@@ -480,7 +480,7 @@ export function ProfileHubView({
 
                 <div className="flex items-center justify-between gap-3 pt-2 border-t border-white/6">
                   <span className="text-xs font-mono-num text-[#F4F5F7]">
-                    +{m.rewardCredits} {t.currency} · +{m.rewardXp} XP · +{m.rewardReputation} {t.reputation}
+                    +${m.rewardCredits} {t.currency} · +{m.rewardXp} XP · +{m.rewardReputation} {t.reputation}
                   </span>
                   <button
                     type="button"
@@ -576,7 +576,7 @@ export function ProfileHubView({
                       <span className="text-sm font-medium text-[#F4F5F7] truncate">{c.name}</span>
                     </div>
                     <span className="text-xs font-mono-num text-emerald-400">
-                      {c.totalRevenue.toLocaleString()} {t.currency}
+                      ${c.totalRevenue.toLocaleString()} {t.currency}
                     </span>
                   </div>
                 ))}

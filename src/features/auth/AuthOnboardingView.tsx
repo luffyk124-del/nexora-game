@@ -166,7 +166,7 @@ export function AuthOnboardingView({
               <div>
                 <p className="text-[#9299A6]">{language === 'ar' ? 'رأس المال' : 'Capital'}</p>
                 <p className="font-mono-num text-[#F4F5F7] font-semibold mt-0.5">
-                  {STARTING_CREDITS.toLocaleString()}
+                  {'$'}{STARTING_CREDITS.toLocaleString()}
                 </p>
               </div>
               <div>

@@ -150,7 +150,7 @@ export function BusinessHubView({
     try {
       const earned = await collectCompanyRevenue(profile.uid, companyId);
       showToast(
-        language === 'ar' ? `تم تحصيل +${earned} N-Credits.` : `Collected +${earned} N-Credits.`,
+        language === 'ar' ? `تم تحصيل +${earned} $.` : `Collected +${earned} $.`,
         'success'
       );
     } catch (err) {
@@ -210,8 +210,8 @@ export function BusinessHubView({
             : `Company reached staff cap (${COMPANY_MAX_STAFF}).`
           : code === 'INSUFFICIENT_FUNDS'
           ? language === 'ar'
-            ? `الرصيد غير كافٍ (${COMPANY_HIRE_COST} N-Credits).`
-            : `Insufficient funds (${COMPANY_HIRE_COST} N-Credits).`
+            ? `الرصيد غير كافٍ (${COMPANY_HIRE_COST} $).`
+            : `Insufficient funds (${COMPANY_HIRE_COST} $).`
           : language === 'ar'
           ? 'تعذر إتمام التوظيف.'
           : 'Hiring failed.',
@@ -277,7 +277,7 @@ export function BusinessHubView({
     try {
       const earned = await collectPropertyRent(profile.uid, propId);
       showToast(
-        language === 'ar' ? `تم تحصيل +${earned} N-Credits إيجار.` : `Collected +${earned} N-Credits rent.`,
+        language === 'ar' ? `تم تحصيل +${earned} $ إيجار.` : `Collected +${earned} $ rent.`,
         'success'
       );
     } catch (err) {
@@ -424,7 +424,7 @@ export function BusinessHubView({
                       </p>
                     </div>
                     <span className="text-xs font-mono-num font-semibold text-[#E04455]">
-                      {s.foundingCost.toLocaleString()}
+                      {'$'}{s.foundingCost.toLocaleString()}
                     </span>
                   </button>
                 ))}
@@ -501,7 +501,7 @@ export function BusinessHubView({
                       <div className="text-end">
                         <p className="text-xs text-[#9299A6]">{t.netPerHour}</p>
                         <p className="text-sm font-mono-num font-bold text-emerald-400">
-                          +{netHourly.toLocaleString()}
+                          +{'$'}{netHourly.toLocaleString()}
                         </p>
                       </div>
                     </div>
@@ -510,31 +510,31 @@ export function BusinessHubView({
                       <div>
                         <p className="text-[#9299A6]">{t.grossRevenueHr}</p>
                         <p className="font-mono-num font-semibold text-emerald-400 mt-0.5">
-                          +{grossHourly.toLocaleString()}
+                          +{'$'}{grossHourly.toLocaleString()}
                         </p>
                       </div>
                       <div>
                         <p className="text-[#9299A6]">{t.operatingExpenseHr}</p>
                         <p className="font-mono-num font-semibold text-[#E04455] mt-0.5">
-                          -{expenseHourly.toLocaleString()}
+                          -{'$'}{expenseHourly.toLocaleString()}
                         </p>
                       </div>
                       <div>
                         <p className="text-[#9299A6]">{language === 'ar' ? 'الإيراد المتراكم' : 'Accrued'}</p>
                         <p className="font-mono-num font-semibold text-[#F4F5F7] mt-0.5">
-                          {accrued.toLocaleString()} {t.currency}
+                          {'$'}{accrued.toLocaleString()} {t.currency}
                         </p>
                       </div>
                       <div>
                         <p className="text-[#9299A6]">{language === 'ar' ? 'إجمالي العوائد' : 'Lifetime Rev'}</p>
                         <p className="font-mono-num font-semibold text-[#F4F5F7] mt-0.5">
-                          {c.totalRevenue.toLocaleString()}
+                          {'$'}{c.totalRevenue.toLocaleString()}
                         </p>
                       </div>
                       <div>
                         <p className="text-[#9299A6]">{language === 'ar' ? 'تكلفة التطوير' : 'Upgrade Cost'}</p>
                         <p className="font-mono-num font-semibold text-[#F4F5F7] mt-0.5">
-                          {isMaxLevel ? t.maxLevelReached : upgradeCost.toLocaleString()}
+                          {isMaxLevel ? t.maxLevelReached : `$${upgradeCost.toLocaleString()}`}
                         </p>
                       </div>
                     </div>
@@ -757,7 +757,7 @@ export function BusinessHubView({
                     </p>
                   </div>
                   <span className="text-xs font-mono-num font-semibold text-[#E04455]">
-                    {p.purchasePrice.toLocaleString()}
+                    {'$'}{p.purchasePrice.toLocaleString()}
                   </span>
                 </button>
               ))}
@@ -821,13 +821,13 @@ export function BusinessHubView({
                       <div>
                         <p className="text-[#9299A6]">{t.grossRentHr}</p>
                         <p className="font-mono-num font-semibold text-emerald-400 mt-0.5">
-                          +{grossRent.toLocaleString()}
+                          +{'$'}{grossRent.toLocaleString()}
                         </p>
                       </div>
                       <div>
                         <p className="text-[#9299A6]">{t.maintenanceHr}</p>
                         <p className="font-mono-num font-semibold text-[#E04455] mt-0.5">
-                          -{maintenance.toLocaleString()}
+                          -{'$'}{maintenance.toLocaleString()}
                         </p>
                       </div>
                       <div>
@@ -934,7 +934,7 @@ export function BusinessHubView({
               <TrendingUp className="w-4 h-4 text-emerald-400" />
             </div>
             <p className="text-xl font-bold font-mono-num text-[#F4F5F7] mt-2">
-              {(wallet?.totalEarned ?? 0).toLocaleString()}
+              {'$'}{(wallet?.totalEarned ?? 0).toLocaleString()}
             </p>
           </div>
 
@@ -944,7 +944,7 @@ export function BusinessHubView({
               <Coins className="w-4 h-4 text-[#E04455]" />
             </div>
             <p className="text-xl font-bold font-mono-num text-[#F4F5F7] mt-2">
-              {(wallet?.totalSpent ?? 0).toLocaleString()}
+              {'$'}{(wallet?.totalSpent ?? 0).toLocaleString()}
             </p>
           </div>
 
@@ -954,7 +954,7 @@ export function BusinessHubView({
               <Building className="w-4 h-4 text-[#9299A6]" />
             </div>
             <p className="text-xl font-bold font-mono-num text-emerald-400 mt-2">
-              +{totalCompanyNetHr.toLocaleString()}
+              +{'$'}{totalCompanyNetHr.toLocaleString()}
             </p>
           </div>
 
@@ -968,7 +968,7 @@ export function BusinessHubView({
                 totalPropNetHr >= 0 ? 'text-emerald-400' : 'text-[#E04455]'
               }`}
             >
-              {totalPropNetHr >= 0 ? `+${totalPropNetHr.toLocaleString()}` : totalPropNetHr.toLocaleString()}
+              {totalPropNetHr >= 0 ? `+${'$'}{totalPropNetHr.toLocaleString()}` : totalPropNetHr.toLocaleString()}
             </p>
           </div>
         </div>

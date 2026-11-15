@@ -100,7 +100,7 @@ export function AppShell({
               <span aria-hidden="true">·</span>
               <span className="flex items-center gap-1 font-mono-num text-[#F4F5F7] font-semibold">
                 <Coins className="w-3.5 h-3.5 text-[#E04455]" />
-                \${(wallet?.balance ?? 0).toLocaleString()}
+                \${'$'}{(wallet?.balance ?? 0).toLocaleString()}
               </span>
             </div>
 

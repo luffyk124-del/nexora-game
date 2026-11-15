@@ -103,8 +103,8 @@ export function OrganizationHubView({
       showToast(
         code === 'INSUFFICIENT_FUNDS'
           ? language === 'ar'
-            ? `يتطلب التأسيس ${ORG_CREATION_COST} N-Credits.`
-            : `Founding requires ${ORG_CREATION_COST} N-Credits.`
+            ? `يتطلب التأسيس ${ORG_CREATION_COST} $.`
+            : `Founding requires ${ORG_CREATION_COST} $.`
           : language === 'ar'
           ? 'تأكد من صحة الاسم والرمز.'
           : 'Check organization name and tag.',
@@ -376,7 +376,7 @@ export function OrganizationHubView({
             disabled={busyKey === 'create_org' || (wallet?.balance ?? 0) < ORG_CREATION_COST}
             className="w-full min-h-[44px] px-4 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white text-sm font-semibold transition-colors disabled:bg-[#1B2230] disabled:text-[#9299A6]"
           >
-            {t.createOrg} ({ORG_CREATION_COST.toLocaleString()})
+            {t.createOrg} ({'$'}{ORG_CREATION_COST.toLocaleString()})
           </button>
         </form>
 
@@ -478,7 +478,7 @@ export function OrganizationHubView({
           <div className="text-end">
             <p className="text-xs text-[#9299A6]">{t.orgTreasury}</p>
             <p className="text-lg font-bold font-mono-num text-emerald-400">
-              {currentOrg.treasuryBalance.toLocaleString()} {t.currency}
+              {'$'}{currentOrg.treasuryBalance.toLocaleString()} {t.currency}
             </p>
           </div>
           {canManageOrg && (
@@ -579,7 +579,7 @@ export function OrganizationHubView({
                         }`}
                       >
                         {isInflow ? '+' : '-'}
-                        {otx.amount.toLocaleString()}
+                        {'$'}{otx.amount.toLocaleString()}
                       </span>
                     </div>
                   );
@@ -702,7 +702,7 @@ export function OrganizationHubView({
                         {formatOrgRole(m.role, language)}
                         {contributed > 0 && (
                           <span className="ms-2 font-mono-num text-emerald-400">
-                            · +{contributed.toLocaleString()}
+                            · +${contributed.toLocaleString()}
                           </span>
                         )}
                       </p>

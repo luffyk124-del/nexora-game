@@ -79,8 +79,8 @@ export function HomeDashboardView({
       const credited = await claimDailyStipend(profile.uid);
       showToast(
         language === 'ar'
-          ? `تم استلام +${credited} N-Credits و40 XP.`
-          : `Claimed +${credited} N-Credits and 40 XP.`,
+          ? `تم استلام +${credited} $ و40 XP.`
+          : `Claimed +${credited} $ and 40 XP.`,
         'success'
       );
     } catch (err) {
@@ -153,7 +153,7 @@ export function HomeDashboardView({
             <div className="text-end shrink-0">
               <p className="text-xs text-[#9299A6]">{t.balance}</p>
               <p className="text-xl font-bold font-mono-num text-[#F4F5F7]">
-                {(wallet?.balance ?? 0).toLocaleString()}
+                {'$'}{(wallet?.balance ?? 0).toLocaleString()}
               </p>
             </div>
           </div>
@@ -219,7 +219,7 @@ export function HomeDashboardView({
           <div className="bg-[#0B0D12] border border-white/6 rounded-xl p-3.5 flex items-center justify-between">
             <span className="text-xs text-[#9299A6]">{t.currency}</span>
             <span className="text-base font-bold font-mono-num text-[#F4F5F7]">
-              +{dailyAmount.toLocaleString()}
+              +{'$'}{dailyAmount.toLocaleString()}
             </span>
           </div>
 
@@ -432,7 +432,7 @@ export function HomeDashboardView({
                         isCredit ? 'text-emerald-400' : 'text-[#F4F5F7]'
                       }`}
                     >
-                      {isCredit ? `+${tx.netAmount.toLocaleString()}` : `-${tx.amount.toLocaleString()}`}
+                      {isCredit ? `+$${tx.netAmount.toLocaleString()}` : `-$${tx.amount.toLocaleString()}`}
                     </span>
                   </div>
                 );
