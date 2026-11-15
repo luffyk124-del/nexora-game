@@ -8,6 +8,7 @@ import {
 import type {
   Company,
   MarketListing,
+  ManufacturingRecipe,
   OrganizationMember,
   OrgPermission,
   OrgRole,
