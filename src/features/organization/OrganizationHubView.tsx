@@ -4,6 +4,7 @@ import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useToast } from '../../components/ui/ToastProvider';
 import { ORG_CREATION_COST, ROLE_DEFAULT_PERMISSIONS } from '../../data/catalog';
 import { useTranslations, formatOrgRole } from '../../i18n/translations';
+import { searchAndSortOrganizations, type OrganizationSort } from '../../lib/organizationDirectory';
 import {
   calculateOrgUpgradeCost,
   canManageOrgMember,
@@ -62,6 +63,8 @@ export function OrganizationHubView({
   const [orgName, setOrgName] = useState('');
   const [orgTag, setOrgTag] = useState('');
   const [orgDesc, setOrgDesc] = useState('');
+  const [orgSearch, setOrgSearch] = useState('');
+  const [orgSort, setOrgSort] = useState<OrganizationSort>('reputation');
   const [treasuryAmt, setTreasuryAmt] = useState(100);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
@@ -314,6 +317,8 @@ export function OrganizationHubView({
     }
   }
 
+  const visibleOrganizations = searchAndSortOrganizations(organizations, orgSearch, orgSort);
+
   if (!myOrgMember || !currentOrg) {
     return (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -384,6 +389,18 @@ export function OrganizationHubView({
             <Building2 className="w-4 h-4 text-[#9299A6]" />
           </div>
 
+          {organizations.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_190px] gap-2.5">
+              <input type="search" value={orgSearch} onChange={(e) => setOrgSearch(e.target.value)} placeholder={language === 'ar' ? 'ابحث بالاسم أو الرمز أو القائد...' : 'Search name, tag or leader...'} aria-label={language === 'ar' ? 'البحث عن منظمة' : 'Search organizations'} className="w-full min-h-[44px] px-3.5 rounded-xl bg-[#0B0D12] border border-white/10 text-sm text-[#F4F5F7] focus:outline-none focus:border-[#E04455]" />
+              <select value={orgSort} onChange={(e) => setOrgSort(e.target.value as OrganizationSort)} aria-label={language === 'ar' ? 'ترتيب المنظمات' : 'Sort organizations'} className="w-full min-h-[44px] px-3.5 rounded-xl bg-[#0B0D12] border border-white/10 text-sm text-[#F4F5F7] focus:outline-none focus:border-[#E04455]">
+                <option value="reputation">{language === 'ar' ? 'الأعلى سمعة' : 'Top reputation'}</option>
+                <option value="members">{language === 'ar' ? 'الأكثر أعضاءً' : 'Most members'}</option>
+                <option value="level">{language === 'ar' ? 'الأعلى مستوى' : 'Highest level'}</option>
+                <option value="treasury">{language === 'ar' ? 'الأغنى خزينةً' : 'Largest treasury'}</option>
+              </select>
+            </div>
+          )}
+
           {organizations.length === 0 ? (
             <div className="bg-[#141821] border border-white/8 rounded-2xl p-8 text-center">
               <p className="text-sm text-[#9299A6]">
@@ -393,7 +410,9 @@ export function OrganizationHubView({
               </p>
             </div>
           ) : (
-              organizations.map((org) => {
+              visibleOrganizations.length === 0 ? (
+                <div className="bg-[#141821] border border-white/8 rounded-2xl p-6 text-center text-sm text-[#9299A6]">{language === 'ar' ? 'لا توجد نتائج مطابقة لبحثك.' : 'No organizations match your search.'}</div>
+              ) : visibleOrganizations.map((org) => {
                 const isPending = myPendingOrgIds.has(org.id);
                 return (
                   <div
