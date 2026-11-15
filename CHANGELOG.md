@@ -1,4 +1,10 @@
 ## [Unreleased] - 2026-11-15
+### Organization Directory
+- Added live organization search across name, tag, leader, and description.
+- Added reputation, member-count, level, and treasury sorting with deterministic name tie-breaks.
+- Added a localized empty-search state and four unit tests for the directory helper.
+
+## [Unreleased] - 2026-11-15
 ### Build Compatibility
 - Updated the root `esbuild` dev dependency to `^0.28.2` to satisfy Vite 8's declared optional peer dependency (`^0.27.0 || ^0.28.0`) and remove the observed npm `ERESOLVE` blocker.
 
