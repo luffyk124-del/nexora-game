@@ -1,4 +1,7 @@
 ## [Unreleased] - 2026-11-15
+### Build Compatibility
+- Updated the root `esbuild` dev dependency to `^0.28.2` to satisfy Vite 8's declared optional peer dependency (`^0.27.0 || ^0.28.0`) and remove the observed npm `ERESOLVE` blocker.
+
 ### Test Coverage
 - Added 7 focused regression tests for the server-side world event rotation engine, covering activation caps, expiry boundaries, active-event preservation, duplicate stack-group removal, and configured event durations.
 - Validation is pending GitHub Actions; these tests are not yet counted as passing.
