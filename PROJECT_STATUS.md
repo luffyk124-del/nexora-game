@@ -1,7 +1,7 @@
 # حالة مشروع NEXORA — المرجع الرسمي (`PROJECT_STATUS.md`)
 
 > آخر تحديث: `2026-11-15`  
-> الإصدار الحالي: `1.1.1`  
+> الإصدار الوظيفي الموثق: `1.1.1` (تغييرات السمعة والأحداث موجودة على فرع التطوير ولم تُعتمد كإصدار بعد)  
 > المستودع المستهدف: `https://github.com/luffyk124-del/nexora-game`
 
 ---
@@ -22,8 +22,10 @@
 
 ## 2. الحالة الحالية
 - **نسبة الإنجاز التقديرية**: **~95%** من نطاق MVP + المراجعة الشاملة والاستقرار (`1.1.1`): تم إغلاق الثغرات الأمنية وإصلاحات الاستقرار والواجهة، وتقسيم حزم البناء (`manualChunks` + تحميل كسول لـ `DiagnosticsView`)، وتوسيع الاختبارات إلى `27/27` اختباراً ناجحاً. يتبقى نشر `firestore.rules` المحدثة ونشر `nexoraDiagnostics` Cloud Function Gen 2 على Firebase وتعيين صلاحية المالك وإتمام `git push` إلى GitHub.
-- **المرحلة الحالية**: إتمام المراجعة التقنية والوظيفية الشاملة (**NEXORA Comprehensive Audit & Stabilization — `1.1.1`**) والتحضير للنشر الإنتاجي.
+- **المرحلة الحالية**: استكمال تدقيق وتطوير التغييرات اللاحقة لـ `1.1.1` على فرع `development/nexora-next`؛ لا يُعد الإصدار `1.2.0` مكتملاً أو معتمداً بعد.
 - **آخر نقطة وصل إليها التطوير**:
+  - آخر commit مستقر على `main` وقت إنشاء بيئة التطوير: `178ef86422bd31c3867e283e44d2a0421668cf74`، ويضيف نظام مستويات السمعة ومكافآتها، ويطوّر الأحداث العالمية بمدد زمنية ومجموعات تأثير وقطاعات مستهدفة، ويضيف مؤشر حالة الاتصال.
+  - تم إنشاء فرع عمل مستقل `development/nexora-next` انطلاقاً من هذا commit. أضيف سير عمل GitHub Actions في `.github/workflows/ci.yml` للتحقق من قواعد Firestore وTypeScript والاختبارات وبناء الواجهة وCloud Functions. لم تظهر نتائج CI بعد؛ لذلك لا تُسجل هذه الفحوص كناجحة حتى يكتمل تشغيلها.
   - تشديد `firestore.rules` محلياً (`company_hire` المستقل، سقف رسوم السوق، مطابقة `itemId` وكمية العرض عند الشراء، قصر `manufacturing` على الوصفات الرسمية، ربط `market_orders` بمعاملة المحفظة، وتقييد `organization_requests` `allow list` بصلاحية `manage_members`).
   - إصلاح دورة الحياة في `useGameData.ts` (تصفير كامل عند تسجيل الخروج، اشتراك `myPendingOrgIds`، تحديث `utcDateKey` تلقائياً عند منتصف الليل UTC، ومنع تكرار محاولات الإنجازات) وتوحيد حدود الاقتصاد وحسابات المهام والإنجازات في `economy.ts` و`gameService.ts`.
   - تحسين الواجهة في جميع التبويبات الستة (`Auth`, `Home`, `Business`, `Market`, `Organization`, `Profile`)، وتعريب أنواع المعاملات والرتب وفئات المهام، وإضافة حالات التحميل والخطأ والحدود القصوى (`MAX`)، وتقسيم حزم البناء في `vite.config.ts`.
@@ -49,7 +51,7 @@
 ## 4. الأنظمة قيد التطوير والتحقق
 - **نشر حزمة `firestore.rules` (`1.1.1`) المتزامن مع الواجهة الجديدة**: تم تحديث `firestore.rules` محلياً (ويجتاز `npm run lint:rules` و`audit.test.ts`) ولم يُنشر بعد في هذه المراجعة؛ وبما أن `hireCompanyStaff` باتت تصدر `type: 'company_hire'` بدلاً من `'manufacturing'`، يجب نشر `firestore.rules` المحدثة قبل أو بالتوازي مع نشر الواجهة المحدثة حتى لا ترفض القواعد القديمة (`1.1.0`) عملية توظيف الكوادر.
 - **نشر Cloud Functions Gen 2 (`nexoraDiagnostics`)**: الكود مبني ومختبر محلياً في `/functions`، ويتطلب تنفيذه على خادم Firebase تفعيل خطة Blaze والخدمات المطلوبة ثم `firebase login` و`firebase deploy --only functions --project gen-lang-client-0074900177` (إضافة إلى منح المالك `diagnosticsOwner: true` أو سجل `diagnostics_admins/{uid}`).
-- **إتمام الرفع إلى GitHub (`origin/main`)**: المستودع المحلي مهيأ وموثق بـ commits واضحة، وينتظر تنفيذه من بيئة تملك صلاحية مصادقة GitHub.
+- **تطوير GitHub**: أصبح التطوير يجري على الفرع `development/nexora-next`؛ لا تُدمج التغييرات في `main` إلا بعد المراجعة واجتياز الاختبارات.
 
 ---
 
@@ -133,7 +135,7 @@
 - **مفتوحة**:
   1. **نشر `firestore.rules` المحدثة (`1.1.1`)**: لازم قبل اختبار توظيف الكوادر (`company_hire`) في الإنتاج.
   2. **نشر Cloud Functions Gen 2 ومنح صلاحية المالك**: يتطلب خطة **Blaze** وتفعيل خدمات `cloudfunctions.googleapis.com` و`cloudbuild.googleapis.com` و`run.googleapis.com` و`artifactregistry.googleapis.com` في مشروع `gen-lang-client-0074900177`، ثم `firebase login` و`firebase deploy --only functions --project gen-lang-client-0074900177` وتعيين Custom Claim `diagnosticsOwner: true` أو سجل `diagnostics_admins/{uid}` (`enabled: true`, `role: "owner"`).
-  3. **الرفع إلى GitHub (`https://github.com/luffyk124-del/nexora-game`)**: بيئة التشغيل المعزولة لا تحتوي على `gh` CLI أو مفتاح SSH أو PAT، مما يؤدي إلى فشل `git push -u origin main`. الـ commits المحلية جاهزة بالكامل على فرع `main`.
+  3. **التحقق من GitHub Actions**: أُضيف `.github/workflows/ci.yml` على فرع التطوير؛ ننتظر أول تشغيل فعلي للتحقق من صلاحية خطوات التثبيت والبناء والاختبارات.
   4. **التحقق الحي في المتصفح**: مراجعة تجربة اللاعب الفعلية بعد نشر حزمة `1.1.1`.
 
 ---
@@ -149,6 +151,7 @@
 ## 13. سجل التحديثات
 | التاريخ | الملفات المتأثرة | ما تغير | السبب | نتيجة التحقق |
 | :--- | :--- | :--- | :--- | :--- |
+| `2026-11-15` | `.github/workflows/ci.yml`, `PROJECT_STATUS.md` | إنشاء فرع التطوير `development/nexora-next` من آخر commit، وإضافة سير CI تلقائي لفحوص TypeScript وFirestore Rules وVitest وبناء الواجهة وCloud Functions، وتحديث سجل الحالة. | تجهيز بيئة تطوير معزولة عن `main` قبل استكمال التغييرات. | تم التحقق من وجود الفرع والملف على GitHub؛ نتائج CI لم تُسجل بعد. |
 | `2026-11-15` | المشروع الأساسي بالكامل (`src/*`, `firestore.rules`, `firebase-blueprint.json`, `docs/*`) | بناء MVP المتكامل لـ NEXORA، قواعد الأمان، والاختبارات الأولية، ونشر القواعد الأولى. | تنفيذ وثيقة تصميم اللعبة GDD v1.0. | `lint:rules` ناجح، `vitest` `10/10`، `vite build` و`tsc` ناجحان. |
 | `2026-11-15` | `firestore.rules`, `src/hooks/useGameData.ts` | تعديل `allow list` و`allow get` لـ `organizations`, `daily_claims`, `organization_members` وإضافة `handleFirestoreError` لمستمعي `onSnapshot`. | معالجة أخطاء `permission-denied` في مستمعي البداية. | تم نشر القواعد وبناء التطبيق. |
 | `2026-11-15` | `src/hooks/useGameData.ts`, `firestore.rules`, `.gitignore`, `PROJECT_STATUS.md`, `CHANGELOG.md` | إضافة `orgMemberLoaded`، توسيع `.gitignore`، إنشاء `PROJECT_STATUS.md`، وتهيئة Git المحلي على `main` وربط `origin` (`d1613f7`, `5cf2bed`). | حل سباق تحميل عضوية المنظمة، وتأسيس التوثيق المستمر وربط Git. | `lint:rules`، `vitest`، `tsc`، `build`، و`DeployRules` ناجحة؛ `git push` محجوب لعدم توفر مصادقة GitHub. |
