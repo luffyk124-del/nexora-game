@@ -1,8 +1,10 @@
 # NEXORA
 
-**NEXORA** is a portrait-first (Mobile-First) economic, corporate management, and social strategy simulation browser game built with **React 19**, **TypeScript**, **Tailwind CSS v4**, and **Firebase** (**Firebase Authentication** + **Cloud Firestore Enterprise Edition**).
+**NEXORA** is a portrait-first (Mobile-First) economic, corporate management, and social strategy simulation browser game built with **React 19**, **TypeScript**, **Tailwind CSS v4**, and a backend currently being migrated from Firebase to Supabase.
 
 Default UI language is **Arabic (`RTL`)** with instant switching to **English (`LTR`)**.
+
+> **Database isolation notice:** NEXORA's planned Supabase data belongs only in the dedicated `nexora` schema of the shared Supabase project `OneState-Trading-DB`. OneState's existing data remains in `public`. Never create, read, update, or delete NEXORA application records in OneState's `public` tables, and never alter OneState's existing objects. See [docs/SUPABASE_SHARED_PROJECT.md](docs/SUPABASE_SHARED_PROJECT.md) before making any database or auth changes. The schema boundary separates application data, but Supabase Auth is project-wide and therefore is not an independent user directory.
 
 ---
 
@@ -20,18 +22,26 @@ Default UI language is **Arabic (`RTL`)** with instant switching to **English (`
 
 ---
 
-## Official Firebase Architecture
-- **Authentication**: Firebase Auth (Google provider; `email_verified == true` enforced by `firestore.rules`).
-- **Database**: Cloud Firestore Enterprise Edition (`projectId: gen-lang-client-0074900177`, `firestoreDatabaseId: ai-studio-74843d9e-8228-49b7-a616-317cadd90bff`).
-- **Backend Functions**: Firebase Cloud Functions Gen 2 (`functions/src/index.ts`, Node 22) providing owner-restricted read-only diagnostics aggregations.
-- **Data Integrity & Rules**: Server-side security rules (`firestore.rules`) enforce atomic multi-document transactions (`getAfter` / `existsAfter`), anti-negative wallet guards, anti-item-minting inventory locks, market escrow invariants, and organization RBAC checks.
+## Current / Legacy Firebase Architecture
+- **Authentication**: Firebase Auth (Google provider; `email_verified == true` enforced by `firestore.rules`) remains the current NEXORA login until the Supabase Auth decision and OAuth setup are completed.
+- **Database**: Cloud Firestore Enterprise Edition (`projectId: gen-lang-client-0074900177`, `firestoreDatabaseId: ai-studio-74843d9e-8228-49b7-a616-317cadd90bff`) remains the existing source of truth until migration and verification are complete.
+- **Backend Functions**: Firebase Cloud Functions Gen 2 (`functions/src/index.ts`, Node 22) currently provide owner-restricted read-only diagnostics aggregations.
+- **Data Integrity & Rules**: `firestore.rules` enforce atomic multi-document transactions, anti-negative wallet guards, anti-item-minting inventory locks, market escrow invariants, and organization RBAC checks.
+
+## Supabase Target (Isolated Namespace)
+- **Shared Supabase project**: `OneState-Trading-DB` (`dmeupqmhsyojxlgalxrc`, `eu-west-1`).
+- **NEXORA schema**: `nexora` (created and documented; currently empty).
+- **OneState schema**: `public` (existing OneState objects; do not modify).
+- **API exposure**: `nexora` is not yet enabled in Data API exposed schemas. Do not expose it until the complete RLS/grant model and API surface are ready.
+- **Auth boundary**: Supabase Auth is shared at project level. Do not assume per-schema Auth isolation. See the isolation document before implementing sign-in.
 
 ---
 
 ## Documentation
 - `PROJECT_STATUS.md` — Official living project status, implemented vs. planned scope, test results, open issues, and update log.
 - `docs/ARCHITECTURE.md` — Technical architecture, client/Firebase layers, and atomic transaction workflows.
-- `docs/DATABASE.md` — Complete Firestore collections, document schemas, relationships, indexes, and security invariants.
+- `docs/DATABASE.md` — Current Firestore collections, document schemas, relationships, indexes, and security invariants.
+- `docs/SUPABASE_SHARED_PROJECT.md` — Mandatory isolation contract for NEXORA and OneState sharing one Supabase project.
 - `docs/DIAGNOSTICS.md` — Read-only Diagnostics System security model, Gen 2 Cloud Functions, and JSON report schema.
 - `security_spec.md` — Data invariants and adversarial attack payload catalog.
 - `CHANGELOG.md` — Version history.
