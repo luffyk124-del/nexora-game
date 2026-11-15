@@ -1,4 +1,8 @@
 ## [Unreleased] - 2026-11-15
+### Currency & Audio Experience
+- Replaced the visible N-Credits label with the `$` symbol across onboarding, wallet, market, business, organization, mission rewards, and transaction history; wallet values and economy calculations remain unchanged.
+- Added an original low-volume ambient electronic soundtrack using Web Audio, with smooth chord transitions and an explicit play/pause control in the app header.
+
 ### Organization Directory
 - Added live organization search across name, tag, leader, and description.
 - Added reputation, member-count, level, and treasury sorting with deterministic name tie-breaks.

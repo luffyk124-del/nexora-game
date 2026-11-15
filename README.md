@@ -7,10 +7,11 @@ Default UI language is **Arabic (`RTL`)** with instant switching to **English (`
 ---
 
 ## Core Systems Implemented
-- **Authentication & Onboarding**: Google Sign-In (`signInWithPopup`) with verified-email enforcement, unique username reservation (`usernames/{usernameLower}`), executive portrait selection, owner-isolated private data (`users_private/{uid}`), and `2,500 N-Credits` starting capital.
+- **Authentication & Onboarding**: Google Sign-In (`signInWithPopup`) with verified-email enforcement, unique username reservation (`usernames/{usernameLower}`), executive portrait selection, owner-isolated private data (`users_private/{uid}`), and `2,500 $` starting capital.
+- **Ambient Soundtrack**: Original adaptive synth ambience built with Web Audio, smoothly transitioning through a restrained four-chord progression; user-controlled playback, no external audio asset or tracking.
 - **5-Tab Mobile-First Portrait Shell**: Home (`الرئيسية`), Business (`الأعمال`), Market (`السوق`), Organization (`المنظمة`), and Profile (`الشخصية`), paired with a sticky header and live notifications drawer.
 - **Character & Skill Tree**: Level/XP progression and 6 functionally bound skills (`Trade`, `Management`, `Industry`, `Negotiation`, `Financial Analysis`, `Leadership`).
-- **Interconnected Economy**: Atomic `N-Credits` wallets (`wallets/{uid}`) linked to an append-only ledger (`transactions/{txId}`), player-to-player transfers, open market listings/orders with dynamic supply-based pricing, tax rates, and active world events.
+- **Interconnected Economy**: Atomic `$` wallets (`wallets/{uid}`) linked to an append-only ledger (`transactions/{txId}`), player-to-player transfers, open market listings/orders with dynamic supply-based pricing, tax rates, and active world events.
 - **Manufacturing Chains**: 3-tier industrial chains (`Raw Materials` -> `Intermediate Goods` -> `Final Products`) and daily trade contracts.
 - **Companies & Real Estate**: Found and upgrade companies across 5 sectors, hire staff, purchase and lease properties (`shop`, `office`, `facility`), and collect accrued hourly revenue.
 - **Organizations & RBAC**: Found or join syndicates, manage member ranks (`leader`, `deputy`, `officer`, `member`) and permissions, approve/reject join applications, and operate a shared treasury.
