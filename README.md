@@ -8,7 +8,8 @@ Default UI language is **Arabic (`RTL`)** with instant switching to **English (`
 
 ## Core Systems Implemented
 - **Authentication & Onboarding**: Google Sign-In (`signInWithPopup`) with verified-email enforcement, unique username reservation (`usernames/{usernameLower}`), executive portrait selection, owner-isolated private data (`users_private/{uid}`), and `2,500 $` starting capital.
-- **Ambient Soundtrack**: Original adaptive synth ambience built with Web Audio, smoothly transitioning through a restrained four-chord progression; user-controlled playback, no external audio asset or tracking.
+- **Ambient Soundtrack & UI Audio**: Original adaptive synth ambience and per-control synthesized feedback using one shared Web Audio context; no MP3/WAV files, no audio downloads, and audio unlock is tied to the first trusted user gesture.
+- **Tactile Interaction**: Responsive pressed states, keyboard-visible focus, and reduced-motion-aware transitions across buttons and navigation links.
 - **5-Tab Mobile-First Portrait Shell**: Home (`الرئيسية`), Business (`الأعمال`), Market (`السوق`), Organization (`المنظمة`), and Profile (`الشخصية`), paired with a sticky header and live notifications drawer.
 - **Character & Skill Tree**: Level/XP progression and 6 functionally bound skills (`Trade`, `Management`, `Industry`, `Negotiation`, `Financial Analysis`, `Leadership`).
 - **Interconnected Economy**: Atomic `$` wallets (`wallets/{uid}`) linked to an append-only ledger (`transactions/{txId}`), player-to-player transfers, open market listings/orders with dynamic supply-based pricing, tax rates, and active world events.
