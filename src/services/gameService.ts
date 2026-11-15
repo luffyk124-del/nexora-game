@@ -1,0 +1,1966 @@
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  runTransaction,
+  serverTimestamp,
+  setDoc,
+  Timestamp,
+  updateDoc,
+  where,
+  writeBatch,
+} from 'firebase/firestore';
+import {
+  COMPANY_SECTORS,
+  ITEM_MAP,
+  MANUFACTURING_RECIPES,
+  MISSIONS,
+  ORG_CREATION_COST,
+  PROPERTY_SPECS,
+  ROLE_DEFAULT_PERMISSIONS,
+  SEED_MARKET_LISTINGS,
+  SEED_WORLD_EVENTS,
+  SKILL_DEFINITIONS,
+  STARTING_CREDITS,
+  TRADE_CONTRACTS,
+} from '../data/catalog';
+import {
+  calculateAccruedPayout,
+  calculateCompanyHourlyNet,
+  calculateDailyStipend,
+  calculateLevelProgress,
+  calculateManufacturingCost,
+  calculatePropertyHourlyNet,
+  isValidUsername,
+  validateTransfer,
+} from '../lib/economy';
+import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import type {
+  Company,
+  CompanySector,
+  InventoryItem,
+  Language,
+  MarketListing,
+  Organization,
+  OrganizationMember,
+  OrgRole,
+  PlayerProfile,
+  PropertyAsset,
+  PropertyType,
+  SkillKey,
+  SkillsMap,
+  Wallet,
+} from '../types/game';
+
+function genId(prefix: string): string {
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `${prefix}_${Date.now()}_${rand}`;
+}
+
+export function getUtcDateKey(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function timestampToMs(ts: unknown): number {
+  if (!ts) return Date.now();
+  if (ts instanceof Timestamp) return ts.toMillis();
+  if (typeof ts === 'object' && ts !== null && 'seconds' in ts) {
+    return (ts as { seconds: number }).seconds * 1000;
+  }
+  return Date.now();
+}
+
+function applyXpAndLevel(
+  profile: PlayerProfile,
+  xpGain: number,
+  reputationGain = 0,
+  influenceGain = 0
+) {
+  const nextXp = profile.xp + Math.max(0, Math.round(xpGain));
+  const prog = calculateLevelProgress(nextXp);
+  const levelsGained = Math.max(0, prog.level - profile.level);
+  const leadershipBonus = 1 + (profile.skills.leadership || 0) * 0.1;
+  return {
+    xp: nextXp,
+    level: prog.level,
+    skillPoints: profile.skillPoints + levelsGained * 2,
+    reputation: profile.reputation + Math.round(reputationGain * leadershipBonus),
+    influence: profile.influence + Math.round(influenceGain * leadershipBonus),
+  };
+}
+
+export async function ensureBootstrapWorldData(): Promise<void> {
+  try {
+    for (const evt of SEED_WORLD_EVENTS) {
+      const ref = doc(db, 'world_events', evt.id);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        await setDoc(ref, {
+          ...evt,
+          createdAt: serverTimestamp(),
+        });
+      }
+    }
+
+    for (const seed of SEED_MARKET_LISTINGS) {
+      const ref = doc(db, 'market_listings', seed.id);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        await setDoc(ref, {
+          id: seed.id,
+          sellerUid: 'SYSTEM',
+          sellerName: 'NEXORA Reserve',
+          itemId: seed.itemId,
+          quantity: seed.quantity,
+          remainingQty: seed.quantity,
+          unitPrice: seed.unitPrice,
+          status: 'active',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+  } catch (error) {
+    console.warn('Bootstrap world data check skipped or partially seeded:', error);
+  }
+}
+
+export async function isUsernameAvailable(username: string): Promise<boolean> {
+  const clean = username.trim().toLowerCase();
+  if (!isValidUsername(username)) return false;
+  const snap = await getDoc(doc(db, 'usernames', clean));
+  return !snap.exists();
+}
+
+export async function createPlayerCharacter(
+  uid: string,
+  email: string,
+  username: string,
+  avatarId: string,
+  language: Language
+): Promise<void> {
+  const trimmed = username.trim();
+  if (!isValidUsername(trimmed)) {
+    throw new Error('INVALID_USERNAME');
+  }
+  const usernameLower = trimmed.toLowerCase();
+  const initTxId = `init_${uid}`;
+  const notifId = genId('ntf');
+
+  const initialSkills: SkillsMap = {
+    trade: 0,
+    management: 0,
+    industry: 0,
+    negotiation: 0,
+    finance: 0,
+    leadership: 0,
+  };
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const unameRef = doc(db, 'usernames', usernameLower);
+      const profileRef = doc(db, 'profiles', uid);
+      const privateRef = doc(db, 'users_private', uid);
+      const walletRef = doc(db, 'wallets', uid);
+
+      const [unameSnap, profileSnap] = await Promise.all([
+        tx.get(unameRef),
+        tx.get(profileRef),
+      ]);
+
+      if (profileSnap.exists()) {
+        throw new Error('PROFILE_EXISTS');
+      }
+      if (unameSnap.exists()) {
+        throw new Error('USERNAME_TAKEN');
+      }
+
+      tx.set(unameRef, {
+        uid,
+        username: trimmed,
+        createdAt: serverTimestamp(),
+      });
+
+      tx.set(profileRef, {
+        uid,
+        username: trimmed,
+        usernameLower,
+        avatarId,
+        title: language === 'ar' ? 'مؤسس طموح' : 'Executive Founder',
+        level: 1,
+        xp: 0,
+        reputation: 10,
+        influence: 5,
+        skillPoints: 3,
+        skills: initialSkills,
+        stats: {
+          missionsCompleted: 0,
+          tradesCount: 0,
+          companiesOwned: 0,
+          propertiesOwned: 0,
+          totalProduced: 0,
+        },
+        orgId: null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.set(privateRef, {
+        uid,
+        email,
+        language,
+        notificationsEnabled: true,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.set(walletRef, {
+        uid,
+        balance: STARTING_CREDITS,
+        totalEarned: STARTING_CREDITS,
+        totalSpent: 0,
+        lastTxId: initTxId,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.set(doc(db, 'notifications', notifId), {
+        id: notifId,
+        uid,
+        title: language === 'ar' ? 'مرحباً بك في NEXORA' : 'Welcome to NEXORA',
+        body:
+          language === 'ar'
+            ? `تم إيداع ${STARTING_CREDITS.toLocaleString()} N-Credits في محفظتك وتخصيص 3 نقاط مهارة.`
+            : `${STARTING_CREDITS.toLocaleString()} N-Credits and 3 skill points credited to your account.`,
+        type: 'system',
+        read: false,
+        createdAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (error instanceof Error && ['INVALID_USERNAME', 'USERNAME_TAKEN', 'PROFILE_EXISTS'].includes(error.message)) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.WRITE, `profiles/${uid}`);
+  }
+}
+
+export async function claimDailyStipend(uid: string): Promise<number> {
+  const dateKey = getUtcDateKey();
+  const claimId = `${uid}_${dateKey}`;
+  const txId = genId('tx');
+  const notifId = genId('ntf');
+
+  try {
+    let credited = 0;
+    await runTransaction(db, async (tx) => {
+      const claimRef = doc(db, 'daily_claims', claimId);
+      const walletRef = doc(db, 'wallets', uid);
+      const profileRef = doc(db, 'profiles', uid);
+
+      const [claimSnap, walletSnap, profileSnap] = await Promise.all([
+        tx.get(claimRef),
+        tx.get(walletRef),
+        tx.get(profileRef),
+      ]);
+
+      if (claimSnap.exists()) throw new Error('ALREADY_CLAIMED_TODAY');
+      if (!walletSnap.exists() || !profileSnap.exists()) throw new Error('ACCOUNT_NOT_FOUND');
+
+      const wallet = walletSnap.data() as Wallet;
+      const profile = profileSnap.data() as PlayerProfile;
+      const amount = calculateDailyStipend(profile.level, profile.skills.finance || 0);
+      credited = amount;
+
+      const xpUpdate = applyXpAndLevel(profile, 40, 2, 1);
+
+      tx.set(claimRef, {
+        uid,
+        dateKey,
+        amount,
+        claimedAt: serverTimestamp(),
+      });
+
+      tx.set(doc(db, 'transactions', txId), {
+        id: txId,
+        fromUid: 'SYSTEM',
+        toUid: uid,
+        amount,
+        fee: 0,
+        netAmount: amount,
+        type: 'daily_stipend',
+        referenceId: claimId,
+        description: `Daily operational stipend (${dateKey})`,
+        status: 'completed',
+        createdAt: serverTimestamp(),
+      });
+
+      tx.update(walletRef, {
+        balance: wallet.balance + amount,
+        totalEarned: wallet.totalEarned + amount,
+        lastTxId: txId,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.update(profileRef, {
+        ...xpUpdate,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.set(doc(db, 'notifications', notifId), {
+        id: notifId,
+        uid,
+        title: 'Daily Stipend Credited',
+        body: `+${amount} N-Credits & +40 XP`,
+        type: 'economy',
+        read: false,
+        createdAt: serverTimestamp(),
+      });
+    });
+    return credited;
+  } catch (error) {
+    if (error instanceof Error && error.message === 'ALREADY_CLAIMED_TODAY') throw error;
+    handleFirestoreError(error, OperationType.WRITE, `daily_claims/${claimId}`);
+  }
+}
+
+export async function upgradeSkill(uid: string, skillKey: SkillKey): Promise<void> {
+  const def = SKILL_DEFINITIONS.find((s) => s.key === skillKey);
+  if (!def) throw new Error('INVALID_SKILL');
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const profileRef = doc(db, 'profiles', uid);
+      const snap = await tx.get(profileRef);
+      if (!snap.exists()) throw new Error('ACCOUNT_NOT_FOUND');
+      const profile = snap.data() as PlayerProfile;
+
+      if (profile.skillPoints < 1) throw new Error('NO_SKILL_POINTS');
+      const currentVal = profile.skills[skillKey] || 0;
+      if (currentVal >= def.maxLevel) throw new Error('SKILL_MAXED');
+
+      tx.update(profileRef, {
+        skillPoints: profile.skillPoints - 1,
+        skills: {
+          ...profile.skills,
+          [skillKey]: currentVal + 1,
+        },
+        updatedAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (error instanceof Error && ['NO_SKILL_POINTS', 'SKILL_MAXED', 'INVALID_SKILL'].includes(error.message)) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.UPDATE, `profiles/${uid}`);
+  }
+}
+
+export async function transferCredits(
+  fromUid: string,
+  recipientUsername: string,
+  amountRaw: number,
+  note: string
+): Promise<void> {
+  const amount = Math.floor(amountRaw);
+  const cleanName = recipientUsername.trim().toLowerCase();
+  if (!cleanName) throw new Error('RECIPIENT_NOT_FOUND');
+
+  const unameSnap = await getDoc(doc(db, 'usernames', cleanName));
+  if (!unameSnap.exists()) throw new Error('RECIPIENT_NOT_FOUND');
+  const toUid = (unameSnap.data() as { uid: string }).uid;
+
+  const txId = genId('tx');
+  const logId = genId('aud');
+  const notifId = genId('ntf');
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const fromWalletRef = doc(db, 'wallets', fromUid);
+      const toWalletRef = doc(db, 'wallets', toUid);
+      const [fromSnap, toSnap] = await Promise.all([tx.get(fromWalletRef), tx.get(toWalletRef)]);
+
+      if (!fromSnap.exists() || !toSnap.exists()) throw new Error('RECIPIENT_NOT_FOUND');
+
+      const fromWallet = fromSnap.data() as Wallet;
+      const toWallet = toSnap.data() as Wallet;
+
+      const validation = validateTransfer(fromUid, toUid, fromWallet.balance, amount);
+      if (!validation.valid) {
+        throw new Error(validation.reason || 'INVALID_TRANSFER');
+      }
+
+      tx.set(doc(db, 'transactions', txId), {
+        id: txId,
+        fromUid,
+        toUid,
+        amount,
+        fee: 0,
+        netAmount: amount,
+        type: 'transfer',
+        referenceId: toUid,
+        description: note.trim() || `Transfer to ${recipientUsername.trim()}`,
+        status: 'completed',
+        createdAt: serverTimestamp(),
+      });
+
+      tx.update(fromWalletRef, {
+        balance: fromWallet.balance - amount,
+        totalSpent: fromWallet.totalSpent + amount,
+        lastTxId: txId,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.update(toWalletRef, {
+        balance: toWallet.balance + amount,
+        totalEarned: toWallet.totalEarned + amount,
+        lastTxId: txId,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.set(doc(db, 'audit_logs', logId), {
+        id: logId,
+        uid: fromUid,
+        action: 'wallet_transfer',
+        entityType: 'transaction',
+        entityId: txId,
+        createdAt: serverTimestamp(),
+      });
+
+      tx.set(doc(db, 'notifications', notifId), {
+        id: notifId,
+        uid: fromUid,
+        title: 'Transfer Sent',
+        body: `-${amount.toLocaleString()} N-Credits -> ${recipientUsername.trim()}`,
+        type: 'economy',
+        read: false,
+        createdAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      ['RECIPIENT_NOT_FOUND', 'SELF_OR_MISSING_RECIPIENT', 'INVALID_AMOUNT', 'INSUFFICIENT_FUNDS'].includes(
+        error.message
+      )
+    ) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.WRITE, `transactions/${txId}`);
+  }
+}
+
+export async function createMarketListing(
+  uid: string,
+  username: string,
+  itemId: string,
+  qtyRaw: number,
+  unitPriceRaw: number
+): Promise<void> {
+  const qty = Math.floor(qtyRaw);
+  const unitPrice = Math.round(unitPriceRaw);
+  if (!ITEM_MAP[itemId]) throw new Error('INVALID_ITEM');
+  if (qty < 1 || qty > 10000 || unitPrice < 1) throw new Error('INVALID_LISTING_PARAMS');
+
+  const invDocId = `${uid}_${itemId}`;
+  const listingId = genId('lst');
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const invRef = doc(db, 'inventory', invDocId);
+      const invSnap = await tx.get(invRef);
+      if (!invSnap.exists()) throw new Error('INSUFFICIENT_INVENTORY');
+      const inv = invSnap.data() as InventoryItem;
+      if (inv.quantity < qty) throw new Error('INSUFFICIENT_INVENTORY');
+
+      tx.update(invRef, {
+        quantity: inv.quantity - qty,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.set(doc(db, 'market_listings', listingId), {
+        id: listingId,
+        sellerUid: uid,
+        sellerName: username,
+        itemId,
+        quantity: qty,
+        remainingQty: qty,
+        unitPrice,
+        status: 'active',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (error instanceof Error && ['INVALID_ITEM', 'INVALID_LISTING_PARAMS', 'INSUFFICIENT_INVENTORY'].includes(error.message)) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.WRITE, `market_listings/${listingId}`);
+  }
+}
+
+export async function buyMarketListing(
+  buyerUid: string,
+  listingId: string,
+  buyQtyRaw: number,
+  taxRate: number
+): Promise<void> {
+  const buyQty = Math.floor(buyQtyRaw);
+  if (buyQty < 1) throw new Error('INVALID_QUANTITY');
+
+  const txId = genId('tx');
+  const orderId = genId('ord');
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const listingRef = doc(db, 'market_listings', listingId);
+      const buyerWalletRef = doc(db, 'wallets', buyerUid);
+      const buyerProfileRef = doc(db, 'profiles', buyerUid);
+
+      const [listingSnap, buyerWalletSnap, buyerProfileSnap] = await Promise.all([
+        tx.get(listingRef),
+        tx.get(buyerWalletRef),
+        tx.get(buyerProfileRef),
+      ]);
+
+      if (!listingSnap.exists()) throw new Error('LISTING_NOT_FOUND');
+      if (!buyerWalletSnap.exists() || !buyerProfileSnap.exists()) throw new Error('ACCOUNT_NOT_FOUND');
+
+      const listing = listingSnap.data() as MarketListing;
+      if (listing.status !== 'active' || listing.remainingQty < buyQty) {
+        throw new Error('INSUFFICIENT_LISTING_QTY');
+      }
+      if (listing.sellerUid === buyerUid) {
+        throw new Error('CANNOT_BUY_OWN_LISTING');
+      }
+
+      const buyerWallet = buyerWalletSnap.data() as Wallet;
+      const buyerProfile = buyerProfileSnap.data() as PlayerProfile;
+
+      const totalPrice = listing.unitPrice * buyQty;
+      if (buyerWallet.balance < totalPrice) {
+        throw new Error('INSUFFICIENT_FUNDS');
+      }
+
+      const fee = Math.round(totalPrice * taxRate);
+      const netAmount = totalPrice - fee;
+
+      const invDocId = `${buyerUid}_${listing.itemId}`;
+      const invRef = doc(db, 'inventory', invDocId);
+      const invSnap = await tx.get(invRef);
+
+      let sellerWalletSnap = null;
+      const sellerWalletRef = doc(db, 'wallets', listing.sellerUid);
+      if (listing.sellerUid !== 'SYSTEM') {
+        sellerWalletSnap = await tx.get(sellerWalletRef);
+      }
+
+      const newRemaining = listing.remainingQty - buyQty;
+
+      tx.set(doc(db, 'transactions', txId), {
+        id: txId,
+        fromUid: buyerUid,
+        toUid: listing.sellerUid,
+        amount: totalPrice,
+        fee,
+        netAmount,
+        type: 'market_buy',
+        referenceId: listingId,
+        description: `Market buy: ${buyQty}x ${listing.itemId}`,
+        status: 'completed',
+        createdAt: serverTimestamp(),
+      });
+
+      tx.update(buyerWalletRef, {
+        balance: buyerWallet.balance - totalPrice,
+        totalSpent: buyerWallet.totalSpent + totalPrice,
+        lastTxId: txId,
+        updatedAt: serverTimestamp(),
+      });
+
+      if (sellerWalletSnap && sellerWalletSnap.exists()) {
+        const sw = sellerWalletSnap.data() as Wallet;
+        tx.update(sellerWalletRef, {
+          balance: sw.balance + netAmount,
+          totalEarned: sw.totalEarned + netAmount,
+          lastTxId: txId,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      tx.update(listingRef, {
+        remainingQty: newRemaining,
+        status: newRemaining === 0 ? 'sold' : 'active',
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.set(doc(db, 'market_orders', orderId), {
+        id: orderId,
+        listingId,
+        buyerUid,
+        sellerUid: listing.sellerUid,
+        itemId: listing.itemId,
+        quantity: buyQty,
+        unitPrice: listing.unitPrice,
+        totalPrice,
+        taxAmount: fee,
+        txId,
+        createdAt: serverTimestamp(),
+      });
+
+      if (invSnap.exists()) {
+        const prevQty = (invSnap.data() as InventoryItem).quantity;
+        tx.update(invRef, {
+          quantity: prevQty + buyQty,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        tx.set(invRef, {
+          uid: buyerUid,
+          itemId: listing.itemId,
+          quantity: buyQty,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      const xpUpdate = applyXpAndLevel(buyerProfile, 25 + Math.min(50, buyQty * 2), 2, 1);
+      tx.update(buyerProfileRef, {
+        ...xpUpdate,
+        stats: {
+          ...buyerProfile.stats,
+          tradesCount: buyerProfile.stats.tradesCount + 1,
+        },
+        updatedAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      [
+        'INVALID_QUANTITY',
+        'LISTING_NOT_FOUND',
+        'INSUFFICIENT_LISTING_QTY',
+        'CANNOT_BUY_OWN_LISTING',
+        'INSUFFICIENT_FUNDS',
+      ].includes(error.message)
+    ) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.WRITE, `market_listings/${listingId}`);
+  }
+}
+
+export async function cancelMarketListing(uid: string, listingId: string): Promise<void> {
+  try {
+    await runTransaction(db, async (tx) => {
+      const listingRef = doc(db, 'market_listings', listingId);
+      const listingSnap = await tx.get(listingRef);
+      if (!listingSnap.exists()) throw new Error('LISTING_NOT_FOUND');
+
+      const listing = listingSnap.data() as MarketListing;
+      if (listing.sellerUid !== uid || listing.status !== 'active') {
+        throw new Error('CANNOT_CANCEL_LISTING');
+      }
+
+      const invRef = doc(db, 'inventory', `${uid}_${listing.itemId}`);
+      const invSnap = await tx.get(invRef);
+
+      tx.update(listingRef, {
+        remainingQty: 0,
+        status: 'cancelled',
+        updatedAt: serverTimestamp(),
+      });
+
+      if (invSnap.exists()) {
+        const prev = (invSnap.data() as InventoryItem).quantity;
+        tx.update(invRef, {
+          quantity: prev + listing.remainingQty,
+          lastListingId: listingId,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        tx.set(invRef, {
+          uid,
+          itemId: listing.itemId,
+          quantity: listing.remainingQty,
+          lastListingId: listingId,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    });
+  } catch (error) {
+    if (error instanceof Error && ['LISTING_NOT_FOUND', 'CANNOT_CANCEL_LISTING'].includes(error.message)) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.UPDATE, `market_listings/${listingId}`);
+  }
+}
+
+export async function manufactureRecipe(uid: string, recipeId: string): Promise<void> {
+  const recipe = MANUFACTURING_RECIPES.find((r) => r.id === recipeId);
+  if (!recipe) throw new Error('INVALID_RECIPE');
+  const txId = genId('tx');
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const profileRef = doc(db, 'profiles', uid);
+      const walletRef = doc(db, 'wallets', uid);
+      const outInvRef = doc(db, 'inventory', `${uid}_${recipe.outputItemId}`);
+
+      const inputRefs = recipe.inputs.map((inp) => doc(db, 'inventory', `${uid}_${inp.itemId}`));
+      const [profileSnap, walletSnap, outInvSnap, ...inputSnaps] = await Promise.all([
+        tx.get(profileRef),
+        tx.get(walletRef),
+        tx.get(outInvRef),
+        ...inputRefs.map((ref) => tx.get(ref)),
+      ]);
+
+      if (!profileSnap.exists() || !walletSnap.exists()) throw new Error('ACCOUNT_NOT_FOUND');
+      const profile = profileSnap.data() as PlayerProfile;
+      const wallet = walletSnap.data() as Wallet;
+
+      if ((profile.skills.industry || 0) < recipe.requiredIndustrySkill) {
+        throw new Error('INDUSTRY_SKILL_TOO_LOW');
+      }
+
+      const cost = calculateManufacturingCost(recipe, profile.skills.industry || 0);
+      if (wallet.balance < cost) throw new Error('INSUFFICIENT_FUNDS');
+
+      for (let i = 0; i < recipe.inputs.length; i++) {
+        const inp = recipe.inputs[i];
+        const snap = inputSnaps[i];
+        if (!snap.exists() || (snap.data() as InventoryItem).quantity < inp.qty) {
+          throw new Error('MISSING_INPUTS');
+        }
+      }
+
+      tx.set(doc(db, 'transactions', txId), {
+        id: txId,
+        fromUid: uid,
+        toUid: 'SYSTEM',
+        amount: cost,
+        fee: 0,
+        netAmount: cost,
+        type: 'manufacturing',
+        referenceId: recipeId,
+        description: `Manufactured ${recipe.outputQty}x ${recipe.outputItemId}`,
+        status: 'completed',
+        createdAt: serverTimestamp(),
+      });
+
+      tx.update(walletRef, {
+        balance: wallet.balance - cost,
+        totalSpent: wallet.totalSpent + cost,
+        lastTxId: txId,
+        updatedAt: serverTimestamp(),
+      });
+
+      for (let i = 0; i < recipe.inputs.length; i++) {
+        const inp = recipe.inputs[i];
+        const prev = (inputSnaps[i].data() as InventoryItem).quantity;
+        tx.update(inputRefs[i], {
+          quantity: prev - inp.qty,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      if (outInvSnap.exists()) {
+        const prevOut = (outInvSnap.data() as InventoryItem).quantity;
+        tx.update(outInvRef, {
+          quantity: prevOut + recipe.outputQty,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        tx.set(outInvRef, {
+          uid,
+          itemId: recipe.outputItemId,
+          quantity: recipe.outputQty,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      const xpUpdate = applyXpAndLevel(profile, recipe.xpReward, 3, 2);
+      tx.update(profileRef, {
+        ...xpUpdate,
+        stats: {
+          ...profile.stats,
+          totalProduced: profile.stats.totalProduced + recipe.outputQty,
+        },
+        updatedAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      ['INVALID_RECIPE', 'INDUSTRY_SKILL_TOO_LOW', 'INSUFFICIENT_FUNDS', 'MISSING_INPUTS'].includes(
+        error.message
+      )
+    ) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.WRITE, `manufacturing/${recipeId}`);
+  }
+}
+
+export async function fulfillTradeContract(uid: string, contractId: string): Promise<number> {
+  const contract = TRADE_CONTRACTS.find((c) => c.id === contractId);
+  if (!contract) throw new Error('INVALID_CONTRACT');
+
+  const dateKey = getUtcDateKey();
+  const claimId = `${uid}_${contractId}_${dateKey}`;
+  const txId = genId('tx');
+
+  try {
+    let payout = 0;
+    await runTransaction(db, async (tx) => {
+      const claimRef = doc(db, 'contract_claims', claimId);
+      const invRef = doc(db, 'inventory', `${uid}_${contract.requiredItemId}`);
+      const walletRef = doc(db, 'wallets', uid);
+      const profileRef = doc(db, 'profiles', uid);
+
+      const [claimSnap, invSnap, walletSnap, profileSnap] = await Promise.all([
+        tx.get(claimRef),
+        tx.get(invRef),
+        tx.get(walletRef),
+        tx.get(profileRef),
+      ]);
+
+      if (claimSnap.exists()) throw new Error('CONTRACT_ALREADY_FULFILLED');
+      if (!invSnap.exists() || (invSnap.data() as InventoryItem).quantity < contract.requiredQty) {
+        throw new Error('MISSING_INPUTS');
+      }
+      if (!walletSnap.exists() || !profileSnap.exists()) throw new Error('ACCOUNT_NOT_FOUND');
+
+      const wallet = walletSnap.data() as Wallet;
+      const profile = profileSnap.data() as PlayerProfile;
+      const negBonus = 1 + (profile.skills.negotiation || 0) * 0.07;
+      payout = Math.min(2500, Math.round(contract.payoutCredits * negBonus));
+
+      tx.set(claimRef, {
+        uid,
+        contractId: `${contractId}_${dateKey}`,
+        amount: payout,
+        claimedAt: serverTimestamp(),
+      });
+
+      tx.set(doc(db, 'transactions', txId), {
+        id: txId,
+        fromUid: 'SYSTEM',
+        toUid: uid,
+        amount: payout,
+        fee: 0,
+        netAmount: payout,
+        type: 'contract_deal',
+        referenceId: claimId,
+        description: `Contract fulfilled: ${contract.titleEn}`,
+        status: 'completed',
+        createdAt: serverTimestamp(),
+      });
+
+      tx.update(walletRef, {
+        balance: wallet.balance + payout,
+        totalEarned: wallet.totalEarned + payout,
+        lastTxId: txId,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.update(invRef, {
+        quantity: (invSnap.data() as InventoryItem).quantity - contract.requiredQty,
+        updatedAt: serverTimestamp(),
+      });
+
+      const xpUpdate = applyXpAndLevel(
+        profile,
+        contract.xpReward,
+        contract.reputationReward,
+        5
+      );
+      tx.update(profileRef, {
+        ...xpUpdate,
+        stats: {
+          ...profile.stats,
+          tradesCount: profile.stats.tradesCount + 1,
+        },
+        updatedAt: serverTimestamp(),
+      });
+    });
+    return payout;
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      ['INVALID_CONTRACT', 'CONTRACT_ALREADY_FULFILLED', 'MISSING_INPUTS'].includes(error.message)
+    ) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.WRITE, `contract_claims/${claimId}`);
+  }
+}
+
+export async function foundCompany(
+  uid: string,
+  ownerName: string,
+  name: string,
+  sector: CompanySector
+): Promise<void> {
+  const cleanName = name.trim();
+  if (cleanName.length < 2 || cleanName.length > 48) throw new Error('INVALID_NAME');
+  const spec = COMPANY_SECTORS.find((s) => s.sector === sector);
+  if (!spec) throw new Error('INVALID_SECTOR');
+
+  const companyId = genId('cmp');
+  const txId = genId('tx');
+  const logId = genId('clog');
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const walletRef = doc(db, 'wallets', uid);
+      const profileRef = doc(db, 'profiles', uid);
+      const [walletSnap, profileSnap] = await Promise.all([
+        tx.get(walletRef),
+        tx.get(profileRef),
+      ]);
+
+      if (!walletSnap.exists() || !profileSnap.exists()) throw new Error('ACCOUNT_NOT_FOUND');
+      const wallet = walletSnap.data() as Wallet;
+      const profile = profileSnap.data() as PlayerProfile;
+
+      if (wallet.balance < spec.foundingCost) throw new Error('INSUFFICIENT_FUNDS');
+
+      tx.set(doc(db, 'companies', companyId), {
+        id: companyId,
+        ownerUid: uid,
+        ownerName,
+        name: cleanName,
+        sector,
+        level: 1,
+        capital: spec.foundingCost,
+        employeesCount: spec.initialEmployees,
+        baseRevenuePerHour: spec.baseRevenuePerHour,
+        expensePerHour: spec.baseExpensePerHour,
+        totalRevenue: 0,
+        lastCollectedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.set(doc(db, 'transactions', txId), {
+        id: txId,
+        fromUid: uid,
+        toUid: 'SYSTEM',
+        amount: spec.foundingCost,
+        fee: 0,
+        netAmount: spec.foundingCost,
+        type: 'company_create',
+        referenceId: companyId,
+        description: `Founded company: ${cleanName}`,
+        status: 'completed',
+        createdAt: serverTimestamp(),
+      });
+
+      tx.update(walletRef, {
+        balance: wallet.balance - spec.foundingCost,
+        totalSpent: wallet.totalSpent + spec.foundingCost,
+        lastTxId: txId,
+        updatedAt: serverTimestamp(),
+      });
+
+      const xpUpdate = applyXpAndLevel(profile, 100, 10, 8);
+      tx.update(profileRef, {
+        ...xpUpdate,
+        stats: {
+          ...profile.stats,
+          companiesOwned: profile.stats.companiesOwned + 1,
+        },
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.set(doc(db, 'company_logs', logId), {
+        id: logId,
+        companyId,
+        ownerUid: uid,
+        action: 'founded',
+        amount: -spec.foundingCost,
+        details: `Company established in ${sector} sector`,
+        createdAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (error instanceof Error && ['INVALID_NAME', 'INVALID_SECTOR', 'INSUFFICIENT_FUNDS'].includes(error.message)) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.WRITE, `companies/${companyId}`);
+  }
+}
+
+export async function upgradeCompany(uid: string, companyId: string): Promise<void> {
+  const txId = genId('tx');
+  const logId = genId('clog');
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const compRef = doc(db, 'companies', companyId);
+      const walletRef = doc(db, 'wallets', uid);
+      const profileRef = doc(db, 'profiles', uid);
+      const [compSnap, walletSnap, profileSnap] = await Promise.all([
+        tx.get(compRef),
+        tx.get(walletRef),
+        tx.get(profileRef),
+      ]);
+
+      if (!compSnap.exists()) throw new Error('COMPANY_NOT_FOUND');
+      const comp = compSnap.data() as Company;
+      if (comp.ownerUid !== uid) throw new Error('UNAUTHORIZED');
+      if (comp.level >= 20) throw new Error('MAX_LEVEL');
+
+      const cost = comp.level * 550;
+      const wallet = walletSnap.data() as Wallet;
+      const profile = profileSnap.data() as PlayerProfile;
+      if (wallet.balance < cost) throw new Error('INSUFFICIENT_FUNDS');
+
+      tx.set(doc(db, 'transactions', txId), {
+        id: txId,
+        fromUid: uid,
+        toUid: 'SYSTEM',
+        amount: cost,
+        fee: 0,
+        netAmount: cost,
+        type: 'company_upgrade',
+        referenceId: companyId,
+        description: `Upgraded ${comp.name} to Lv.${comp.level + 1}`,
+        status: 'completed',
+        createdAt: serverTimestamp(),
+      });
+
+      tx.update(walletRef, {
+        balance: wallet.balance - cost,
+        totalSpent: wallet.totalSpent + cost,
+        lastTxId: txId,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.update(compRef, {
+        level: comp.level + 1,
+        capital: comp.capital + cost,
+        updatedAt: serverTimestamp(),
+      });
+
+      const xpUpdate = applyXpAndLevel(profile, 75, 8, 5);
+      tx.update(profileRef, {
+        ...xpUpdate,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.set(doc(db, 'company_logs', logId), {
+        id: logId,
+        companyId,
+        ownerUid: uid,
+        action: 'upgrade',
+        amount: -cost,
+        details: `Upgraded to Level ${comp.level + 1}`,
+        createdAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (error instanceof Error && ['COMPANY_NOT_FOUND', 'UNAUTHORIZED', 'MAX_LEVEL', 'INSUFFICIENT_FUNDS'].includes(error.message)) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.UPDATE, `companies/${companyId}`);
+  }
+}
+
+export async function hireCompanyStaff(uid: string, companyId: string): Promise<void> {
+  const txId = genId('tx');
+  const logId = genId('clog');
+  const hireCost = 250;
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const compRef = doc(db, 'companies', companyId);
+      const walletRef = doc(db, 'wallets', uid);
+      const [compSnap, walletSnap] = await Promise.all([tx.get(compRef), tx.get(walletRef)]);
+      if (!compSnap.exists()) throw new Error('COMPANY_NOT_FOUND');
+      const comp = compSnap.data() as Company;
+      if (comp.ownerUid !== uid) throw new Error('UNAUTHORIZED');
+      if (comp.employeesCount >= 500) throw new Error('MAX_STAFF');
+
+      const wallet = walletSnap.data() as Wallet;
+      if (wallet.balance < hireCost) throw new Error('INSUFFICIENT_FUNDS');
+
+      tx.set(doc(db, 'transactions', txId), {
+        id: txId,
+        fromUid: uid,
+        toUid: 'SYSTEM',
+        amount: hireCost,
+        fee: 0,
+        netAmount: hireCost,
+        type: 'manufacturing',
+        referenceId: companyId,
+        description: `Hired specialist for ${comp.name}`,
+        status: 'completed',
+        createdAt: serverTimestamp(),
+      });
+
+      tx.update(walletRef, {
+        balance: wallet.balance - hireCost,
+        totalSpent: wallet.totalSpent + hireCost,
+        lastTxId: txId,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.update(compRef, {
+        employeesCount: comp.employeesCount + 1,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.set(doc(db, 'company_logs', logId), {
+        id: logId,
+        companyId,
+        ownerUid: uid,
+        action: 'hire',
+        amount: -hireCost,
+        details: `Staff expanded to ${comp.employeesCount + 1}`,
+        createdAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (error instanceof Error && ['COMPANY_NOT_FOUND', 'UNAUTHORIZED', 'MAX_STAFF', 'INSUFFICIENT_FUNDS'].includes(error.message)) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.UPDATE, `companies/${companyId}`);
+  }
+}
+
+export async function collectCompanyRevenue(uid: string, companyId: string): Promise<number> {
+  const txId = genId('tx');
+  const logId = genId('clog');
+
+  try {
+    let payout = 0;
+    await runTransaction(db, async (tx) => {
+      const compRef = doc(db, 'companies', companyId);
+      const walletRef = doc(db, 'wallets', uid);
+      const profileRef = doc(db, 'profiles', uid);
+      const [compSnap, walletSnap, profileSnap] = await Promise.all([
+        tx.get(compRef),
+        tx.get(walletRef),
+        tx.get(profileRef),
+      ]);
+
+      if (!compSnap.exists()) throw new Error('COMPANY_NOT_FOUND');
+      const comp = compSnap.data() as Company;
+      if (comp.ownerUid !== uid) throw new Error('UNAUTHORIZED');
+
+      const wallet = walletSnap.data() as Wallet;
+      const profile = profileSnap.data() as PlayerProfile;
+      const { netHourly } = calculateCompanyHourlyNet(comp, {
+        management: profile.skills.management || 0,
+        finance: profile.skills.finance || 0,
+      });
+
+      const rawAccrued = calculateAccruedPayout(
+        netHourly,
+        timestampToMs(comp.lastCollectedAt),
+        Date.now()
+      );
+      payout = Math.min(25000, rawAccrued);
+      if (payout < 1) throw new Error('NOTHING_TO_COLLECT');
+
+      tx.set(doc(db, 'transactions', txId), {
+        id: txId,
+        fromUid: 'SYSTEM',
+        toUid: uid,
+        amount: payout,
+        fee: 0,
+        netAmount: payout,
+        type: 'company_collect',
+        referenceId: companyId,
+        description: `Company revenue collected: ${comp.name}`,
+        status: 'completed',
+        createdAt: serverTimestamp(),
+      });
+
+      tx.update(walletRef, {
+        balance: wallet.balance + payout,
+        totalEarned: wallet.totalEarned + payout,
+        lastTxId: txId,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.update(compRef, {
+        totalRevenue: comp.totalRevenue + payout,
+        lastCollectedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      const xpUpdate = applyXpAndLevel(profile, Math.min(80, Math.max(10, Math.floor(payout / 15))), 2, 1);
+      tx.update(profileRef, {
+        ...xpUpdate,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.set(doc(db, 'company_logs', logId), {
+        id: logId,
+        companyId,
+        ownerUid: uid,
+        action: 'collect',
+        amount: payout,
+        details: `Collected +${payout} N-Credits`,
+        createdAt: serverTimestamp(),
+      });
+    });
+    return payout;
+  } catch (error) {
+    if (error instanceof Error && ['COMPANY_NOT_FOUND', 'UNAUTHORIZED', 'NOTHING_TO_COLLECT'].includes(error.message)) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.UPDATE, `companies/${companyId}`);
+  }
+}
+
+export async function buyProperty(
+  uid: string,
+  name: string,
+  type: PropertyType
+): Promise<void> {
+  const cleanName = name.trim();
+  if (cleanName.length < 2 || cleanName.length > 48) throw new Error('INVALID_NAME');
+  const spec = PROPERTY_SPECS.find((p) => p.type === type);
+  if (!spec) throw new Error('INVALID_PROPERTY_TYPE');
+
+  const propId = genId('prop');
+  const txId = genId('tx');
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const walletRef = doc(db, 'wallets', uid);
+      const profileRef = doc(db, 'profiles', uid);
+      const [walletSnap, profileSnap] = await Promise.all([
+        tx.get(walletRef),
+        tx.get(profileRef),
+      ]);
+
+      if (!walletSnap.exists() || !profileSnap.exists()) throw new Error('ACCOUNT_NOT_FOUND');
+      const wallet = walletSnap.data() as Wallet;
+      const profile = profileSnap.data() as PlayerProfile;
+      if (wallet.balance < spec.purchasePrice) throw new Error('INSUFFICIENT_FUNDS');
+
+      tx.set(doc(db, 'properties', propId), {
+        id: propId,
+        ownerUid: uid,
+        name: cleanName,
+        type,
+        level: 1,
+        purchasePrice: spec.purchasePrice,
+        rentPerHour: spec.rentPerHour,
+        maintenancePerHour: spec.maintenancePerHour,
+        isRented: true,
+        lastCollectedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.set(doc(db, 'transactions', txId), {
+        id: txId,
+        fromUid: uid,
+        toUid: 'SYSTEM',
+        amount: spec.purchasePrice,
+        fee: 0,
+        netAmount: spec.purchasePrice,
+        type: 'property_buy',
+        referenceId: propId,
+        description: `Acquired property: ${cleanName}`,
+        status: 'completed',
+        createdAt: serverTimestamp(),
+      });
+
+      tx.update(walletRef, {
+        balance: wallet.balance - spec.purchasePrice,
+        totalSpent: wallet.totalSpent + spec.purchasePrice,
+        lastTxId: txId,
+        updatedAt: serverTimestamp(),
+      });
+
+      const xpUpdate = applyXpAndLevel(profile, 90, 8, 6);
+      tx.update(profileRef, {
+        ...xpUpdate,
+        stats: {
+          ...profile.stats,
+          propertiesOwned: profile.stats.propertiesOwned + 1,
+        },
+        updatedAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (error instanceof Error && ['INVALID_NAME', 'INVALID_PROPERTY_TYPE', 'INSUFFICIENT_FUNDS'].includes(error.message)) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.WRITE, `properties/${propId}`);
+  }
+}
+
+export async function togglePropertyLease(uid: string, propertyId: string, nextState: boolean): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'properties', propertyId), {
+      isRented: nextState,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `properties/${propertyId}`);
+  }
+}
+
+export async function upgradeProperty(uid: string, propertyId: string): Promise<void> {
+  const txId = genId('tx');
+  try {
+    await runTransaction(db, async (tx) => {
+      const propRef = doc(db, 'properties', propertyId);
+      const walletRef = doc(db, 'wallets', uid);
+      const [propSnap, walletSnap] = await Promise.all([tx.get(propRef), tx.get(walletRef)]);
+      if (!propSnap.exists()) throw new Error('PROPERTY_NOT_FOUND');
+      const prop = propSnap.data() as PropertyAsset;
+      if (prop.ownerUid !== uid) throw new Error('UNAUTHORIZED');
+      if (prop.level >= 15) throw new Error('MAX_LEVEL');
+
+      const cost = prop.level * 480;
+      const wallet = walletSnap.data() as Wallet;
+      if (wallet.balance < cost) throw new Error('INSUFFICIENT_FUNDS');
+
+      tx.set(doc(db, 'transactions', txId), {
+        id: txId,
+        fromUid: uid,
+        toUid: 'SYSTEM',
+        amount: cost,
+        fee: 0,
+        netAmount: cost,
+        type: 'property_upgrade',
+        referenceId: propertyId,
+        description: `Upgraded property ${prop.name} to Lv.${prop.level + 1}`,
+        status: 'completed',
+        createdAt: serverTimestamp(),
+      });
+
+      tx.update(walletRef, {
+        balance: wallet.balance - cost,
+        totalSpent: wallet.totalSpent + cost,
+        lastTxId: txId,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.update(propRef, {
+        level: prop.level + 1,
+        updatedAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (error instanceof Error && ['PROPERTY_NOT_FOUND', 'UNAUTHORIZED', 'MAX_LEVEL', 'INSUFFICIENT_FUNDS'].includes(error.message)) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.UPDATE, `properties/${propertyId}`);
+  }
+}
+
+export async function collectPropertyRent(uid: string, propertyId: string): Promise<number> {
+  const txId = genId('tx');
+  try {
+    let payout = 0;
+    await runTransaction(db, async (tx) => {
+      const propRef = doc(db, 'properties', propertyId);
+      const walletRef = doc(db, 'wallets', uid);
+      const profileRef = doc(db, 'profiles', uid);
+      const [propSnap, walletSnap, profileSnap] = await Promise.all([
+        tx.get(propRef),
+        tx.get(walletRef),
+        tx.get(profileRef),
+      ]);
+      if (!propSnap.exists()) throw new Error('PROPERTY_NOT_FOUND');
+      const prop = propSnap.data() as PropertyAsset;
+      if (prop.ownerUid !== uid) throw new Error('UNAUTHORIZED');
+
+      const wallet = walletSnap.data() as Wallet;
+      const profile = profileSnap.data() as PlayerProfile;
+      const { netHourly } = calculatePropertyHourlyNet(prop, profile.skills.negotiation || 0);
+      if (netHourly <= 0) throw new Error('PROPERTY_VACANT');
+
+      const rawAccrued = calculateAccruedPayout(
+        netHourly,
+        timestampToMs(prop.lastCollectedAt),
+        Date.now()
+      );
+      payout = Math.min(15000, rawAccrued);
+      if (payout < 1) throw new Error('NOTHING_TO_COLLECT');
+
+      tx.set(doc(db, 'transactions', txId), {
+        id: txId,
+        fromUid: 'SYSTEM',
+        toUid: uid,
+        amount: payout,
+        fee: 0,
+        netAmount: payout,
+        type: 'property_collect',
+        referenceId: propertyId,
+        description: `Collected rent from ${prop.name}`,
+        status: 'completed',
+        createdAt: serverTimestamp(),
+      });
+
+      tx.update(walletRef, {
+        balance: wallet.balance + payout,
+        totalEarned: wallet.totalEarned + payout,
+        lastTxId: txId,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.update(propRef, {
+        lastCollectedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    });
+    return payout;
+  } catch (error) {
+    if (error instanceof Error && ['PROPERTY_NOT_FOUND', 'UNAUTHORIZED', 'PROPERTY_VACANT', 'NOTHING_TO_COLLECT'].includes(error.message)) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.UPDATE, `properties/${propertyId}`);
+  }
+}
+
+export async function claimMissionReward(uid: string, missionId: string): Promise<void> {
+  const mission = MISSIONS.find((m) => m.id === missionId);
+  if (!mission) throw new Error('INVALID_MISSION');
+
+  const claimDocId = `${uid}_${missionId}`;
+  const txId = genId('tx');
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const claimRef = doc(db, 'player_missions', claimDocId);
+      const walletRef = doc(db, 'wallets', uid);
+      const profileRef = doc(db, 'profiles', uid);
+      const [claimSnap, walletSnap, profileSnap] = await Promise.all([
+        tx.get(claimRef),
+        tx.get(walletRef),
+        tx.get(profileRef),
+      ]);
+
+      if (claimSnap.exists()) throw new Error('MISSION_ALREADY_CLAIMED');
+      if (!walletSnap.exists() || !profileSnap.exists()) throw new Error('ACCOUNT_NOT_FOUND');
+
+      const wallet = walletSnap.data() as Wallet;
+      const profile = profileSnap.data() as PlayerProfile;
+
+      const currentProgress =
+        mission.metric === 'trades'
+          ? profile.stats.tradesCount
+          : mission.metric === 'companies'
+          ? profile.stats.companiesOwned
+          : mission.metric === 'properties'
+          ? profile.stats.propertiesOwned
+          : mission.metric === 'produced'
+          ? profile.stats.totalProduced
+          : mission.metric === 'org'
+          ? profile.orgId
+            ? 1
+            : 0
+          : profile.level;
+
+      if (currentProgress < mission.targetCount) {
+        throw new Error('MISSION_NOT_COMPLETE');
+      }
+
+      tx.set(claimRef, {
+        uid,
+        missionId,
+        category: mission.category,
+        rewardCredits: mission.rewardCredits,
+        rewardXp: mission.rewardXp,
+        claimedAt: serverTimestamp(),
+      });
+
+      tx.set(doc(db, 'transactions', txId), {
+        id: txId,
+        fromUid: 'SYSTEM',
+        toUid: uid,
+        amount: mission.rewardCredits,
+        fee: 0,
+        netAmount: mission.rewardCredits,
+        type: 'mission_reward',
+        referenceId: claimDocId,
+        description: `Mission reward: ${mission.titleEn}`,
+        status: 'completed',
+        createdAt: serverTimestamp(),
+      });
+
+      tx.update(walletRef, {
+        balance: wallet.balance + mission.rewardCredits,
+        totalEarned: wallet.totalEarned + mission.rewardCredits,
+        lastTxId: txId,
+        updatedAt: serverTimestamp(),
+      });
+
+      const xpUpdate = applyXpAndLevel(profile, mission.rewardXp, mission.rewardReputation, 5);
+      tx.update(profileRef, {
+        ...xpUpdate,
+        stats: {
+          ...profile.stats,
+          missionsCompleted: profile.stats.missionsCompleted + 1,
+        },
+        updatedAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (error instanceof Error && ['INVALID_MISSION', 'MISSION_ALREADY_CLAIMED', 'MISSION_NOT_COMPLETE'].includes(error.message)) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.WRITE, `player_missions/${claimDocId}`);
+  }
+}
+
+export async function createOrganization(
+  uid: string,
+  username: string,
+  name: string,
+  tag: string,
+  description: string
+): Promise<string> {
+  const cleanName = name.trim();
+  const cleanTag = tag.trim().toUpperCase();
+  if (cleanName.length < 3 || cleanName.length > 40) throw new Error('INVALID_NAME');
+  if (cleanTag.length < 2 || cleanTag.length > 6) throw new Error('INVALID_TAG');
+
+  const orgId = genId('org');
+  const txId = genId('tx');
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const walletRef = doc(db, 'wallets', uid);
+      const profileRef = doc(db, 'profiles', uid);
+      const [walletSnap, profileSnap] = await Promise.all([tx.get(walletRef), tx.get(profileRef)]);
+      if (!walletSnap.exists() || !profileSnap.exists()) throw new Error('ACCOUNT_NOT_FOUND');
+
+      const wallet = walletSnap.data() as Wallet;
+      const profile = profileSnap.data() as PlayerProfile;
+      if (profile.orgId) throw new Error('ALREADY_IN_ORG');
+      if (wallet.balance < ORG_CREATION_COST) throw new Error('INSUFFICIENT_FUNDS');
+
+      tx.set(doc(db, 'organizations', orgId), {
+        id: orgId,
+        name: cleanName,
+        tag: cleanTag,
+        description: description.trim().slice(0, 240),
+        leaderUid: uid,
+        leaderName: username,
+        treasuryBalance: 0,
+        memberCount: 1,
+        reputation: 15,
+        level: 1,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.set(doc(db, 'organization_members', `${orgId}_${uid}`), {
+        orgId,
+        uid,
+        username,
+        role: 'leader',
+        permissions: ROLE_DEFAULT_PERMISSIONS.leader,
+        joinedAt: serverTimestamp(),
+      });
+
+      tx.set(doc(db, 'transactions', txId), {
+        id: txId,
+        fromUid: uid,
+        toUid: 'SYSTEM',
+        amount: ORG_CREATION_COST,
+        fee: 0,
+        netAmount: ORG_CREATION_COST,
+        type: 'org_create',
+        referenceId: orgId,
+        description: `Founded organization [${cleanTag}] ${cleanName}`,
+        status: 'completed',
+        createdAt: serverTimestamp(),
+      });
+
+      tx.update(walletRef, {
+        balance: wallet.balance - ORG_CREATION_COST,
+        totalSpent: wallet.totalSpent + ORG_CREATION_COST,
+        lastTxId: txId,
+        updatedAt: serverTimestamp(),
+      });
+
+      const xpUpdate = applyXpAndLevel(profile, 150, 20, 25);
+      tx.update(profileRef, {
+        ...xpUpdate,
+        orgId,
+        updatedAt: serverTimestamp(),
+      });
+    });
+    return orgId;
+  } catch (error) {
+    if (error instanceof Error && ['INVALID_NAME', 'INVALID_TAG', 'ALREADY_IN_ORG', 'INSUFFICIENT_FUNDS'].includes(error.message)) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.WRITE, `organizations/${orgId}`);
+  }
+}
+
+export async function requestJoinOrganization(
+  uid: string,
+  username: string,
+  orgId: string
+): Promise<void> {
+  const reqId = `${orgId}_${uid}_${Date.now()}`;
+  try {
+    await setDoc(doc(db, 'organization_requests', reqId), {
+      id: reqId,
+      orgId,
+      uid,
+      username,
+      status: 'pending',
+      createdAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `organization_requests/${reqId}`);
+  }
+}
+
+export async function handleOrgJoinRequest(
+  orgId: string,
+  reqId: string,
+  applicantUid: string,
+  applicantUsername: string,
+  decision: 'approved' | 'rejected'
+): Promise<void> {
+  try {
+    await runTransaction(db, async (tx) => {
+      const reqRef = doc(db, 'organization_requests', reqId);
+      const orgRef = doc(db, 'organizations', orgId);
+      const [reqSnap, orgSnap] = await Promise.all([tx.get(reqRef), tx.get(orgRef)]);
+      if (!reqSnap.exists() || !orgSnap.exists()) throw new Error('NOT_FOUND');
+
+      tx.update(reqRef, { status: decision });
+
+      if (decision === 'approved') {
+        const org = orgSnap.data() as Organization;
+        tx.set(doc(db, 'organization_members', `${orgId}_${applicantUid}`), {
+          orgId,
+          uid: applicantUid,
+          username: applicantUsername,
+          role: 'member',
+          permissions: ROLE_DEFAULT_PERMISSIONS.member,
+          joinedAt: serverTimestamp(),
+        });
+        tx.update(orgRef, {
+          memberCount: org.memberCount + 1,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `organization_requests/${reqId}`);
+  }
+}
+
+export async function syncSelfOrgMembership(uid: string, orgId: string | null): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'profiles', uid), {
+      orgId,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `profiles/${uid}`);
+  }
+}
+
+export async function updateOrgMemberRole(
+  orgId: string,
+  targetUid: string,
+  newRole: Exclude<OrgRole, 'leader'>
+): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'organization_members', `${orgId}_${targetUid}`), {
+      role: newRole,
+      permissions: ROLE_DEFAULT_PERMISSIONS[newRole],
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `organization_members/${orgId}_${targetUid}`);
+  }
+}
+
+export async function leaveOrganization(uid: string, orgId: string): Promise<void> {
+  try {
+    await runTransaction(db, async (tx) => {
+      const orgRef = doc(db, 'organizations', orgId);
+      const memberRef = doc(db, 'organization_members', `${orgId}_${uid}`);
+      const profileRef = doc(db, 'profiles', uid);
+      const [orgSnap, memberSnap] = await Promise.all([tx.get(orgRef), tx.get(memberRef)]);
+      if (!orgSnap.exists() || !memberSnap.exists()) throw new Error('NOT_FOUND');
+      const member = memberSnap.data() as OrganizationMember;
+      if (member.role === 'leader') throw new Error('LEADER_CANNOT_LEAVE');
+
+      const org = orgSnap.data() as Organization;
+      tx.delete(memberRef);
+      tx.update(orgRef, {
+        memberCount: Math.max(1, org.memberCount - 1),
+        updatedAt: serverTimestamp(),
+      });
+      tx.update(profileRef, {
+        orgId: null,
+        updatedAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'LEADER_CANNOT_LEAVE') throw error;
+    handleFirestoreError(error, OperationType.DELETE, `organization_members/${orgId}_${uid}`);
+  }
+}
+
+export async function depositToOrgTreasury(
+  uid: string,
+  username: string,
+  orgId: string,
+  amountRaw: number
+): Promise<void> {
+  const amount = Math.floor(amountRaw);
+  if (amount <= 0) throw new Error('INVALID_AMOUNT');
+  const txId = genId('tx');
+  const orgTxId = genId('otx');
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const walletRef = doc(db, 'wallets', uid);
+      const orgRef = doc(db, 'organizations', orgId);
+      const [walletSnap, orgSnap] = await Promise.all([tx.get(walletRef), tx.get(orgRef)]);
+      if (!walletSnap.exists() || !orgSnap.exists()) throw new Error('NOT_FOUND');
+
+      const wallet = walletSnap.data() as Wallet;
+      const org = orgSnap.data() as Organization;
+      if (wallet.balance < amount) throw new Error('INSUFFICIENT_FUNDS');
+
+      tx.set(doc(db, 'transactions', txId), {
+        id: txId,
+        fromUid: uid,
+        toUid: 'ORG',
+        amount,
+        fee: 0,
+        netAmount: amount,
+        type: 'org_deposit',
+        referenceId: orgId,
+        description: `Org treasury deposit [${org.tag}]`,
+        status: 'completed',
+        createdAt: serverTimestamp(),
+      });
+
+      tx.update(walletRef, {
+        balance: wallet.balance - amount,
+        totalSpent: wallet.totalSpent + amount,
+        lastTxId: txId,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.update(orgRef, {
+        treasuryBalance: org.treasuryBalance + amount,
+        reputation: org.reputation + Math.max(1, Math.floor(amount / 100)),
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.set(doc(db, 'organization_transactions', orgTxId), {
+        id: orgTxId,
+        orgId,
+        uid,
+        username,
+        type: 'deposit',
+        amount,
+        note: `Deposit by ${username}`,
+        createdAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (error instanceof Error && ['INVALID_AMOUNT', 'INSUFFICIENT_FUNDS'].includes(error.message)) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.WRITE, `organizations/${orgId}`);
+  }
+}
+
+export async function withdrawFromOrgTreasury(
+  uid: string,
+  username: string,
+  orgId: string,
+  amountRaw: number
+): Promise<void> {
+  const amount = Math.floor(amountRaw);
+  if (amount <= 0) throw new Error('INVALID_AMOUNT');
+  const txId = genId('tx');
+  const orgTxId = genId('otx');
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const walletRef = doc(db, 'wallets', uid);
+      const orgRef = doc(db, 'organizations', orgId);
+      const [walletSnap, orgSnap] = await Promise.all([tx.get(walletRef), tx.get(orgRef)]);
+      if (!walletSnap.exists() || !orgSnap.exists()) throw new Error('NOT_FOUND');
+
+      const wallet = walletSnap.data() as Wallet;
+      const org = orgSnap.data() as Organization;
+      if (org.treasuryBalance < amount) throw new Error('INSUFFICIENT_TREASURY');
+
+      tx.set(doc(db, 'transactions', txId), {
+        id: txId,
+        fromUid: 'ORG',
+        toUid: uid,
+        amount,
+        fee: 0,
+        netAmount: amount,
+        type: 'org_withdraw',
+        referenceId: orgId,
+        description: `Org treasury withdrawal [${org.tag}]`,
+        status: 'completed',
+        createdAt: serverTimestamp(),
+      });
+
+      tx.update(walletRef, {
+        balance: wallet.balance + amount,
+        totalEarned: wallet.totalEarned + amount,
+        lastTxId: txId,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.update(orgRef, {
+        treasuryBalance: org.treasuryBalance - amount,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.set(doc(db, 'organization_transactions', orgTxId), {
+        id: orgTxId,
+        orgId,
+        uid,
+        username,
+        type: 'withdraw',
+        amount,
+        note: `Withdrawal by ${username}`,
+        createdAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (error instanceof Error && ['INVALID_AMOUNT', 'INSUFFICIENT_TREASURY'].includes(error.message)) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.WRITE, `organizations/${orgId}`);
+  }
+}
+
+export async function updatePlayerSettings(
+  uid: string,
+  language: Language,
+  notificationsEnabled: boolean
+): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'users_private', uid), {
+      language,
+      notificationsEnabled,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `users_private/${uid}`);
+  }
+}
+
+export async function updatePlayerAvatar(uid: string, avatarId: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'profiles', uid), {
+      avatarId,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `profiles/${uid}`);
+  }
+}
+
+export async function markNotificationRead(notifId: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'notifications', notifId), { read: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `notifications/${notifId}`);
+  }
+}
+
+export async function markAllNotificationsRead(notifIds: string[]): Promise<void> {
+  if (!notifIds.length) return;
+  try {
+    const batch = writeBatch(db);
+    for (const id of notifIds) {
+      batch.update(doc(db, 'notifications', id), { read: true });
+    }
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, 'notifications');
+  }
+}
+
+export async function fetchLeaderboards(): Promise<{
+  players: PlayerProfile[];
+  companies: Company[];
+  organizations: Organization[];
+}> {
+  const [pSnap, cSnap, oSnap] = await Promise.all([
+    getDocs(query(collection(db, 'profiles'), where('influence', '>=', 0), orderBy('influence', 'desc'), limit(20))),
+    getDocs(query(collection(db, 'companies'), where('totalRevenue', '>=', 0), orderBy('totalRevenue', 'desc'), limit(20))),
+    getDocs(query(collection(db, 'organizations'), where('reputation', '>=', 0), orderBy('reputation', 'desc'), limit(20))),
+  ]);
+
+  return {
+    players: pSnap.docs.map((d) => d.data() as PlayerProfile),
+    companies: cSnap.docs.map((d) => d.data() as Company),
+    organizations: oSnap.docs.map((d) => d.data() as Organization),
+  };
+}
+
+export async function checkAndUnlockAchievements(
+  uid: string,
+  profile: PlayerProfile,
+  unlockedIds: Set<string>,
+  achievements: { id: string; metric: string; threshold: number }[]
+): Promise<void> {
+  for (const ach of achievements) {
+    if (unlockedIds.has(ach.id)) continue;
+    const val =
+      ach.metric === 'trades'
+        ? profile.stats.tradesCount
+        : ach.metric === 'companies'
+        ? profile.stats.companiesOwned
+        : ach.metric === 'properties'
+        ? profile.stats.propertiesOwned
+        : ach.metric === 'produced'
+        ? profile.stats.totalProduced
+        : ach.metric === 'reputation'
+        ? profile.reputation
+        : profile.level;
+
+    if (val >= ach.threshold) {
+      const docId = `${uid}_${ach.id}`;
+      try {
+        await setDoc(doc(db, 'player_achievements', docId), {
+          uid,
+          achievementId: ach.id,
+          unlockedAt: serverTimestamp(),
+        });
+      } catch {
+        // Ignore duplicate race
+      }
+    }
+  }
+}
+
+export async function fetchOrgPendingRequests(orgId: string) {
+  const q = query(
+    collection(db, 'organization_requests'),
+    where('orgId', '==', orgId),
+    where('status', '==', 'pending')
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => d.data());
+}

@@ -1,0 +1,498 @@
+import { Building2, Check, Plus, Shield, Users, Vault, X } from 'lucide-react';
+import { useState } from 'react';
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
+import { useToast } from '../../components/ui/ToastProvider';
+import { ORG_CREATION_COST } from '../../data/catalog';
+import { useTranslations } from '../../i18n/translations';
+import { hasOrgPermission } from '../../lib/economy';
+import {
+  createOrganization,
+  depositToOrgTreasury,
+  handleOrgJoinRequest,
+  leaveOrganization,
+  requestJoinOrganization,
+  updateOrgMemberRole,
+  withdrawFromOrgTreasury,
+} from '../../services/gameService';
+import type {
+  Language,
+  Organization,
+  OrganizationMember,
+  OrganizationRequest,
+  OrganizationTransaction,
+  OrgRole,
+  PlayerProfile,
+  Wallet,
+} from '../../types/game';
+
+interface OrganizationHubViewProps {
+  profile: PlayerProfile;
+  wallet: Wallet | null;
+  organizations: Organization[];
+  myOrgMember: OrganizationMember | null;
+  orgMembers: OrganizationMember[];
+  orgRequests: OrganizationRequest[];
+  orgTransactions: OrganizationTransaction[];
+  language: Language;
+}
+
+export function OrganizationHubView({
+  profile,
+  wallet,
+  organizations,
+  myOrgMember,
+  orgMembers,
+  orgRequests,
+  orgTransactions,
+  language,
+}: OrganizationHubViewProps) {
+  const t = useTranslations(language);
+  const { showToast } = useToast();
+
+  const [orgName, setOrgName] = useState('');
+  const [orgTag, setOrgTag] = useState('');
+  const [orgDesc, setOrgDesc] = useState('');
+  const [treasuryAmt, setTreasuryAmt] = useState(100);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
+
+  const currentOrg = myOrgMember
+    ? organizations.find((o) => o.id === myOrgMember.orgId) || null
+    : null;
+
+  const canManageMembers = hasOrgPermission(myOrgMember, 'manage_members');
+  const canManageRoles = hasOrgPermission(myOrgMember, 'manage_roles');
+  const canManageTreasury = hasOrgPermission(myOrgMember, 'manage_treasury');
+
+  async function handleCreateOrg(e: React.FormEvent) {
+    e.preventDefault();
+    setBusyKey('create_org');
+    try {
+      await createOrganization(profile.uid, profile.username, orgName, orgTag, orgDesc);
+      setOrgName('');
+      setOrgTag('');
+      setOrgDesc('');
+      showToast(
+        language === 'ar' ? 'تم تأسيس المنظمة بنجاح!' : 'Organization founded!',
+        'success'
+      );
+    } catch (err) {
+      const code = err instanceof Error ? err.message : '';
+      showToast(
+        code === 'INSUFFICIENT_FUNDS'
+          ? language === 'ar'
+            ? `يتطلب التأسيس ${ORG_CREATION_COST} N-Credits.`
+            : `Founding requires ${ORG_CREATION_COST} N-Credits.`
+          : language === 'ar'
+          ? 'تأكد من صحة الاسم والرمز.'
+          : 'Check organization name and tag.',
+        'error'
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function handleRequestJoin(orgId: string) {
+    setBusyKey(`join_${orgId}`);
+    try {
+      await requestJoinOrganization(profile.uid, profile.username, orgId);
+      showToast(
+        language === 'ar' ? 'تم إرسال طلب الانضمام للإدارة.' : 'Join request sent to leadership.',
+        'success'
+      );
+    } catch {
+      showToast(language === 'ar' ? 'تعذر إرسال الطلب.' : 'Could not submit request.', 'error');
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function handleDeposit() {
+    if (!currentOrg) return;
+    setBusyKey('dep');
+    try {
+      await depositToOrgTreasury(profile.uid, profile.username, currentOrg.id, treasuryAmt);
+      showToast(
+        language === 'ar' ? 'تم الإيداع في خزينة المنظمة.' : 'Deposited to organization treasury.',
+        'success'
+      );
+    } catch {
+      showToast(language === 'ar' ? 'الرصيد غير كافٍ.' : 'Insufficient personal funds.', 'error');
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function handleWithdraw() {
+    if (!currentOrg) return;
+    setBusyKey('wdr');
+    try {
+      await withdrawFromOrgTreasury(profile.uid, profile.username, currentOrg.id, treasuryAmt);
+      showToast(
+        language === 'ar' ? 'تم السحب من خزينة المنظمة.' : 'Withdrawn from treasury.',
+        'success'
+      );
+    } catch {
+      showToast(
+        language === 'ar' ? 'تعذر السحب من الخزينة.' : 'Withdrawal failed or unauthorized.',
+        'error'
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function handleRoleChange(targetUid: string, nextRole: Exclude<OrgRole, 'leader'>) {
+    if (!currentOrg) return;
+    setBusyKey(`role_${targetUid}`);
+    try {
+      await updateOrgMemberRole(currentOrg.id, targetUid, nextRole);
+      showToast(language === 'ar' ? 'تم تحديث الرتبة والصلاحيات.' : 'Member role updated.', 'success');
+    } catch {
+      showToast(language === 'ar' ? 'ليس لديك صلاحية تعديل الرتب.' : 'Permission denied.', 'error');
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function handleLeave() {
+    if (!currentOrg) return;
+    setBusyKey('leave');
+    try {
+      await leaveOrganization(profile.uid, currentOrg.id);
+      setConfirmLeaveOpen(false);
+      showToast(language === 'ar' ? 'غادرت المنظمة.' : 'Left organization.', 'info');
+    } catch {
+      showToast(
+        language === 'ar'
+          ? 'لا يمكن لرئيس المنظمة المغادرة قبل نقل القيادة.'
+          : 'Leader cannot leave organization directly.',
+        'error'
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  if (!myOrgMember || !currentOrg) {
+    return (
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        {/* Create Organization */}
+        <form
+          onSubmit={handleCreateOrg}
+          className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-4 h-fit"
+        >
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-[#F4F5F7]">{t.createOrg}</h2>
+            <Plus className="w-4 h-4 text-[#E04455]" />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs text-[#9299A6]">{t.orgName}</label>
+            <input
+              type="text"
+              value={orgName}
+              onChange={(e) => setOrgName(e.target.value)}
+              minLength={3}
+              maxLength={40}
+              required
+              className="w-full min-h-[44px] px-3.5 rounded-xl bg-[#0B0D12] border border-white/10 text-sm text-[#F4F5F7] focus:outline-none focus:border-[#E04455]"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs text-[#9299A6]">{t.orgTag}</label>
+            <input
+              type="text"
+              value={orgTag}
+              onChange={(e) => setOrgTag(e.target.value.toUpperCase())}
+              minLength={2}
+              maxLength={6}
+              dir="ltr"
+              required
+              placeholder="NXR"
+              className="w-full min-h-[44px] px-3.5 rounded-xl bg-[#0B0D12] border border-white/10 text-sm font-mono-num text-[#F4F5F7] focus:outline-none focus:border-[#E04455]"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs text-[#9299A6]">{t.orgDesc}</label>
+            <textarea
+              value={orgDesc}
+              onChange={(e) => setOrgDesc(e.target.value)}
+              maxLength={240}
+              rows={3}
+              className="w-full p-3 rounded-xl bg-[#0B0D12] border border-white/10 text-sm text-[#F4F5F7] focus:outline-none focus:border-[#E04455]"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={busyKey === 'create_org' || (wallet?.balance ?? 0) < ORG_CREATION_COST}
+            className="w-full min-h-[44px] px-4 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white text-sm font-semibold transition-colors disabled:bg-[#1B2230] disabled:text-[#9299A6]"
+          >
+            {t.createOrg} ({ORG_CREATION_COST.toLocaleString()})
+          </button>
+        </form>
+
+        {/* Browse Organizations */}
+        <div className="lg:col-span-2 space-y-3.5">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold text-[#F4F5F7]">
+              {language === 'ar' ? 'المنظمات والتحالفات النشطة' : 'Active Syndicates & Organizations'}
+            </h2>
+            <Building2 className="w-4 h-4 text-[#9299A6]" />
+          </div>
+
+          {organizations.length === 0 ? (
+            <div className="bg-[#141821] border border-white/8 rounded-2xl p-8 text-center">
+              <p className="text-sm text-[#9299A6]">
+                {language === 'ar'
+                  ? 'لا توجد منظمات مؤسسة بعد. كن أول من يؤسس تحالفاً اقتصادياً!'
+                  : 'No organizations founded yet. Establish the first economic syndicate!'}
+              </p>
+            </div>
+          ) : (
+            organizations.map((org) => (
+              <div
+                key={org.id}
+                className="bg-[#141821] border border-white/8 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+              >
+                <div className="space-y-1">
+                  <h3 className="text-base font-bold text-[#F4F5F7]">
+                    [{org.tag}] {org.name}
+                  </h3>
+                  <p className="text-xs text-[#9299A6]">
+                    {org.leaderName} · {t.members}:{' '}
+                    <span className="font-mono-num text-[#F4F5F7]">{org.memberCount}</span> ·{' '}
+                    {t.reputation}:{' '}
+                    <span className="font-mono-num text-[#F4F5F7]">{org.reputation}</span>
+                  </p>
+                  {org.description && (
+                    <p className="text-xs text-[#9299A6]/90 pt-1">{org.description}</p>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  disabled={busyKey === `join_${org.id}`}
+                  onClick={() => handleRequestJoin(org.id)}
+                  className="min-h-[42px] px-4 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white text-xs font-semibold whitespace-nowrap shrink-0"
+                >
+                  {t.joinOrg}
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Organization Header */}
+      <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2.5">
+            <Shield className="w-5 h-5 text-[#E04455]" />
+            <h1 className="text-xl font-bold text-[#F4F5F7]">
+              [{currentOrg.tag}] {currentOrg.name}
+            </h1>
+          </div>
+          <p className="text-xs text-[#9299A6]">
+            {t.level} <span className="font-mono-num text-[#F4F5F7]">{currentOrg.level}</span> ·{' '}
+            {t.members}{' '}
+            <span className="font-mono-num text-[#F4F5F7]">{currentOrg.memberCount}</span> ·{' '}
+            {t.reputation}{' '}
+            <span className="font-mono-num text-[#F4F5F7]">{currentOrg.reputation}</span>
+          </p>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <div className="text-end">
+            <p className="text-xs text-[#9299A6]">{t.orgTreasury}</p>
+            <p className="text-lg font-bold font-mono-num text-emerald-400">
+              {currentOrg.treasuryBalance.toLocaleString()} {t.currency}
+            </p>
+          </div>
+          {myOrgMember.role !== 'leader' && (
+            <button
+              type="button"
+              onClick={() => setConfirmLeaveOpen(true)}
+              className="min-h-[40px] px-3.5 rounded-xl bg-[#1B2230] hover:bg-[#232C3E] text-[#E04455] text-xs font-semibold whitespace-nowrap"
+            >
+              {t.leaveOrg}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* Shared Treasury Operations */}
+        <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold text-[#F4F5F7]">{t.orgTreasury}</h2>
+            <Vault className="w-4 h-4 text-[#E04455]" />
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            <input
+              type="number"
+              min={1}
+              value={treasuryAmt}
+              onChange={(e) => setTreasuryAmt(Math.max(1, Number(e.target.value)))}
+              className="flex-1 min-h-[44px] px-3.5 rounded-xl bg-[#0B0D12] border border-white/10 text-sm font-mono-num text-[#F4F5F7]"
+            />
+            <button
+              type="button"
+              disabled={busyKey === 'dep' || (wallet?.balance ?? 0) < treasuryAmt}
+              onClick={handleDeposit}
+              className="min-h-[44px] px-4 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white text-xs font-semibold whitespace-nowrap disabled:bg-[#1B2230] disabled:text-[#9299A6]"
+            >
+              {t.deposit}
+            </button>
+            {canManageTreasury && (
+              <button
+                type="button"
+                disabled={busyKey === 'wdr' || currentOrg.treasuryBalance < treasuryAmt}
+                onClick={handleWithdraw}
+                className="min-h-[44px] px-4 rounded-xl bg-[#1B2230] hover:bg-[#232C3E] text-[#F4F5F7] text-xs font-semibold whitespace-nowrap disabled:opacity-50"
+              >
+                {t.withdraw}
+              </button>
+            )}
+          </div>
+
+          <div className="space-y-2 pt-2 border-t border-white/8">
+            {orgTransactions.length === 0 ? (
+              <p className="text-xs text-[#9299A6] py-4 text-center">{t.noActivity}</p>
+            ) : (
+              orgTransactions.slice(0, 6).map((otx) => (
+                <div
+                  key={otx.id}
+                  className="flex items-center justify-between text-xs py-2 border-b border-white/6 last:border-0"
+                >
+                  <span className="text-[#9299A6]">
+                    {otx.username} · {otx.type}
+                  </span>
+                  <span
+                    className={`font-mono-num font-semibold ${
+                      otx.type === 'deposit' ? 'text-emerald-400' : 'text-[#E04455]'
+                    }`}
+                  >
+                    {otx.type === 'deposit' ? '+' : '-'}
+                    {otx.amount.toLocaleString()}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Members & RBAC + Join Requests */}
+        <div className="space-y-5">
+          {canManageMembers && orgRequests.length > 0 && (
+            <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-3">
+              <h2 className="text-base font-semibold text-[#F4F5F7]">{t.joinRequests}</h2>
+              <div className="space-y-2">
+                {orgRequests.map((req) => (
+                  <div
+                    key={req.id}
+                    className="p-3 rounded-xl bg-[#0B0D12] border border-white/6 flex items-center justify-between gap-3"
+                  >
+                    <span className="text-sm font-medium text-[#F4F5F7]">{req.username}</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleOrgJoinRequest(
+                            currentOrg.id,
+                            req.id,
+                            req.uid,
+                            req.username,
+                            'approved'
+                          )
+                        }
+                        className="min-h-[38px] px-3 rounded-lg bg-[#B91C32] text-white text-xs font-semibold flex items-center gap-1"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>{t.approve}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleOrgJoinRequest(
+                            currentOrg.id,
+                            req.id,
+                            req.uid,
+                            req.username,
+                            'rejected'
+                          )
+                        }
+                        className="min-h-[38px] px-3 rounded-lg bg-[#1B2230] text-[#9299A6] text-xs font-semibold flex items-center gap-1"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        <span>{t.reject}</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-[#F4F5F7]">{t.members}</h2>
+              <Users className="w-4 h-4 text-[#9299A6]" />
+            </div>
+            <div className="space-y-2">
+              {orgMembers.map((m) => (
+                <div
+                  key={m.uid}
+                  className="p-3 rounded-xl bg-[#0B0D12] border border-white/6 flex items-center justify-between gap-3"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-[#F4F5F7]">{m.username}</p>
+                    <p className="text-xs text-[#9299A6] mt-0.5">{m.role}</p>
+                  </div>
+                  {canManageRoles && m.role !== 'leader' && m.uid !== profile.uid && (
+                    <select
+                      value={m.role}
+                      disabled={busyKey === `role_${m.uid}`}
+                      onChange={(e) =>
+                        handleRoleChange(m.uid, e.target.value as Exclude<OrgRole, 'leader'>)
+                      }
+                      className="min-h-[38px] px-2.5 rounded-lg bg-[#141821] border border-white/10 text-xs text-[#F4F5F7]"
+                    >
+                      <option value="member">member</option>
+                      <option value="officer">officer</option>
+                      <option value="deputy">deputy</option>
+                    </select>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <ConfirmDialog
+        open={confirmLeaveOpen}
+        title={t.leaveOrg}
+        description={
+          language === 'ar'
+            ? 'هل تريد مغادرة المنظمة الحالية؟ ستفقد رتبتك الحالية.'
+            : 'Leave your current organization? You will lose your current rank.'
+        }
+        confirmLabel={t.confirmBtn}
+        cancelLabel={t.cancelBtn}
+        busy={busyKey === 'leave'}
+        onConfirm={handleLeave}
+        onCancel={() => setConfirmLeaveOpen(false)}
+      />
+    </div>
+  );
+}
