@@ -64,6 +64,14 @@ function NexoraAppContent() {
       notifications={game.notifications}
       language={game.language}
     >
+      {!game.isOnline && (
+        <div className="mb-4 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200">
+          {game.language === 'ar'
+            ? 'لا يوجد اتصال بالإنترنت حالياً — ستتم مزامنة العمليات عند عودة الاتصال.'
+            : 'Currently offline — actions will resume syncing once connection is restored.'}
+        </div>
+      )}
+
       {activeTab === 'home' && (
         <HomeDashboardView
           profile={game.profile}
@@ -86,6 +94,7 @@ function NexoraAppContent() {
           companyLogs={game.companyLogs}
           properties={game.properties}
           inventory={game.inventory}
+          worldEvents={game.worldEvents}
           language={game.language}
           onGoToMarket={() => setActiveTab('market')}
         />
@@ -97,6 +106,7 @@ function NexoraAppContent() {
           wallet={game.wallet}
           inventory={game.inventory}
           marketListings={game.marketListings}
+          marketOrders={game.marketOrders}
           transactions={game.transactions}
           worldEvents={game.worldEvents}
           claimedContractsToday={game.claimedContractsToday}

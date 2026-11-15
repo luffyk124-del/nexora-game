@@ -13,7 +13,9 @@ import { useToast } from '../../components/ui/ToastProvider';
 import { BRAND_ASSETS, CATALOG_ITEMS, ITEM_MAP, TRADE_CONTRACTS } from '../../data/catalog';
 import { useTranslations, formatTxType } from '../../i18n/translations';
 import {
+  calculateContractPayout,
   calculateDynamicItemPrice,
+  calculateMarketItemAnalytics,
   calculateMarketTaxRate,
   LISTING_MAX_PRICE,
   LISTING_MAX_QTY,
@@ -32,6 +34,7 @@ import type {
   ItemTier,
   Language,
   MarketListing,
+  MarketOrder,
   MarketSubTab,
   PlayerProfile,
   TransactionRecord,
@@ -44,6 +47,7 @@ interface MarketHubViewProps {
   wallet: Wallet | null;
   inventory: InventoryItem[];
   marketListings: MarketListing[];
+  marketOrders: MarketOrder[];
   transactions: TransactionRecord[];
   worldEvents: WorldEvent[];
   claimedContractsToday: Set<string>;
@@ -55,6 +59,7 @@ export function MarketHubView({
   wallet,
   inventory,
   marketListings,
+  marketOrders,
   transactions,
   worldEvents,
   claimedContractsToday,
@@ -86,6 +91,18 @@ export function MarketHubView({
   const invMap = new Map<string, number>();
   inventory.forEach((i) => invMap.set(i.itemId, i.quantity));
   const todayKey = getUtcDateKey();
+
+  // Compute live supply per item across active listings
+  const supplyByItem = new Map<string, number>();
+  for (const l of marketListings) {
+    if (l.status === 'active' && l.remainingQty > 0) {
+      supplyByItem.set(l.itemId, (supplyByItem.get(l.itemId) || 0) + l.remainingQty);
+    }
+  }
+
+  const pulseItems = CATALOG_ITEMS.slice(0, 4).map((item) =>
+    calculateMarketItemAnalytics(item.id, marketListings, worldEvents)
+  );
 
   const filteredListings = marketListings.filter((l) => {
     const item = ITEM_MAP[l.itemId];
@@ -324,6 +341,55 @@ export function MarketHubView({
             </div>
           </div>
 
+          {/* Supply & Demand Pulse Strip */}
+          <div className="bg-[#141821] border border-white/8 rounded-2xl p-4 space-y-3">
+            <h2 className="text-xs font-semibold text-[#9299A6] uppercase tracking-wider">
+              {t.marketPulse}
+            </h2>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              {pulseItems.map((ana) => {
+                const item = ITEM_MAP[ana.itemId];
+                if (!item) return null;
+                const statusLabel =
+                  ana.supplyStatus === 'scarce'
+                    ? t.supplyScarce
+                    : ana.supplyStatus === 'abundant'
+                    ? t.supplyAbundant
+                    : t.supplyBalanced;
+                const statusColor =
+                  ana.supplyStatus === 'scarce'
+                    ? 'text-[#E04455]'
+                    : ana.supplyStatus === 'abundant'
+                    ? 'text-emerald-400'
+                    : 'text-[#F4F5F7]';
+                return (
+                  <div
+                    key={ana.itemId}
+                    className="p-3 rounded-xl bg-[#0B0D12] border border-white/6 space-y-1"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-[#F4F5F7] truncate">
+                        {language === 'ar' ? item.nameAr : item.nameEn}
+                      </span>
+                      <span className={`text-[11px] font-medium ${statusColor}`}>
+                        {statusLabel}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-[#9299A6]">
+                      <span>{t.indexPrice}: <span className="font-mono-num text-[#F4F5F7]">{ana.indexPrice}</span></span>
+                      <span>
+                        {t.lowestAsk}:{' '}
+                        <span className="font-mono-num text-[#F4F5F7]">
+                          {ana.lowestAsk !== null ? ana.lowestAsk : '—'}
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
             {/* Post Sell Listing Form */}
             <form
@@ -464,11 +530,16 @@ export function MarketHubView({
                       listing.remainingQty,
                       sanitizePositiveInt(buyQuantities[listing.id], 1, listing.remainingQty)
                     );
+                    const totalItemSupply = supplyByItem.get(listing.itemId) || listing.remainingQty;
                     const refPrice = calculateDynamicItemPrice(
                       listing.itemId,
-                      listing.remainingQty,
+                      totalItemSupply,
                       worldEvents
                     );
+                    const spreadPct =
+                      refPrice > 0
+                        ? Math.round(((listing.unitPrice - refPrice) / refPrice) * 100)
+                        : 0;
 
                     return (
                       <div
@@ -489,7 +560,16 @@ export function MarketHubView({
                             </span>{' '}
                             {language === 'ar' ? 'متاح' : 'avail'} ·{' '}
                             {language === 'ar' ? 'السعر المرجعي:' : 'Index:'}{' '}
-                            <span className="font-mono-num">{refPrice}</span>
+                            <span className="font-mono-num">{refPrice}</span>{' '}
+                            {spreadPct !== 0 && (
+                              <span
+                                className={`font-mono-num font-semibold ${
+                                  spreadPct < 0 ? 'text-emerald-400' : 'text-amber-300'
+                                }`}
+                              >
+                                ({spreadPct > 0 ? `+${spreadPct}%` : `${spreadPct}%`})
+                              </span>
+                            )}
                           </p>
                         </div>
 
@@ -565,9 +645,10 @@ export function MarketHubView({
             const item = ITEM_MAP[ctr.requiredItemId];
             const owned = invMap.get(ctr.requiredItemId) || 0;
             const claimed = claimedContractsToday.has(`${ctr.id}_${todayKey}`);
-            const payout = Math.min(
-              2500,
-              Math.round(ctr.payoutCredits * (1 + (profile.skills.negotiation || 0) * 0.07))
+            const payout = calculateContractPayout(
+              ctr.payoutCredits,
+              profile.skills.negotiation || 0,
+              profile.reputation
             );
 
             return (
@@ -682,59 +763,96 @@ export function MarketHubView({
         </div>
       )}
 
-      {/* 4. TRANSACTION LEDGER */}
+      {/* 4. TRANSACTION & ORDERS LEDGER */}
       {subTab === 'ledger' && (
-        <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-3">
-          <h2 className="text-base font-semibold text-[#F4F5F7]">{t.subLedger}</h2>
-          {transactions.length === 0 ? (
-            <p className="text-sm text-[#9299A6] py-8 text-center">{t.noActivity}</p>
-          ) : (
-            <div className="space-y-2">
-              {transactions.map((tx) => {
-                const isCredit = tx.toUid === profile.uid;
-                return (
-                  <div
-                    key={tx.id}
-                    className="p-3.5 rounded-xl bg-[#0B0D12] border border-white/6 flex items-center justify-between gap-3"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-8 h-8 rounded-lg bg-[#1B2230] flex items-center justify-center shrink-0">
-                        {isCredit ? (
-                          <ArrowDownLeft className="w-4 h-4 text-emerald-400" />
-                        ) : (
-                          <ArrowUpRight className="w-4 h-4 text-[#E04455]" />
-                        )}
-                      </div>
+        <div className="space-y-5">
+          {marketOrders.length > 0 && (
+            <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-3">
+              <h2 className="text-base font-semibold text-[#F4F5F7]">{t.executedOrders}</h2>
+              <div className="space-y-2">
+                {marketOrders.slice(0, 12).map((ord) => {
+                  const ordItem = ITEM_MAP[ord.itemId];
+                  return (
+                    <div
+                      key={ord.id}
+                      className="p-3.5 rounded-xl bg-[#0B0D12] border border-white/6 flex items-center justify-between gap-3"
+                    >
                       <div className="min-w-0">
                         <p className="text-xs font-medium text-[#F4F5F7] truncate">
-                          {tx.description}
+                          {ordItem ? (language === 'ar' ? ordItem.nameAr : ordItem.nameEn) : ord.itemId} ×
+                          <span className="font-mono-num">{ord.quantity}</span>
                         </p>
-                        <p className="text-[11px] text-[#9299A6] mt-0.5">
-                          <span className="font-mono-num">{tx.id}</span> · {formatTxType(tx.type, language)}
+                        <p className="text-[11px] text-[#9299A6] mt-0.5 font-mono-num">
+                          {ord.unitPrice.toLocaleString()} / {t.currency} · {ord.id}
+                        </p>
+                      </div>
+                      <div className="text-end shrink-0">
+                        <p className="text-sm font-mono-num font-bold text-[#F4F5F7]">
+                          -{ord.totalPrice.toLocaleString()}
+                        </p>
+                        <p className="text-[10px] font-mono-num text-[#9299A6]">
+                          Tax: {ord.taxAmount}
                         </p>
                       </div>
                     </div>
-                    <div className="text-end shrink-0">
-                      <p
-                        className={`text-sm font-mono-num font-bold ${
-                          isCredit ? 'text-emerald-400' : 'text-[#F4F5F7]'
-                        }`}
-                      >
-                        {isCredit
-                          ? `+${tx.netAmount.toLocaleString()}`
-                          : `-${tx.amount.toLocaleString()}`}
-                      </p>
-                      {tx.fee > 0 && (
-                        <p className="text-[10px] font-mono-num text-[#9299A6]">
-                          Fee: {tx.fee}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
           )}
+
+          <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-3">
+            <h2 className="text-base font-semibold text-[#F4F5F7]">{t.financialLedger}</h2>
+            {transactions.length === 0 ? (
+              <p className="text-sm text-[#9299A6] py-8 text-center">{t.noActivity}</p>
+            ) : (
+              <div className="space-y-2">
+                {transactions.map((tx) => {
+                  const isCredit = tx.toUid === profile.uid;
+                  return (
+                    <div
+                      key={tx.id}
+                      className="p-3.5 rounded-xl bg-[#0B0D12] border border-white/6 flex items-center justify-between gap-3"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-[#1B2230] flex items-center justify-center shrink-0">
+                          {isCredit ? (
+                            <ArrowDownLeft className="w-4 h-4 text-emerald-400" />
+                          ) : (
+                            <ArrowUpRight className="w-4 h-4 text-[#E04455]" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-[#F4F5F7] truncate">
+                            {tx.description}
+                          </p>
+                          <p className="text-[11px] text-[#9299A6] mt-0.5">
+                            <span className="font-mono-num">{tx.id}</span> · {formatTxType(tx.type, language)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-end shrink-0">
+                        <p
+                          className={`text-sm font-mono-num font-bold ${
+                            isCredit ? 'text-emerald-400' : 'text-[#F4F5F7]'
+                          }`}
+                        >
+                          {isCredit
+                            ? `+${tx.netAmount.toLocaleString()}`
+                            : `-${tx.amount.toLocaleString()}`}
+                        </p>
+                        {tx.fee > 0 && (
+                          <p className="text-[10px] font-mono-num text-[#9299A6]">
+                            Fee: {tx.fee}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

@@ -278,18 +278,40 @@ export interface AchievementDefinition {
   threshold: number;
 }
 
+export type WorldEventEffectType =
+  | 'demand_surge'
+  | 'supply_shortage'
+  | 'tax_cut'
+  | 'industrial_boom'
+  | 'service_crisis'
+  | 'logistics_boom';
+
 export interface WorldEvent {
   id: string;
   titleAr: string;
   titleEn: string;
   descriptionAr: string;
   descriptionEn: string;
-  effectType: 'demand_surge' | 'supply_shortage' | 'tax_cut' | 'industrial_boom';
+  effectType: WorldEventEffectType;
   targetItemId?: string;
+  affectedSectors?: CompanySector[];
   priceMultiplier: number;
+  revenueMultiplier?: number;
   taxDelta: number;
+  stackGroup?: string;
+  startsAt?: unknown;
+  endsAt?: unknown;
   active: boolean;
   createdAt: unknown;
+}
+
+export interface ReputationTier {
+  id: string;
+  minReputation: number;
+  titleAr: string;
+  titleEn: string;
+  contractBonusRate: number;
+  companyYieldBonusRate: number;
 }
 
 export interface GameNotification {

@@ -7,8 +7,10 @@ import type {
   OrgPermission,
   OrgRole,
   PropertyType,
+  ReputationTier,
   SkillKey,
   TradeContract,
+  WorldEventEffectType,
 } from '../types/game';
 
 export const BRAND_ASSETS = {
@@ -591,29 +593,174 @@ export const SEED_MARKET_LISTINGS = [
   { id: 'seed_rare_minerals', itemId: 'rare_minerals', quantity: 140, unitPrice: 70 },
 ];
 
-export const SEED_WORLD_EVENTS = [
+export const REPUTATION_TIERS: ReputationTier[] = [
+  {
+    id: 'tier_emerging',
+    minReputation: 0,
+    titleAr: 'رائد صاعد',
+    titleEn: 'Emerging Founder',
+    contractBonusRate: 0,
+    companyYieldBonusRate: 0,
+  },
+  {
+    id: 'tier_trusted',
+    minReputation: 60,
+    titleAr: 'شريك موثوق',
+    titleEn: 'Trusted Partner',
+    contractBonusRate: 0.04,
+    companyYieldBonusRate: 0.02,
+  },
+  {
+    id: 'tier_accredited',
+    minReputation: 160,
+    titleAr: 'مستثمر معتمد',
+    titleEn: 'Accredited Executive',
+    contractBonusRate: 0.08,
+    companyYieldBonusRate: 0.04,
+  },
+  {
+    id: 'tier_magnate',
+    minReputation: 350,
+    titleAr: 'قطب سوقي',
+    titleEn: 'Market Magnate',
+    contractBonusRate: 0.12,
+    companyYieldBonusRate: 0.06,
+  },
+  {
+    id: 'tier_sovereign',
+    minReputation: 700,
+    titleAr: 'سيادي النخبة',
+    titleEn: 'Syndicate Sovereign',
+    contractBonusRate: 0.15,
+    companyYieldBonusRate: 0.08,
+  },
+];
+
+export interface WorldEventTemplate {
+  id: string;
+  titleAr: string;
+  titleEn: string;
+  descriptionAr: string;
+  descriptionEn: string;
+  effectType: WorldEventEffectType;
+  targetItemId: string;
+  affectedSectors: CompanySector[];
+  priceMultiplier: number;
+  revenueMultiplier: number;
+  taxDelta: number;
+  stackGroup: string;
+  durationHours: number;
+}
+
+export const WORLD_EVENT_TEMPLATES: WorldEventTemplate[] = [
   {
     id: 'evt_silicon_boom',
     titleAr: 'طفرة الطلب على الرقائق',
     titleEn: 'Silicon & Microchip Demand Surge',
-    descriptionAr: 'ارتفاع الطلب العالمي على أشباه الموصلات يرفع جاذبية خام السيليكون والرقائق الدقيقة (+18%).',
-    descriptionEn: 'Global semiconductor demand boosts Silicon Ore & Microchip market valuations (+18%).',
-    effectType: 'demand_surge' as const,
+    descriptionAr: 'ارتفاع الطلب العالمي على أشباه الموصلات يرفع تقييم الرقائق (+18%) وعوائد شركات التقنية (+15%).',
+    descriptionEn: 'Global semiconductor demand boosts Microchip index (+18%) and Tech company yields (+15%).',
+    effectType: 'demand_surge',
     targetItemId: 'microchips',
+    affectedSectors: ['tech'],
     priceMultiplier: 1.18,
+    revenueMultiplier: 1.15,
     taxDelta: 0,
-    active: true,
+    stackGroup: 'sector_tech',
+    durationHours: 24,
+  },
+  {
+    id: 'evt_raw_shortage',
+    titleAr: 'شح المعادن والخامات',
+    titleEn: 'Raw Material Supply Squeeze',
+    descriptionAr: 'تباطؤ الإمدادات العالمية يرفع قيمة خام السيليكون (+22%) ويضغط على هوامش التصنيع (-6%).',
+    descriptionEn: 'Global extraction bottleneck elevates Silicon Ore value (+22%) while tightening factory margins (-6%).',
+    effectType: 'supply_shortage',
+    targetItemId: 'silicon_ore',
+    affectedSectors: ['manufacturing'],
+    priceMultiplier: 1.22,
+    revenueMultiplier: 0.94,
+    taxDelta: 0.01,
+    stackGroup: 'supply_raw',
+    durationHours: 18,
+  },
+  {
+    id: 'evt_industrial_surge',
+    titleAr: 'ذروة الطلب الصناعي',
+    titleEn: 'Industrial Compute Expansion',
+    descriptionAr: 'موجة توسع في مراكز البيانات ترفع قيمة الخادم الكمومي (+15%) وعائد قطاعي التصنيع والتقنية (+18%).',
+    descriptionEn: 'Data-center expansion lifts Quantum Server prices (+15%) and Tech/Manufacturing output (+18%).',
+    effectType: 'industrial_boom',
+    targetItemId: 'quantum_server',
+    affectedSectors: ['manufacturing', 'tech'],
+    priceMultiplier: 1.15,
+    revenueMultiplier: 1.18,
+    taxDelta: 0,
+    stackGroup: 'sector_industry',
+    durationHours: 24,
+  },
+  {
+    id: 'evt_service_crisis',
+    titleAr: 'تباطؤ قطاع الخدمات',
+    titleEn: 'Service Sector Contraction',
+    descriptionAr: 'انخفاض مؤقت في الإنفاق المؤسسي يخفض عوائد قطاعي الخدمات والتجارة (-15%) ويرفع الرسوم 1%.',
+    descriptionEn: 'Temporary corporate spending pullback trims Services & Trade yields (-15%) and nudges fees +1%.',
+    effectType: 'service_crisis',
+    targetItemId: '',
+    affectedSectors: ['services', 'trade'],
+    priceMultiplier: 0.92,
+    revenueMultiplier: 0.85,
+    taxDelta: 0.01,
+    stackGroup: 'macro_demand',
+    durationHours: 12,
   },
   {
     id: 'evt_tax_holiday',
     titleAr: 'حافز التجارة الحرة',
     titleEn: 'Free Trade Tax Incentive',
-    descriptionAr: 'خفض مؤقت في ضريبة معاملات السوق بمقدار 1% لتشجيع الصفقات بين اللاعبين.',
-    descriptionEn: 'Temporary 1% reduction in open market transaction tax to stimulate player trading.',
-    effectType: 'tax_cut' as const,
+    descriptionAr: 'خفض مؤقت لضريبة معاملات السوق بمقدار 1% مع دفعة تشجيعية لقطاع التجارة (+8%).',
+    descriptionEn: 'Temporary 1% market transaction tax cut with a +8% Trade sector liquidity boost.',
+    effectType: 'tax_cut',
     targetItemId: '',
+    affectedSectors: ['trade'],
     priceMultiplier: 1.0,
+    revenueMultiplier: 1.08,
     taxDelta: -0.01,
-    active: true,
+    stackGroup: 'fiscal_policy',
+    durationHours: 24,
+  },
+  {
+    id: 'evt_logistics_boom',
+    titleAr: 'ازدهار النقل والإمداد',
+    titleEn: 'Global Logistics & Freight Boom',
+    descriptionAr: 'تسارع حركة الشحن العالمية يرفع قيمة طائرات الشحن (+14%) وعوائد النقل والتجارة (+16%).',
+    descriptionEn: 'Surging freight corridors boost Logistics Drone valuations (+14%) and Logistics/Trade yields (+16%).',
+    effectType: 'logistics_boom',
+    targetItemId: 'logistics_drone',
+    affectedSectors: ['logistics', 'trade'],
+    priceMultiplier: 1.14,
+    revenueMultiplier: 1.16,
+    taxDelta: 0,
+    stackGroup: 'sector_logistics',
+    durationHours: 24,
   },
 ];
+
+export const SEED_WORLD_EVENTS = WORLD_EVENT_TEMPLATES.filter((t) =>
+  ['evt_silicon_boom', 'evt_tax_holiday', 'evt_logistics_boom'].includes(t.id)
+).map((t) => ({
+  id: t.id,
+  titleAr: t.titleAr,
+  titleEn: t.titleEn,
+  descriptionAr: t.descriptionAr,
+  descriptionEn: t.descriptionEn,
+  effectType: t.effectType,
+  targetItemId: t.targetItemId,
+  affectedSectors: t.affectedSectors,
+  priceMultiplier: t.priceMultiplier,
+  revenueMultiplier: t.revenueMultiplier,
+  taxDelta: t.taxDelta,
+  stackGroup: t.stackGroup,
+  durationHours: t.durationHours,
+  active: true,
+}));
+

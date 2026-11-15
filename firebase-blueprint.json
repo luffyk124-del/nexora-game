@@ -319,7 +319,7 @@
     },
     "WorldEvent": {
       "title": "WorldEvent",
-      "description": "Global market/economic modifier event.",
+      "description": "Global market and economic sector modifier event with time window and stacking guard.",
       "type": "object",
       "properties": {
         "id": { "type": "string", "minLength": 1, "maxLength": 64 },
@@ -327,10 +327,15 @@
         "titleEn": { "type": "string", "minLength": 1, "maxLength": 120 },
         "descriptionAr": { "type": "string", "minLength": 1, "maxLength": 280 },
         "descriptionEn": { "type": "string", "minLength": 1, "maxLength": 280 },
-        "effectType": { "type": "string", "enum": ["demand_surge", "supply_shortage", "tax_cut", "industrial_boom"] },
+        "effectType": { "type": "string", "enum": ["demand_surge", "supply_shortage", "tax_cut", "industrial_boom", "service_crisis", "logistics_boom"] },
         "targetItemId": { "type": "string", "maxLength": 64 },
+        "affectedSectors": { "type": "array" },
         "priceMultiplier": { "type": "number" },
+        "revenueMultiplier": { "type": "number" },
         "taxDelta": { "type": "number" },
+        "stackGroup": { "type": "string", "maxLength": 64 },
+        "startsAt": { "type": "string", "format": "date-time" },
+        "endsAt": { "type": "string", "format": "date-time" },
         "active": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" }
       },

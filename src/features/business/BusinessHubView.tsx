@@ -50,6 +50,7 @@ import type {
   PropertyAsset,
   PropertyType,
   Wallet,
+  WorldEvent,
 } from '../../types/game';
 
 interface BusinessHubViewProps {
@@ -59,6 +60,7 @@ interface BusinessHubViewProps {
   companyLogs: CompanyLog[];
   properties: PropertyAsset[];
   inventory: InventoryItem[];
+  worldEvents: WorldEvent[];
   language: Language;
   onGoToMarket: () => void;
 }
@@ -70,6 +72,7 @@ export function BusinessHubView({
   companyLogs,
   properties,
   inventory,
+  worldEvents,
   language,
   onGoToMarket,
 }: BusinessHubViewProps) {
@@ -97,10 +100,16 @@ export function BusinessHubView({
   inventory.forEach((item) => invMap.set(item.itemId, item.quantity));
 
   const totalCompanyNetHr = companies.reduce((sum, c) => {
-    const { netHourly } = calculateCompanyHourlyNet(c, {
-      management: profile.skills.management || 0,
-      finance: profile.skills.finance || 0,
-    });
+    const { netHourly } = calculateCompanyHourlyNet(
+      c,
+      {
+        management: profile.skills.management || 0,
+        finance: profile.skills.finance || 0,
+      },
+      worldEvents,
+      nowMs,
+      profile.reputation
+    );
     return sum + netHourly;
   }, 0);
 
@@ -444,10 +453,17 @@ export function BusinessHubView({
               </div>
             ) : (
               companies.map((c) => {
-                const { netHourly } = calculateCompanyHourlyNet(c, {
-                  management: profile.skills.management || 0,
-                  finance: profile.skills.finance || 0,
-                });
+                const breakdown = calculateCompanyHourlyNet(
+                  c,
+                  {
+                    management: profile.skills.management || 0,
+                    finance: profile.skills.finance || 0,
+                  },
+                  worldEvents,
+                  nowMs,
+                  profile.reputation
+                );
+                const { netHourly, grossHourly, expenseHourly, sectorEventMultiplier } = breakdown;
                 const accrued = calculateAccruedPayout(
                   netHourly,
                   timestampToMs(c.lastCollectedAt),
@@ -471,6 +487,15 @@ export function BusinessHubView({
                           <span className="font-mono-num text-[#F4F5F7]">{c.level}</span> ·{' '}
                           {t.employees}{' '}
                           <span className="font-mono-num text-[#F4F5F7]">{c.employeesCount}</span>
+                          {Math.abs(sectorEventMultiplier - 1) > 0.001 && (
+                            <span
+                              className={`ms-2 font-mono-num font-semibold ${
+                                sectorEventMultiplier >= 1 ? 'text-emerald-400' : 'text-amber-300'
+                              }`}
+                            >
+                              · {t.sectorEventFactor} ×{sectorEventMultiplier.toFixed(2)}
+                            </span>
+                          )}
                         </p>
                       </div>
                       <div className="text-end">
@@ -481,7 +506,19 @@ export function BusinessHubView({
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-[#0B0D12] border border-white/6 rounded-xl p-3.5 text-xs">
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 bg-[#0B0D12] border border-white/6 rounded-xl p-3.5 text-xs">
+                      <div>
+                        <p className="text-[#9299A6]">{t.grossRevenueHr}</p>
+                        <p className="font-mono-num font-semibold text-emerald-400 mt-0.5">
+                          +{grossHourly.toLocaleString()}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[#9299A6]">{t.operatingExpenseHr}</p>
+                        <p className="font-mono-num font-semibold text-[#E04455] mt-0.5">
+                          -{expenseHourly.toLocaleString()}
+                        </p>
+                      </div>
                       <div>
                         <p className="text-[#9299A6]">{language === 'ar' ? 'الإيراد المتراكم' : 'Accrued'}</p>
                         <p className="font-mono-num font-semibold text-[#F4F5F7] mt-0.5">
@@ -573,6 +610,12 @@ export function BusinessHubView({
               (inp) => (invMap.get(inp.itemId) || 0) >= inp.qty
             );
             const canAfford = (wallet?.balance ?? 0) >= cost;
+            const estOutputValue = outputItem.basePrice * rec.outputQty;
+            const inputIndexCost = rec.inputs.reduce(
+              (sum, inp) => sum + (ITEM_MAP[inp.itemId]?.basePrice || 0) * inp.qty,
+              0
+            );
+            const estNetMargin = estOutputValue - inputIndexCost - cost;
 
             return (
               <div
@@ -619,6 +662,22 @@ export function BusinessHubView({
                     <span className="text-[#9299A6]">{t.processingCost}</span>
                     <span className="font-mono-num font-semibold text-[#F4F5F7]">
                       {cost.toLocaleString()} {t.currency}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-[#9299A6]">{t.estMarketValue}</span>
+                    <span className="font-mono-num text-[#F4F5F7]">
+                      ~{estOutputValue.toLocaleString()} {t.currency}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-[#9299A6]">{t.estNetMargin}</span>
+                    <span
+                      className={`font-mono-num font-semibold ${
+                        estNetMargin >= 0 ? 'text-emerald-400' : 'text-[#E04455]'
+                      }`}
+                    >
+                      {estNetMargin >= 0 ? `+${estNetMargin.toLocaleString()}` : estNetMargin.toLocaleString()}
                     </span>
                   </div>
                 </div>
@@ -724,7 +783,7 @@ export function BusinessHubView({
               </div>
             ) : (
               properties.map((p) => {
-                const { netHourly } = calculatePropertyHourlyNet(
+                const { grossRent, maintenance, netHourly } = calculatePropertyHourlyNet(
                   p,
                   profile.skills.negotiation || 0
                 );
@@ -756,6 +815,27 @@ export function BusinessHubView({
                       >
                         {netHourly >= 0 ? `+${netHourly}/hr` : `${netHourly}/hr`}
                       </span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-3 bg-[#0B0D12] border border-white/6 rounded-xl p-3 text-xs">
+                      <div>
+                        <p className="text-[#9299A6]">{t.grossRentHr}</p>
+                        <p className="font-mono-num font-semibold text-emerald-400 mt-0.5">
+                          +{grossRent.toLocaleString()}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[#9299A6]">{t.maintenanceHr}</p>
+                        <p className="font-mono-num font-semibold text-[#E04455] mt-0.5">
+                          -{maintenance.toLocaleString()}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[#9299A6]">{language === 'ar' ? 'الإيجار المتراكم' : 'Accrued'}</p>
+                        <p className="font-mono-num font-semibold text-[#F4F5F7] mt-0.5">
+                          {accrued.toLocaleString()}
+                        </p>
+                      </div>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2.5">

@@ -2,17 +2,41 @@ import {
   BASE_MARKET_TAX_RATE,
   DAILY_STIPEND_BASE,
   ITEM_MAP,
+  REPUTATION_TIERS,
   ROLE_DEFAULT_PERMISSIONS,
 } from '../data/catalog';
 import type {
   Company,
-  ManufacturingRecipe,
+  MarketListing,
   OrganizationMember,
   OrgPermission,
+  OrgRole,
   PropertyAsset,
+  ReputationTier,
   SkillsMap,
   WorldEvent,
 } from '../types/game';
+
+/**
+ * Safely converts Firestore Timestamp, plain { seconds } object, number, or ISO string to epoch ms.
+ */
+export function timestampToMs(ts: unknown, fallback = 0): number {
+  if (ts === null || ts === undefined) return fallback;
+  if (typeof ts === 'number') return Number.isFinite(ts) ? ts : fallback;
+  if (typeof ts === 'string') {
+    const parsed = Date.parse(ts);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  if (typeof ts === 'object') {
+    if ('toMillis' in ts && typeof (ts as { toMillis: unknown }).toMillis === 'function') {
+      return (ts as { toMillis: () => number }).toMillis();
+    }
+    if ('seconds' in ts && typeof (ts as { seconds: unknown }).seconds === 'number') {
+      return (ts as { seconds: number }).seconds * 1000;
+    }
+  }
+  return fallback;
+}
 
 /**
  * Computes player level, remaining XP toward next level, and threshold.
@@ -56,28 +80,84 @@ export function calculateLevelProgress(totalXp: number): {
 }
 
 /**
- * Calculates effective market tax rate factoring in Trade skill & World Events.
+ * Resolves the player's current Reputation Tier and next milestone tier.
+ */
+export function getReputationTier(reputation: number): ReputationTier {
+  const rep = Math.max(0, Number.isFinite(reputation) ? reputation : 0);
+  let current = REPUTATION_TIERS[0];
+  for (const tier of REPUTATION_TIERS) {
+    if (rep >= tier.minReputation) {
+      current = tier;
+    }
+  }
+  return current;
+}
+
+export function getNextReputationTier(reputation: number): ReputationTier | null {
+  const rep = Math.max(0, Number.isFinite(reputation) ? reputation : 0);
+  for (const tier of REPUTATION_TIERS) {
+    if (rep < tier.minReputation) {
+      return tier;
+    }
+  }
+  return null;
+}
+
+/**
+ * Filters World Events by active flag, optional startsAt/endsAt time bounds, and deduplicates
+ * by stackGroup (max 3 simultaneous active events to prevent compound inflation exploits).
+ */
+export function getActiveWorldEvents(
+  worldEvents: WorldEvent[],
+  nowMs = Date.now()
+): WorldEvent[] {
+  const seenGroups = new Set<string>();
+  const active: WorldEvent[] = [];
+
+  for (const evt of worldEvents) {
+    if (!evt.active) continue;
+    const startMs = timestampToMs(evt.startsAt, 0);
+    const endMs = timestampToMs(evt.endsAt, 0);
+    if (startMs > 0 && nowMs < startMs) continue;
+    if (endMs > 0 && nowMs >= endMs) continue;
+
+    const groupKey = evt.stackGroup || evt.effectType || evt.id;
+    if (seenGroups.has(groupKey)) continue;
+    seenGroups.add(groupKey);
+    active.push(evt);
+    if (active.length >= 3) break;
+  }
+
+  return active;
+}
+
+/**
+ * Calculates effective market tax rate factoring in Trade skill & active World Events.
  * Clamped between 1% and 12% to prevent zero-tax exploits or punitive spikes.
  */
 export function calculateMarketTaxRate(
   tradeSkillLevel: number,
-  worldEvents: WorldEvent[]
+  worldEvents: WorldEvent[],
+  nowMs = Date.now()
 ): number {
   const skillDiscount = Math.max(0, tradeSkillLevel) * 0.004;
-  const eventDelta = worldEvents
-    .filter((e) => e.active)
-    .reduce((acc, e) => acc + (e.taxDelta || 0), 0);
+  const eventDelta = getActiveWorldEvents(worldEvents, nowMs).reduce(
+    (acc, e) => acc + (e.taxDelta || 0),
+    0
+  );
   const raw = BASE_MARKET_TAX_RATE - skillDiscount + eventDelta;
   return Number(Math.max(0.01, Math.min(0.12, raw)).toFixed(4));
 }
 
 /**
  * Computes dynamic market reference price based on supply volume and active world events.
+ * Combined event price multiplier is capped to [0.7, 1.45].
  */
 export function calculateDynamicItemPrice(
   itemId: string,
   activeSupplyQty: number,
-  worldEvents: WorldEvent[]
+  worldEvents: WorldEvent[],
+  nowMs = Date.now()
 ): number {
   const item = ITEM_MAP[itemId];
   if (!item) return 0;
@@ -91,31 +171,116 @@ export function calculateDynamicItemPrice(
       : 1.0;
 
   let eventMultiplier = 1.0;
-  for (const evt of worldEvents) {
-    if (!evt.active) continue;
+  for (const evt of getActiveWorldEvents(worldEvents, nowMs)) {
     if (!evt.targetItemId || evt.targetItemId === itemId) {
       eventMultiplier *= evt.priceMultiplier || 1.0;
     }
   }
-  return Math.max(1, Math.round(item.basePrice * supplyFactor * eventMultiplier));
+  const boundedMultiplier = Math.max(0.7, Math.min(1.45, eventMultiplier));
+  return Math.max(1, Math.round(item.basePrice * supplyFactor * boundedMultiplier));
+}
+
+export interface MarketItemAnalytics {
+  itemId: string;
+  indexPrice: number;
+  totalSupply: number;
+  listingCount: number;
+  lowestAsk: number | null;
+  avgAsk: number | null;
+  spreadPercentVsIndex: number | null;
+  supplyStatus: 'scarce' | 'balanced' | 'abundant';
+  activeEventApplied: boolean;
+}
+
+export function calculateMarketItemAnalytics(
+  itemId: string,
+  listings: MarketListing[],
+  worldEvents: WorldEvent[],
+  nowMs = Date.now()
+): MarketItemAnalytics {
+  const itemListings = listings.filter(
+    (l) => l.status === 'active' && l.remainingQty > 0 && l.itemId === itemId
+  );
+  const totalSupply = itemListings.reduce((sum, l) => sum + l.remainingQty, 0);
+  const indexPrice = calculateDynamicItemPrice(itemId, totalSupply, worldEvents, nowMs);
+
+  let lowestAsk: number | null = null;
+  let weightedPriceSum = 0;
+  for (const l of itemListings) {
+    if (lowestAsk === null || l.unitPrice < lowestAsk) lowestAsk = l.unitPrice;
+    weightedPriceSum += l.unitPrice * l.remainingQty;
+  }
+
+  const avgAsk = totalSupply > 0 ? Math.round(weightedPriceSum / totalSupply) : null;
+  const spreadPercentVsIndex =
+    lowestAsk !== null && indexPrice > 0
+      ? Math.round(((lowestAsk - indexPrice) / indexPrice) * 100)
+      : null;
+
+  const supplyStatus: MarketItemAnalytics['supplyStatus'] =
+    totalSupply <= 50 ? 'scarce' : totalSupply >= 300 ? 'abundant' : 'balanced';
+
+  const activeEventApplied = getActiveWorldEvents(worldEvents, nowMs).some(
+    (e) => e.targetItemId === itemId && Math.abs((e.priceMultiplier ?? 1) - 1) > 0.001
+  );
+
+  return {
+    itemId,
+    indexPrice,
+    totalSupply,
+    listingCount: itemListings.length,
+    lowestAsk,
+    avgAsk,
+    spreadPercentVsIndex,
+    supplyStatus,
+    activeEventApplied,
+  };
 }
 
 /**
- * Computes net hourly company profit factoring in Management (revenue) and Finance (expense).
+ * Computes net hourly company profit factoring in Management, Finance, and active sector World Events.
  */
 export function calculateCompanyHourlyNet(
-  company: Pick<Company, 'baseRevenuePerHour' | 'expensePerHour' | 'level' | 'employeesCount'>,
-  skills: Pick<SkillsMap, 'management' | 'finance'>
+  company: Pick<Company, 'baseRevenuePerHour' | 'expensePerHour' | 'level' | 'employeesCount'> &
+    Partial<Pick<Company, 'sector'>>,
+  skills: Pick<SkillsMap, 'management' | 'finance'>,
+  worldEvents: WorldEvent[] = [],
+  nowMs = Date.now(),
+  reputation = 0
 ): {
   grossHourly: number;
   expenseHourly: number;
   netHourly: number;
+  levelMultiplier: number;
+  staffBonus: number;
+  mgmtBonus: number;
+  financeReduction: number;
+  sectorEventMultiplier: number;
+  reputationBonus: number;
 } {
   const levelMultiplier = 1 + (company.level - 1) * 0.32;
   const staffBonus = 1 + Math.max(0, company.employeesCount - 1) * 0.05;
   const mgmtBonus = 1 + Math.max(0, skills.management) * 0.08;
+  const repTier = getReputationTier(reputation);
+  const reputationBonus = 1 + repTier.companyYieldBonusRate;
+
+  let rawEventMult = 1.0;
+  if (company.sector) {
+    for (const evt of getActiveWorldEvents(worldEvents, nowMs)) {
+      if (evt.affectedSectors?.includes(company.sector) && evt.revenueMultiplier) {
+        rawEventMult *= evt.revenueMultiplier;
+      }
+    }
+  }
+  const sectorEventMultiplier = Number(Math.max(0.75, Math.min(1.4, rawEventMult)).toFixed(3));
+
   const grossHourly = Math.round(
-    company.baseRevenuePerHour * levelMultiplier * staffBonus * mgmtBonus
+    company.baseRevenuePerHour *
+      levelMultiplier *
+      staffBonus *
+      mgmtBonus *
+      sectorEventMultiplier *
+      reputationBonus
   );
 
   const rawExpense =
@@ -128,6 +293,12 @@ export function calculateCompanyHourlyNet(
     grossHourly,
     expenseHourly,
     netHourly: Math.max(15, grossHourly - expenseHourly),
+    levelMultiplier,
+    staffBonus,
+    mgmtBonus,
+    financeReduction,
+    sectorEventMultiplier,
+    reputationBonus,
   };
 }
 
@@ -167,6 +338,20 @@ export function calculateManufacturingCost(
 }
 
 /**
+ * Computes contract payout factoring in Negotiation skill and Reputation Tier bonus (capped at 2500).
+ */
+export function calculateContractPayout(
+  baseCredits: number,
+  negotiationSkill: number,
+  reputation = 0
+): number {
+  const negBonus = 1 + Math.max(0, negotiationSkill) * 0.07;
+  const tier = getReputationTier(reputation);
+  const repBonus = 1 + tier.contractBonusRate;
+  return Math.min(2500, Math.round(baseCredits * negBonus * repBonus));
+}
+
+/**
  * Computes daily stipend factoring in Finance skill and player level.
  */
 export function calculateDailyStipend(level: number, financeSkill: number): number {
@@ -185,6 +370,24 @@ export function hasOrgPermission(
   if (member.role === 'leader') return true;
   if (member.permissions.includes(permission)) return true;
   return ROLE_DEFAULT_PERMISSIONS[member.role]?.includes(permission) ?? false;
+}
+
+export const ORG_MAX_LEVEL = 50;
+
+export function calculateOrgUpgradeCost(level: number): number {
+  return Math.max(1, Math.floor(level)) * 1500;
+}
+
+const ROLE_WEIGHT: Record<OrgRole, number> = {
+  leader: 4,
+  deputy: 3,
+  officer: 2,
+  member: 1,
+};
+
+export function canManageOrgMember(actorRole: OrgRole, targetRole: OrgRole): boolean {
+  if (targetRole === 'leader') return false;
+  return ROLE_WEIGHT[actorRole] > ROLE_WEIGHT[targetRole];
 }
 
 /**
@@ -216,8 +419,7 @@ export function isValidUsername(username: string): boolean {
 }
 
 /**
- * Computes accrued payout since last collection timestamp (capped at 12 hours per claim,
- * minimum 1 minute yields fractional accrual with at least 1 credit once 2 minutes pass).
+ * Computes accrued payout since last collection timestamp (capped at 12 hours per claim).
  */
 export function calculateAccruedPayout(
   netPerHour: number,
@@ -302,4 +504,5 @@ export function getAchievementProgress(
       return profile.level;
   }
 }
+
 

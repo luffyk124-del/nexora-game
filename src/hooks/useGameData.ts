@@ -10,7 +10,7 @@ import {
 } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ACHIEVEMENTS } from '../data/catalog';
-import { hasOrgPermission } from '../lib/economy';
+import { hasOrgPermission, timestampToMs } from '../lib/economy';
 import { auth, db, googleAuthProvider, handleFirestoreError, OperationType } from '../lib/firebase';
 import {
   checkAndUnlockAchievements,
@@ -65,10 +65,17 @@ export interface GameDataState {
   unlockedAchievements: Set<string>;
   notifications: GameNotification[];
   worldEvents: WorldEvent[];
+  isOnline: boolean;
   language: Language;
   setLanguageLocal: (lang: Language) => void;
   loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
+}
+
+function sortByCreatedAtDesc<T extends { createdAt?: unknown }>(items: T[]): T[] {
+  return [...items].sort(
+    (a, b) => timestampToMs(b.createdAt, 0) - timestampToMs(a.createdAt, 0)
+  );
 }
 
 export function useGameData(): GameDataState {
@@ -99,8 +106,13 @@ export function useGameData(): GameDataState {
   const [notifications, setNotifications] = useState<GameNotification[]>([]);
   const [worldEvents, setWorldEvents] = useState<WorldEvent[]>([]);
   const [utcDateKey, setUtcDateKey] = useState(() => getUtcDateKey());
+  const [isOnline, setIsOnline] = useState(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
   const [language, setLanguage] = useState<Language>('ar');
   const attemptedAchievementsRef = useRef<Set<string>>(new Set());
+  const bootstrappedUidRef = useRef<string | null>(null);
+  const activeUidRef = useRef<string | null>(null);
 
   const setLanguageLocal = useCallback((lang: Language) => {
     setLanguage(lang);
@@ -118,56 +130,76 @@ export function useGameData(): GameDataState {
       const latest = getUtcDateKey();
       setUtcDateKey((prev) => (prev === latest ? prev : latest));
     };
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
     const interval = setInterval(syncDateKey, 60_000);
     window.addEventListener('focus', syncDateKey);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
     return () => {
       clearInterval(interval);
       window.removeEventListener('focus', syncDateKey);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
     };
+  }, []);
+
+  const clearSessionState = useCallback(() => {
+    attemptedAchievementsRef.current.clear();
+    setProfile(null);
+    setProfileLoading(false);
+    setUserPrivate(null);
+    setWallet(null);
+    setInventory([]);
+    setTransactions([]);
+    setMarketListings([]);
+    setMarketOrders([]);
+    setCompanies([]);
+    setCompanyLogs([]);
+    setProperties([]);
+    setOrganizations([]);
+    setMyOrgMember(null);
+    setOrgMemberLoaded(false);
+    setOrgMembers([]);
+    setOrgRequests([]);
+    setMyPendingOrgIds(new Set());
+    setOrgTransactions([]);
+    setClaimedMissions([]);
+    setClaimedDailyToday(false);
+    setClaimedContractsToday(new Set());
+    setUnlockedAchievements(new Set());
+    setNotifications([]);
+    setWorldEvents([]);
   }, []);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
+      const nextUid = user?.uid ?? null;
+      if (activeUidRef.current && activeUidRef.current !== nextUid) {
+        clearSessionState();
+      }
+      activeUidRef.current = nextUid;
       setAuthUser(user);
       setAuthReady(true);
       if (!user) {
-        attemptedAchievementsRef.current.clear();
-        setProfile(null);
-        setProfileLoading(false);
-        setUserPrivate(null);
-        setWallet(null);
-        setInventory([]);
-        setTransactions([]);
-        setMarketListings([]);
-        setMarketOrders([]);
-        setCompanies([]);
-        setCompanyLogs([]);
-        setProperties([]);
-        setOrganizations([]);
-        setMyOrgMember(null);
-        setOrgMemberLoaded(false);
-        setOrgMembers([]);
-        setOrgRequests([]);
-        setMyPendingOrgIds(new Set());
-        setOrgTransactions([]);
-        setClaimedMissions([]);
-        setClaimedDailyToday(false);
-        setClaimedContractsToday(new Set());
-        setUnlockedAchievements(new Set());
-        setNotifications([]);
-        setWorldEvents([]);
+        bootstrappedUidRef.current = null;
+        clearSessionState();
       }
     });
     return () => unsub();
-  }, []);
+  }, [clearSessionState]);
 
   useEffect(() => {
     if (!authUser) return;
     setProfileLoading(true);
     setOrgMemberLoaded(false);
-    ensureBootstrapWorldData();
 
     const uid = authUser.uid;
+    if (bootstrappedUidRef.current !== uid) {
+      bootstrappedUidRef.current = uid;
+      ensureBootstrapWorldData();
+    }
     const unsubs: (() => void)[] = [];
 
     const onSnapErr = (path: string) => (error: unknown) => {
@@ -233,7 +265,9 @@ export function useGameData(): GameDataState {
           const sent = fromSnap.docs.map((d) => d.data() as TransactionRecord);
           setTransactions((prev) => {
             const receivedOnly = prev.filter((t) => t.toUid === uid && t.fromUid !== uid);
-            return [...sent, ...receivedOnly].slice(0, 40);
+            const map = new Map<string, TransactionRecord>();
+            [...sent, ...receivedOnly].forEach((t) => map.set(t.id, t));
+            return sortByCreatedAtDesc(Array.from(map.values())).slice(0, 40);
           });
         },
         onSnapErr('transactions/fromUid')
@@ -249,7 +283,7 @@ export function useGameData(): GameDataState {
             const sentOnly = prev.filter((t) => t.fromUid === uid);
             const map = new Map<string, TransactionRecord>();
             [...sentOnly, ...received].forEach((t) => map.set(t.id, t));
-            return Array.from(map.values()).slice(0, 40);
+            return sortByCreatedAtDesc(Array.from(map.values())).slice(0, 40);
           });
         },
         onSnapErr('transactions/toUid')
@@ -270,7 +304,7 @@ export function useGameData(): GameDataState {
       onSnapshot(
         query(collection(db, 'market_orders'), where('buyerUid', '==', uid), limit(25)),
         (snap) => {
-          setMarketOrders(snap.docs.map((d) => d.data() as MarketOrder));
+          setMarketOrders(sortByCreatedAtDesc(snap.docs.map((d) => d.data() as MarketOrder)));
         },
         onSnapErr('market_orders')
       )
@@ -290,7 +324,7 @@ export function useGameData(): GameDataState {
       onSnapshot(
         query(collection(db, 'company_logs'), where('ownerUid', '==', uid), limit(25)),
         (snap) => {
-          setCompanyLogs(snap.docs.map((d) => d.data() as CompanyLog));
+          setCompanyLogs(sortByCreatedAtDesc(snap.docs.map((d) => d.data() as CompanyLog)));
         },
         onSnapErr('company_logs')
       )
@@ -402,7 +436,7 @@ export function useGameData(): GameDataState {
       onSnapshot(
         query(collection(db, 'notifications'), where('uid', '==', uid), limit(30)),
         (snap) => {
-          setNotifications(snap.docs.map((d) => d.data() as GameNotification));
+          setNotifications(sortByCreatedAtDesc(snap.docs.map((d) => d.data() as GameNotification)));
         },
         onSnapErr('notifications')
       )
@@ -479,9 +513,11 @@ export function useGameData(): GameDataState {
         })();
 
     const u3 = onSnapshot(
-      query(collection(db, 'organization_transactions'), where('orgId', '==', orgId), limit(30)),
+      query(collection(db, 'organization_transactions'), where('orgId', '==', orgId), limit(40)),
       (snap) => {
-        setOrgTransactions(snap.docs.map((d) => d.data() as OrganizationTransaction));
+        setOrgTransactions(
+          sortByCreatedAtDesc(snap.docs.map((d) => d.data() as OrganizationTransaction))
+        );
       },
       onOrgErr(`organization_transactions/${orgId}`)
     );
@@ -544,6 +580,7 @@ export function useGameData(): GameDataState {
     unlockedAchievements,
     notifications,
     worldEvents,
+    isOnline,
     language,
     setLanguageLocal,
     loginWithGoogle,

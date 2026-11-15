@@ -2,14 +2,17 @@ import { ArrowDownLeft, ArrowUpRight, Award, CalendarCheck, Flame, TrendingUp } 
 import { useState } from 'react';
 import { EconomicChart } from '../../components/ui/EconomicChart';
 import { useToast } from '../../components/ui/ToastProvider';
-import { AVATARS, CATALOG_ITEMS, MISSIONS } from '../../data/catalog';
+import { AVATARS, CATALOG_ITEMS, ITEM_MAP, MISSIONS } from '../../data/catalog';
 import { useTranslations, formatTxType } from '../../i18n/translations';
 import {
   calculateDailyStipend,
   calculateDynamicItemPrice,
   calculateLevelProgress,
   calculateMarketTaxRate,
+  getActiveWorldEvents,
   getMissionProgress,
+  getReputationTier,
+  timestampToMs,
 } from '../../lib/economy';
 import { claimDailyStipend, claimMissionReward } from '../../services/gameService';
 import type {
@@ -53,7 +56,9 @@ export function HomeDashboardView({
   const xpProg = calculateLevelProgress(profile.xp);
   const avatar = AVATARS.find((a) => a.id === profile.avatarId) || AVATARS[0];
   const dailyAmount = calculateDailyStipend(profile.level, profile.skills.finance || 0);
-  const taxRate = calculateMarketTaxRate(profile.skills.trade || 0, worldEvents);
+  const activeEvents = getActiveWorldEvents(worldEvents);
+  const taxRate = calculateMarketTaxRate(profile.skills.trade || 0, activeEvents);
+  const repTier = getReputationTier(profile.reputation);
 
   const claimedSet = new Set(claimedMissions.map((m) => m.missionId));
 
@@ -64,7 +69,7 @@ export function HomeDashboardView({
       .reduce((acc, l) => acc + l.remainingQty, 0);
     return {
       label: language === 'ar' ? item.nameAr.split(' ')[0] : item.nameEn.split(' ')[0],
-      value: calculateDynamicItemPrice(item.id, supply, worldEvents),
+      value: calculateDynamicItemPrice(item.id, supply, activeEvents),
     };
   });
 
@@ -178,6 +183,9 @@ export function HomeDashboardView({
               <p className="text-base font-semibold font-mono-num text-[#F4F5F7] mt-0.5">
                 {profile.reputation.toLocaleString()}
               </p>
+              <p className="text-[11px] text-[#E04455] truncate mt-0.5">
+                {language === 'ar' ? repTier.titleAr : repTier.titleEn}
+              </p>
             </div>
             <div>
               <p className="text-xs text-[#9299A6]">{t.influence}</p>
@@ -252,32 +260,57 @@ export function HomeDashboardView({
             <h2 className="text-base font-semibold text-[#F4F5F7]">{t.worldEvents}</h2>
             <Flame className="w-4 h-4 text-[#E04455]" />
           </div>
-          {worldEvents.length === 0 ? (
+          {activeEvents.length === 0 ? (
             <p className="text-sm text-[#9299A6] py-6 text-center">
               {language === 'ar' ? 'السوق في حالة استقرار قياسي.' : 'Markets are operating under baseline conditions.'}
             </p>
           ) : (
             <div className="space-y-3">
-              {worldEvents.map((evt) => (
-                <div
-                  key={evt.id}
-                  className="p-3.5 rounded-xl bg-[#0B0D12] border border-white/6 space-y-1"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium text-[#F4F5F7]">
-                      {language === 'ar' ? evt.titleAr : evt.titleEn}
+              {activeEvents.map((evt) => {
+                const endsMs = timestampToMs(evt.endsAt, 0);
+                const hoursLeft =
+                  endsMs > Date.now() ? Math.max(1, Math.ceil((endsMs - Date.now()) / 3_600_000)) : null;
+                const targetItem = evt.targetItemId ? ITEM_MAP[evt.targetItemId] : null;
+                const revMult = evt.revenueMultiplier ?? 1;
+
+                return (
+                  <div
+                    key={evt.id}
+                    className="p-3.5 rounded-xl bg-[#0B0D12] border border-white/6 space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-[#F4F5F7]">
+                        {language === 'ar' ? evt.titleAr : evt.titleEn}
+                      </p>
+                      <span className="text-xs font-mono-num text-[#E04455] shrink-0">
+                        {evt.priceMultiplier !== 1
+                          ? `×${evt.priceMultiplier.toFixed(2)}`
+                          : `${evt.taxDelta > 0 ? '+' : ''}${(evt.taxDelta * 100).toFixed(0)}% ${t.marketTax}`}
+                      </span>
+                    </div>
+                    <p className="text-xs text-[#9299A6] leading-relaxed">
+                      {language === 'ar' ? evt.descriptionAr : evt.descriptionEn}
                     </p>
-                    <span className="text-xs font-mono-num text-[#E04455] shrink-0">
-                      {evt.priceMultiplier !== 1
-                        ? `×${evt.priceMultiplier.toFixed(2)}`
-                        : `${(evt.taxDelta * 100).toFixed(0)}% ${t.marketTax}`}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-3 text-[11px] text-[#9299A6] pt-0.5">
+                      {targetItem && (
+                        <span>
+                          {language === 'ar' ? targetItem.nameAr : targetItem.nameEn}
+                        </span>
+                      )}
+                      {Math.abs(revMult - 1) > 0.001 && (
+                        <span className={revMult >= 1 ? 'text-emerald-400 font-mono-num' : 'text-amber-300 font-mono-num'}>
+                          {language === 'ar' ? 'عائد القطاعات' : 'Sector'}: ×{revMult.toFixed(2)}
+                        </span>
+                      )}
+                      {hoursLeft !== null && (
+                        <span className="font-mono-num">
+                          {language === 'ar' ? `${hoursLeft} س متبقية` : `${hoursLeft}h left`}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <p className="text-xs text-[#9299A6] leading-relaxed">
-                    {language === 'ar' ? evt.descriptionAr : evt.descriptionEn}
-                  </p>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -313,38 +346,49 @@ export function HomeDashboardView({
               .map((m) => {
                 const isClaimed = claimedSet.has(m.id);
                 const val = getMissionProgress(m.metric, profile);
+                const pct = Math.min(100, Math.round((Math.min(val, m.targetCount) / m.targetCount) * 100));
                 const ready = val >= m.targetCount && !isClaimed;
 
                 return (
                   <div
                     key={m.id}
-                    className="p-3.5 rounded-xl bg-[#0B0D12] border border-white/6 flex items-center justify-between gap-3"
+                    className="p-3.5 rounded-xl bg-[#0B0D12] border border-white/6 space-y-2"
                   >
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-[#F4F5F7] truncate">
-                        {language === 'ar' ? m.titleAr : m.titleEn}
-                      </p>
-                      <p className="text-xs text-[#9299A6] mt-0.5">
-                        <span className="font-mono-num">
-                          {Math.min(val, m.targetCount)}/{m.targetCount}
-                        </span>{' '}
-                        · +{m.rewardCredits} {t.currency} · +{m.rewardXp} XP
-                      </p>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-[#F4F5F7] truncate">
+                          {language === 'ar' ? m.titleAr : m.titleEn}
+                        </p>
+                        <p className="text-xs text-[#9299A6] mt-0.5">
+                          <span className="font-mono-num">
+                            {Math.min(val, m.targetCount)}/{m.targetCount}
+                          </span>{' '}
+                          · +{m.rewardCredits} {t.currency} · +{m.rewardXp} XP
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={!ready || busyId === m.id}
+                        onClick={() => handleClaimMission(m.id)}
+                        className={`min-h-[40px] px-3.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-colors ${
+                          isClaimed
+                            ? 'bg-[#1B2230] text-[#9299A6]'
+                            : ready
+                            ? 'bg-[#B91C32] hover:bg-[#E04455] text-white'
+                            : 'bg-[#1B2230] text-[#9299A6]/70'
+                        }`}
+                      >
+                        {isClaimed ? t.claimed : ready ? t.claimReward : t.inProgress}
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      disabled={!ready || busyId === m.id}
-                      onClick={() => handleClaimMission(m.id)}
-                      className={`min-h-[40px] px-3.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-colors ${
-                        isClaimed
-                          ? 'bg-[#1B2230] text-[#9299A6]'
-                          : ready
-                          ? 'bg-[#B91C32] hover:bg-[#E04455] text-white'
-                          : 'bg-[#1B2230] text-[#9299A6]/70'
-                      }`}
-                    >
-                      {isClaimed ? t.claimed : ready ? t.claimReward : t.inProgress}
-                    </button>
+                    <div className="h-1.5 rounded-full bg-[#141821] overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          isClaimed || ready ? 'bg-emerald-500' : 'bg-[#B91C32]'
+                        }`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
                   </div>
                 );
               })}

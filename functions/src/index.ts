@@ -1,6 +1,7 @@
 import { getApps, initializeApp } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
+import { FieldValue, getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import {
   ALLOWED_DIAGNOSTIC_COLLECTIONS,
   authorizeDiagnosticsActor,
@@ -12,6 +13,10 @@ import {
   validateDiagnosticsRequest,
   type DiagnosticStatus,
 } from './diagnosticsCore.js';
+import {
+  buildWorldEventRotationPlan,
+  type ExistingWorldEventRecord,
+} from './worldEventsEngine.js';
 
 const NEXORA_PROJECT_ID = 'gen-lang-client-0074900177';
 const NEXORA_DATABASE_ID = 'ai-studio-74843d9e-8228-49b7-a616-317cadd90bff';
@@ -442,3 +447,59 @@ export const nexoraDiagnostics = onCall(
     }
   }
 );
+
+/**
+ * Scheduled Cloud Function Gen 2 to expire ended world_events and rotate fresh
+ * non-stacking economic events on the NEXORA named Firestore database.
+ */
+export const rotateWorldEvents = onSchedule(
+  {
+    schedule: 'every 6 hours',
+    region: 'us-central1',
+    maxInstances: 1,
+    timeoutSeconds: 30,
+    memory: '256MiB',
+  },
+  async () => {
+    const nowMs = Date.now();
+    const snap = await db.collection('world_events').get();
+    const existing: ExistingWorldEventRecord[] = snap.docs.map((docSnap) => {
+      const data = docSnap.data();
+      const endsAt = data.endsAt as { toMillis?: () => number } | undefined;
+      return {
+        id: docSnap.id,
+        active: data.active === true,
+        stackGroup: typeof data.stackGroup === 'string' ? data.stackGroup : undefined,
+        endsAtMs: typeof endsAt?.toMillis === 'function' ? endsAt.toMillis() : null,
+      };
+    });
+
+    const plan = buildWorldEventRotationPlan(existing, nowMs, 3);
+    if (plan.toDeactivateIds.length === 0 && plan.toActivate.length === 0) {
+      return;
+    }
+
+    const batch = db.batch();
+    for (const id of plan.toDeactivateIds) {
+      batch.set(
+        db.collection('world_events').doc(id),
+        { active: false },
+        { merge: true }
+      );
+    }
+
+    for (const entry of plan.toActivate) {
+      const { durationHours: _dh, ...templateFields } = entry.template;
+      batch.set(db.collection('world_events').doc(entry.template.id), {
+        ...templateFields,
+        startsAt: Timestamp.fromMillis(entry.startsAtMs),
+        endsAt: Timestamp.fromMillis(entry.endsAtMs),
+        active: true,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    await batch.commit();
+  }
+);
+

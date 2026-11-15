@@ -3,7 +3,12 @@ import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { useToast } from '../../components/ui/ToastProvider';
 import { ACHIEVEMENTS, AVATARS, MISSIONS, SKILL_DEFINITIONS } from '../../data/catalog';
 import { formatMissionCategory, useTranslations } from '../../i18n/translations';
-import { getMissionProgress } from '../../lib/economy';
+import {
+  getAchievementProgress,
+  getMissionProgress,
+  getNextReputationTier,
+  getReputationTier,
+} from '../../lib/economy';
 import {
   verifyDiagnosticsOwnerAccess,
   type ClientSnapshotContext,
@@ -268,6 +273,70 @@ export function ProfileHubView({
           </div>
 
           <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-3">
+            {(() => {
+              const repTier = getReputationTier(profile.reputation);
+              const nextTier = getNextReputationTier(profile.reputation);
+              const baseMin = repTier.minReputation;
+              const nextMin = nextTier ? nextTier.minReputation : Math.max(profile.reputation, 700);
+              const pct = nextTier
+                ? Math.min(
+                    100,
+                    Math.max(0, Math.round(((profile.reputation - baseMin) / (nextMin - baseMin)) * 100))
+                  )
+                : 100;
+
+              return (
+                <>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h2 className="text-base font-semibold text-[#F4F5F7]">
+                        {t.reputationTier}:{' '}
+                        <span className="text-[#E04455]">
+                          {language === 'ar' ? repTier.titleAr : repTier.titleEn}
+                        </span>
+                      </h2>
+                      <p className="text-xs text-[#9299A6] mt-0.5">{t.repInfluenceSources}</p>
+                    </div>
+                    <span className="text-xs font-mono-num text-[#F4F5F7]">
+                      {nextTier
+                        ? `${t.nextTier}: ${language === 'ar' ? nextTier.titleAr : nextTier.titleEn} (${profile.reputation}/${nextTier.minReputation})`
+                        : t.maxTierReached}
+                    </span>
+                  </div>
+
+                  <div className="h-2 rounded-full bg-[#0B0D12] overflow-hidden border border-white/6">
+                    <div
+                      className="h-full bg-[#B91C32] rounded-full transition-all duration-300"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-4 text-xs text-[#9299A6]">
+                    <span>
+                      {t.contractBonus}:{' '}
+                      <span className="font-mono-num text-emerald-400">
+                        +{(repTier.contractBonusRate * 100).toFixed(0)}%
+                      </span>
+                    </span>
+                    <span>
+                      {t.companyYieldBonus}:{' '}
+                      <span className="font-mono-num text-emerald-400">
+                        +{(repTier.companyYieldBonusRate * 100).toFixed(0)}%
+                      </span>
+                    </span>
+                    <span>
+                      {t.influence}:{' '}
+                      <span className="font-mono-num text-[#F4F5F7]">
+                        {profile.influence.toLocaleString()}
+                      </span>
+                    </span>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+
+          <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="text-base font-semibold text-[#F4F5F7]">{t.achievementsTitle}</h2>
               <Trophy className="w-4 h-4 text-[#E04455]" />
@@ -275,21 +344,38 @@ export function ProfileHubView({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {ACHIEVEMENTS.map((ach) => {
                 const unlocked = unlockedAchievements.has(ach.id);
+                const val = getAchievementProgress(ach.metric, profile);
+                const pct = Math.min(100, Math.round((Math.min(val, ach.threshold) / ach.threshold) * 100));
                 return (
                   <div
                     key={ach.id}
-                    className={`p-3.5 rounded-xl border ${
+                    className={`p-3.5 rounded-xl border space-y-2 ${
                       unlocked
                         ? 'bg-[#1B2230] border-[#B91C32]/40'
-                        : 'bg-[#0B0D12] border-white/6 opacity-65'
+                        : 'bg-[#0B0D12] border-white/6'
                     }`}
                   >
-                    <p className="text-sm font-semibold text-[#F4F5F7]">
-                      {language === 'ar' ? ach.titleAr : ach.titleEn}
-                    </p>
-                    <p className="text-xs text-[#9299A6] mt-0.5">
-                      {language === 'ar' ? ach.descriptionAr : ach.descriptionEn}
-                    </p>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold text-[#F4F5F7]">
+                          {language === 'ar' ? ach.titleAr : ach.titleEn}
+                        </p>
+                        <p className="text-xs text-[#9299A6] mt-0.5">
+                          {language === 'ar' ? ach.descriptionAr : ach.descriptionEn}
+                        </p>
+                      </div>
+                      <span className="text-xs font-mono-num text-[#9299A6] shrink-0">
+                        {Math.min(val, ach.threshold)}/{ach.threshold}
+                      </span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-[#141821] overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          unlocked ? 'bg-emerald-500' : 'bg-[#B91C32]'
+                        }`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
                   </div>
                 );
               })}
@@ -360,6 +446,7 @@ export function ProfileHubView({
           {MISSIONS.map((m) => {
             const isClaimed = claimedSet.has(m.id);
             const val = getMissionProgress(m.metric, profile);
+            const pct = Math.min(100, Math.round((Math.min(val, m.targetCount) / m.targetCount) * 100));
             const ready = val >= m.targetCount && !isClaimed;
 
             return (
@@ -367,7 +454,7 @@ export function ProfileHubView({
                 key={m.id}
                 className="bg-[#141821] border border-white/8 rounded-2xl p-5 flex flex-col justify-between gap-4"
               >
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-base font-bold text-[#F4F5F7]">
                       {language === 'ar' ? m.titleAr : m.titleEn}
@@ -378,14 +465,22 @@ export function ProfileHubView({
                     {formatMissionCategory(m.category, language)} ·{' '}
                     <span className="font-mono-num">{Math.min(val, m.targetCount)}/{m.targetCount}</span>
                   </p>
-                  <p className="text-xs text-[#9299A6] pt-1 leading-relaxed">
+                  <p className="text-xs text-[#9299A6] pt-0.5 leading-relaxed">
                     {language === 'ar' ? m.descriptionAr : m.descriptionEn}
                   </p>
+                  <div className="h-1.5 rounded-full bg-[#0B0D12] overflow-hidden pt-0">
+                    <div
+                      className={`h-full rounded-full transition-all duration-300 ${
+                        isClaimed || ready ? 'bg-emerald-500' : 'bg-[#B91C32]'
+                      }`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between gap-3 pt-2 border-t border-white/6">
                   <span className="text-xs font-mono-num text-[#F4F5F7]">
-                    +{m.rewardCredits} {t.currency} · +{m.rewardXp} XP
+                    +{m.rewardCredits} {t.currency} · +{m.rewardXp} XP · +{m.rewardReputation} {t.reputation}
                   </span>
                   <button
                     type="button"

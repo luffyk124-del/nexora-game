@@ -1,17 +1,25 @@
-import { Building2, Check, Plus, Shield, Users, Vault, X } from 'lucide-react';
+import { ArrowUpCircle, Building2, Check, Plus, Shield, UserMinus, Users, Vault, X } from 'lucide-react';
 import { useState } from 'react';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useToast } from '../../components/ui/ToastProvider';
-import { ORG_CREATION_COST } from '../../data/catalog';
+import { ORG_CREATION_COST, ROLE_DEFAULT_PERMISSIONS } from '../../data/catalog';
 import { useTranslations, formatOrgRole } from '../../i18n/translations';
-import { hasOrgPermission, sanitizePositiveInt } from '../../lib/economy';
+import {
+  calculateOrgUpgradeCost,
+  canManageOrgMember,
+  hasOrgPermission,
+  ORG_MAX_LEVEL,
+  sanitizePositiveInt,
+} from '../../lib/economy';
 import {
   createOrganization,
   depositToOrgTreasury,
   handleOrgJoinRequest,
+  kickOrgMember,
   leaveOrganization,
   requestJoinOrganization,
   updateOrgMemberRole,
+  upgradeOrganization,
   withdrawFromOrgTreasury,
 } from '../../services/gameService';
 import type {
@@ -57,6 +65,7 @@ export function OrganizationHubView({
   const [treasuryAmt, setTreasuryAmt] = useState(100);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
+  const [kickTarget, setKickTarget] = useState<{ uid: string; username: string } | null>(null);
 
   const currentOrg = myOrgMember
     ? organizations.find((o) => o.id === myOrgMember.orgId) || null
@@ -65,6 +74,14 @@ export function OrganizationHubView({
   const canManageMembers = hasOrgPermission(myOrgMember, 'manage_members');
   const canManageRoles = hasOrgPermission(myOrgMember, 'manage_roles');
   const canManageTreasury = hasOrgPermission(myOrgMember, 'manage_treasury');
+  const canManageOrg = hasOrgPermission(myOrgMember, 'manage_org');
+
+  const contributionsByUid = new Map<string, number>();
+  for (const otx of orgTransactions) {
+    if (otx.type === 'deposit') {
+      contributionsByUid.set(otx.uid, (contributionsByUid.get(otx.uid) || 0) + otx.amount);
+    }
+  }
 
   async function handleCreateOrg(e: React.FormEvent) {
     e.preventDefault();
@@ -238,6 +255,65 @@ export function OrganizationHubView({
     }
   }
 
+  async function handleUpgradeOrg() {
+    if (!currentOrg) return;
+    setBusyKey('upgrade_org');
+    try {
+      const nextLv = await upgradeOrganization(profile.uid, profile.username, currentOrg.id);
+      showToast(
+        language === 'ar'
+          ? `تمت ترقية المنظمة إلى المستوى ${nextLv} (+25 سمعة).`
+          : `Organization upgraded to Lv.${nextLv} (+25 Rep).`,
+        'success'
+      );
+    } catch (err) {
+      const code = err instanceof Error ? err.message : '';
+      showToast(
+        code === 'INSUFFICIENT_TREASURY'
+          ? language === 'ar'
+            ? 'رصيد خزينة المنظمة غير كافٍ للترقية.'
+            : 'Insufficient organization treasury funds.'
+          : code === 'MAX_LEVEL'
+          ? t.maxLevelReached
+          : language === 'ar'
+          ? 'تعذر ترقية المنظمة.'
+          : 'Could not upgrade organization.',
+        'error'
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function handleConfirmKick() {
+    if (!currentOrg || !kickTarget) return;
+    setBusyKey(`kick_${kickTarget.uid}`);
+    try {
+      await kickOrgMember(profile.uid, currentOrg.id, kickTarget.uid);
+      showToast(
+        language === 'ar'
+          ? `تمت إزالة ${kickTarget.username} من المنظمة.`
+          : `Removed ${kickTarget.username} from organization.`,
+        'info'
+      );
+      setKickTarget(null);
+    } catch (err) {
+      const code = err instanceof Error ? err.message : '';
+      showToast(
+        code === 'RANK_TOO_HIGH' || code === 'UNAUTHORIZED'
+          ? language === 'ar'
+            ? 'رتبتك لا تسمح بإزالة هذا العضو.'
+            : 'Your rank cannot remove this member.'
+          : language === 'ar'
+          ? 'تعذر إزالة العضو.'
+          : 'Failed to remove member.',
+        'error'
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
   if (!myOrgMember || !currentOrg) {
     return (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -356,6 +432,9 @@ export function OrganizationHubView({
     );
   }
 
+  const orgUpgradeCost = calculateOrgUpgradeCost(currentOrg.level);
+  const isOrgMaxLevel = currentOrg.level >= ORG_MAX_LEVEL;
+
   return (
     <div className="space-y-5">
       {/* Organization Header */}
@@ -376,13 +455,32 @@ export function OrganizationHubView({
           </p>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="text-end">
             <p className="text-xs text-[#9299A6]">{t.orgTreasury}</p>
             <p className="text-lg font-bold font-mono-num text-emerald-400">
               {currentOrg.treasuryBalance.toLocaleString()} {t.currency}
             </p>
           </div>
+          {canManageOrg && (
+            <button
+              type="button"
+              disabled={
+                isOrgMaxLevel ||
+                busyKey === 'upgrade_org' ||
+                currentOrg.treasuryBalance < orgUpgradeCost
+              }
+              onClick={handleUpgradeOrg}
+              className="min-h-[40px] px-3.5 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap disabled:bg-[#1B2230] disabled:text-[#9299A6]"
+            >
+              <ArrowUpCircle className="w-4 h-4" />
+              <span>
+                {isOrgMaxLevel
+                  ? t.maxLevelReached
+                  : `${t.upgradeOrg} (${orgUpgradeCost.toLocaleString()})`}
+              </span>
+            </button>
+          )}
           {myOrgMember.role !== 'leader' && (
             <button
               type="button"
@@ -396,68 +494,125 @@ export function OrganizationHubView({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Shared Treasury Operations */}
-        <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-[#F4F5F7]">{t.orgTreasury}</h2>
-            <Vault className="w-4 h-4 text-[#E04455]" />
-          </div>
+        {/* Shared Treasury Operations & RBAC Matrix */}
+        <div className="space-y-5">
+          <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-[#F4F5F7]">{t.orgTreasury}</h2>
+              <Vault className="w-4 h-4 text-[#E04455]" />
+            </div>
 
-          <div className="flex items-center gap-2.5">
-            <input
-              type="number"
-              min={1}
-              value={treasuryAmt || ''}
-              onChange={(e) => {
-                const v = e.target.value;
-                setTreasuryAmt(v === '' ? 0 : sanitizePositiveInt(v, 1));
-              }}
-              onBlur={() => setTreasuryAmt((v) => sanitizePositiveInt(v, 1))}
-              className="flex-1 min-h-[44px] px-3.5 rounded-xl bg-[#0B0D12] border border-white/10 text-sm font-mono-num text-[#F4F5F7]"
-            />
-            <button
-              type="button"
-              disabled={busyKey === 'dep' || treasuryAmt < 1 || (wallet?.balance ?? 0) < treasuryAmt}
-              onClick={handleDeposit}
-              className="min-h-[44px] px-4 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white text-xs font-semibold whitespace-nowrap disabled:bg-[#1B2230] disabled:text-[#9299A6]"
-            >
-              {t.deposit}
-            </button>
-            {canManageTreasury && (
+            <div className="flex items-center gap-2.5">
+              <input
+                type="number"
+                min={1}
+                value={treasuryAmt || ''}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setTreasuryAmt(v === '' ? 0 : sanitizePositiveInt(v, 1));
+                }}
+                onBlur={() => setTreasuryAmt((v) => sanitizePositiveInt(v, 1))}
+                className="flex-1 min-h-[44px] px-3.5 rounded-xl bg-[#0B0D12] border border-white/10 text-sm font-mono-num text-[#F4F5F7]"
+              />
               <button
                 type="button"
-                disabled={busyKey === 'wdr' || treasuryAmt < 1 || currentOrg.treasuryBalance < treasuryAmt}
-                onClick={handleWithdraw}
-                className="min-h-[44px] px-4 rounded-xl bg-[#1B2230] hover:bg-[#232C3E] text-[#F4F5F7] text-xs font-semibold whitespace-nowrap disabled:opacity-50"
+                disabled={busyKey === 'dep' || treasuryAmt < 1 || (wallet?.balance ?? 0) < treasuryAmt}
+                onClick={handleDeposit}
+                className="min-h-[44px] px-4 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white text-xs font-semibold whitespace-nowrap disabled:bg-[#1B2230] disabled:text-[#9299A6]"
               >
-                {t.withdraw}
+                {t.deposit}
               </button>
-            )}
+              {canManageTreasury && (
+                <button
+                  type="button"
+                  disabled={busyKey === 'wdr' || treasuryAmt < 1 || currentOrg.treasuryBalance < treasuryAmt}
+                  onClick={handleWithdraw}
+                  className="min-h-[44px] px-4 rounded-xl bg-[#1B2230] hover:bg-[#232C3E] text-[#F4F5F7] text-xs font-semibold whitespace-nowrap disabled:opacity-50"
+                >
+                  {t.withdraw}
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-2 pt-2 border-t border-white/8">
+              {orgTransactions.length === 0 ? (
+                <p className="text-xs text-[#9299A6] py-4 text-center">{t.noActivity}</p>
+              ) : (
+                orgTransactions.slice(0, 8).map((otx) => {
+                  const isInflow = otx.type === 'deposit';
+                  const typeLabel =
+                    otx.type === 'upgrade'
+                      ? t.upgradeOrg
+                      : otx.type === 'deposit'
+                      ? t.deposit
+                      : t.withdraw;
+                  return (
+                    <div
+                      key={otx.id}
+                      className="flex items-center justify-between text-xs py-2 border-b border-white/6 last:border-0"
+                    >
+                      <span className="text-[#9299A6]">
+                        {otx.username} · {typeLabel}
+                      </span>
+                      <span
+                        className={`font-mono-num font-semibold ${
+                          isInflow ? 'text-emerald-400' : 'text-[#E04455]'
+                        }`}
+                      >
+                        {isInflow ? '+' : '-'}
+                        {otx.amount.toLocaleString()}
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
 
-          <div className="space-y-2 pt-2 border-t border-white/8">
-            {orgTransactions.length === 0 ? (
-              <p className="text-xs text-[#9299A6] py-4 text-center">{t.noActivity}</p>
-            ) : (
-              orgTransactions.slice(0, 6).map((otx) => (
-                <div
-                  key={otx.id}
-                  className="flex items-center justify-between text-xs py-2 border-b border-white/6 last:border-0"
-                >
-                  <span className="text-[#9299A6]">
-                    {otx.username} · {otx.type === 'deposit' ? t.deposit : t.withdraw}
-                  </span>
-                  <span
-                    className={`font-mono-num font-semibold ${
-                      otx.type === 'deposit' ? 'text-emerald-400' : 'text-[#E04455]'
+          {/* Role Permissions Matrix */}
+          <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-3">
+            <h2 className="text-sm font-semibold text-[#F4F5F7]">{t.orgPerks}</h2>
+            <div className="grid grid-cols-2 gap-2.5 text-xs">
+              {(['leader', 'deputy', 'officer', 'member'] as const).map((role) => {
+                const perms = ROLE_DEFAULT_PERMISSIONS[role];
+                const isMine = myOrgMember.role === role;
+                return (
+                  <div
+                    key={role}
+                    className={`p-3 rounded-xl border ${
+                      isMine ? 'bg-[#1B2230] border-[#E04455]/50' : 'bg-[#0B0D12] border-white/6'
                     }`}
                   >
-                    {otx.type === 'deposit' ? '+' : '-'}
-                    {otx.amount.toLocaleString()}
-                  </span>
-                </div>
-              ))
-            )}
+                    <p className="font-semibold text-[#F4F5F7]">{formatOrgRole(role, language)}</p>
+                    <p className="text-[11px] text-[#9299A6] mt-1 leading-relaxed">
+                      {perms.length === 0
+                        ? language === 'ar'
+                          ? 'مساهمة الخزينة والاطلاع'
+                          : 'Treasury deposits & view'
+                        : perms
+                            .map((p) =>
+                              p === 'manage_members'
+                                ? language === 'ar'
+                                  ? 'الأعضاء'
+                                  : 'Members'
+                                : p === 'manage_roles'
+                                ? language === 'ar'
+                                  ? 'الرتب'
+                                  : 'Roles'
+                                : p === 'manage_treasury'
+                                ? language === 'ar'
+                                  ? 'السحب'
+                                  : 'Treasury'
+                                : language === 'ar'
+                                ? 'الترقية'
+                                : 'Upgrade'
+                            )
+                            .join(' · ')}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
 
@@ -505,31 +660,67 @@ export function OrganizationHubView({
               <Users className="w-4 h-4 text-[#9299A6]" />
             </div>
             <div className="space-y-2">
-              {orgMembers.map((m) => (
-                <div
-                  key={m.uid}
-                  className="p-3 rounded-xl bg-[#0B0D12] border border-white/6 flex items-center justify-between gap-3"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-[#F4F5F7]">{m.username}</p>
-                    <p className="text-xs text-[#9299A6] mt-0.5">{formatOrgRole(m.role, language)}</p>
+              {orgMembers.map((m) => {
+                const contributed = contributionsByUid.get(m.uid) || 0;
+                const canChangeRole =
+                  canManageRoles &&
+                  m.uid !== profile.uid &&
+                  m.role !== 'leader' &&
+                  (myOrgMember.role === 'leader' || m.role !== 'deputy');
+                const canKick =
+                  canManageMembers &&
+                  m.uid !== profile.uid &&
+                  canManageOrgMember(myOrgMember.role, m.role);
+
+                return (
+                  <div
+                    key={m.uid}
+                    className="p-3 rounded-xl bg-[#0B0D12] border border-white/6 flex items-center justify-between gap-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-[#F4F5F7] truncate">{m.username}</p>
+                      <p className="text-xs text-[#9299A6] mt-0.5">
+                        {formatOrgRole(m.role, language)}
+                        {contributed > 0 && (
+                          <span className="ms-2 font-mono-num text-emerald-400">
+                            · +{contributed.toLocaleString()}
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {canChangeRole && (
+                        <select
+                          value={m.role}
+                          disabled={busyKey === `role_${m.uid}`}
+                          onChange={(e) =>
+                            handleRoleChange(m.uid, e.target.value as Exclude<OrgRole, 'leader'>)
+                          }
+                          className="min-h-[38px] px-2.5 rounded-lg bg-[#141821] border border-white/10 text-xs text-[#F4F5F7]"
+                        >
+                          <option value="member">{formatOrgRole('member', language)}</option>
+                          <option value="officer">{formatOrgRole('officer', language)}</option>
+                          {myOrgMember.role === 'leader' && (
+                            <option value="deputy">{formatOrgRole('deputy', language)}</option>
+                          )}
+                        </select>
+                      )}
+                      {canKick && (
+                        <button
+                          type="button"
+                          disabled={busyKey === `kick_${m.uid}`}
+                          onClick={() => setKickTarget({ uid: m.uid, username: m.username })}
+                          title={t.kick}
+                          aria-label={t.kick}
+                          className="min-h-[38px] px-2.5 rounded-lg bg-[#1B2230] hover:bg-[#B91C32]/30 text-[#E04455] text-xs font-semibold flex items-center gap-1"
+                        >
+                          <UserMinus className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  {canManageRoles && m.role !== 'leader' && m.uid !== profile.uid && (
-                    <select
-                      value={m.role}
-                      disabled={busyKey === `role_${m.uid}`}
-                      onChange={(e) =>
-                        handleRoleChange(m.uid, e.target.value as Exclude<OrgRole, 'leader'>)
-                      }
-                      className="min-h-[38px] px-2.5 rounded-lg bg-[#141821] border border-white/10 text-xs text-[#F4F5F7]"
-                    >
-                      <option value="member">{formatOrgRole('member', language)}</option>
-                      <option value="officer">{formatOrgRole('officer', language)}</option>
-                      <option value="deputy">{formatOrgRole('deputy', language)}</option>
-                    </select>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -548,6 +739,23 @@ export function OrganizationHubView({
         busy={busyKey === 'leave'}
         onConfirm={handleLeave}
         onCancel={() => setConfirmLeaveOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={kickTarget !== null}
+        title={t.kick}
+        description={
+          kickTarget
+            ? language === 'ar'
+              ? `هل تريد إزالة العضو ${kickTarget.username} من المنظمة؟`
+              : `Remove ${kickTarget.username} from the organization?`
+            : ''
+        }
+        confirmLabel={t.confirmBtn}
+        cancelLabel={t.cancelBtn}
+        busy={kickTarget !== null && busyKey === `kick_${kickTarget.uid}`}
+        onConfirm={handleConfirmKick}
+        onCancel={() => setKickTarget(null)}
       />
     </div>
   );

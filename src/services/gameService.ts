@@ -31,19 +31,25 @@ import {
 import {
   calculateAccruedPayout,
   calculateCompanyHourlyNet,
+  calculateContractPayout,
   calculateDailyStipend,
   calculateLevelProgress,
   calculateManufacturingCost,
+  calculateOrgUpgradeCost,
   calculatePropertyHourlyNet,
+  canManageOrgMember,
   COMPANY_HIRE_COST,
   COMPANY_MAX_LEVEL,
   COMPANY_MAX_STAFF,
   getAchievementProgress,
   getMissionProgress,
+  hasOrgPermission,
   isValidUsername,
   LISTING_MAX_PRICE,
   LISTING_MAX_QTY,
+  ORG_MAX_LEVEL,
   PROPERTY_MAX_LEVEL,
+  timestampToMs as parseTimestampMs,
   validateTransfer,
 } from '../lib/economy';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
@@ -62,6 +68,7 @@ import type {
   SkillKey,
   SkillsMap,
   Wallet,
+  WorldEvent,
 } from '../types/game';
 
 function genId(prefix: string): string {
@@ -74,12 +81,7 @@ export function getUtcDateKey(): string {
 }
 
 export function timestampToMs(ts: unknown): number {
-  if (!ts) return Date.now();
-  if (ts instanceof Timestamp) return ts.toMillis();
-  if (typeof ts === 'object' && ts !== null && 'seconds' in ts) {
-    return (ts as { seconds: number }).seconds * 1000;
-  }
-  return Date.now();
+  return parseTimestampMs(ts, Date.now());
 }
 
 function applyXpAndLevel(
@@ -103,12 +105,16 @@ function applyXpAndLevel(
 
 export async function ensureBootstrapWorldData(): Promise<void> {
   try {
+    const nowMs = Date.now();
     for (const evt of SEED_WORLD_EVENTS) {
       const ref = doc(db, 'world_events', evt.id);
       const snap = await getDoc(ref);
       if (!snap.exists()) {
+        const { durationHours, ...eventPayload } = evt;
         await setDoc(ref, {
-          ...evt,
+          ...eventPayload,
+          startsAt: Timestamp.fromMillis(nowMs),
+          endsAt: Timestamp.fromMillis(nowMs + durationHours * 3_600_000),
           createdAt: serverTimestamp(),
         });
       }
@@ -523,7 +529,7 @@ export async function buyMarketListing(
   if (buyQty < 1) throw new Error('INVALID_QUANTITY');
 
   const txId = genId('tx');
-  const orderId = genId('ord');
+  const orderId = `ord_${txId}`;
 
   try {
     await runTransaction(db, async (tx) => {
@@ -847,8 +853,11 @@ export async function fulfillTradeContract(uid: string, contractId: string): Pro
 
       const wallet = walletSnap.data() as Wallet;
       const profile = profileSnap.data() as PlayerProfile;
-      const negBonus = 1 + (profile.skills.negotiation || 0) * 0.07;
-      payout = Math.min(2500, Math.round(contract.payoutCredits * negBonus));
+      payout = calculateContractPayout(
+        contract.payoutCredits,
+        profile.skills.negotiation || 0,
+        profile.reputation
+      );
 
       tx.set(claimRef, {
         uid,
@@ -1148,6 +1157,16 @@ export async function collectCompanyRevenue(uid: string, companyId: string): Pro
   const txId = genId('tx');
   const logId = genId('clog');
 
+  let worldEvents: WorldEvent[] = [];
+  try {
+    const eventsSnap = await getDocs(
+      query(collection(db, 'world_events'), where('active', '==', true))
+    );
+    worldEvents = eventsSnap.docs.map((d) => d.data() as WorldEvent);
+  } catch {
+    worldEvents = [];
+  }
+
   try {
     let payout = 0;
     await runTransaction(db, async (tx) => {
@@ -1164,18 +1183,26 @@ export async function collectCompanyRevenue(uid: string, companyId: string): Pro
       const comp = compSnap.data() as Company;
       if (comp.ownerUid !== uid) throw new Error('UNAUTHORIZED');
 
+      const nowMs = Date.now();
+      const lastCollectedMs = timestampToMs(comp.lastCollectedAt);
+      if (nowMs - lastCollectedMs < 30_000) {
+        throw new Error('NOTHING_TO_COLLECT');
+      }
+
       const wallet = walletSnap.data() as Wallet;
       const profile = profileSnap.data() as PlayerProfile;
-      const { netHourly } = calculateCompanyHourlyNet(comp, {
-        management: profile.skills.management || 0,
-        finance: profile.skills.finance || 0,
-      });
-
-      const rawAccrued = calculateAccruedPayout(
-        netHourly,
-        timestampToMs(comp.lastCollectedAt),
-        Date.now()
+      const { netHourly } = calculateCompanyHourlyNet(
+        comp,
+        {
+          management: profile.skills.management || 0,
+          finance: profile.skills.finance || 0,
+        },
+        worldEvents,
+        nowMs,
+        profile.reputation
       );
+
+      const rawAccrued = calculateAccruedPayout(netHourly, lastCollectedMs, nowMs);
       payout = Math.min(25000, rawAccrued);
       if (payout < 1) throw new Error('NOTHING_TO_COLLECT');
 
@@ -1389,17 +1416,20 @@ export async function collectPropertyRent(uid: string, propertyId: string): Prom
       if (!propSnap.exists()) throw new Error('PROPERTY_NOT_FOUND');
       const prop = propSnap.data() as PropertyAsset;
       if (prop.ownerUid !== uid) throw new Error('UNAUTHORIZED');
+      if (!prop.isRented) throw new Error('PROPERTY_VACANT');
+
+      const nowMs = Date.now();
+      const lastCollectedMs = timestampToMs(prop.lastCollectedAt);
+      if (nowMs - lastCollectedMs < 60_000) {
+        throw new Error('NOTHING_TO_COLLECT');
+      }
 
       const wallet = walletSnap.data() as Wallet;
       const profile = profileSnap.data() as PlayerProfile;
       const { netHourly } = calculatePropertyHourlyNet(prop, profile.skills.negotiation || 0);
       if (netHourly <= 0) throw new Error('PROPERTY_VACANT');
 
-      const rawAccrued = calculateAccruedPayout(
-        netHourly,
-        timestampToMs(prop.lastCollectedAt),
-        Date.now()
-      );
+      const rawAccrued = calculateAccruedPayout(netHourly, lastCollectedMs, nowMs);
       payout = Math.min(15000, rawAccrued);
       if (payout < 1) throw new Error('NOTHING_TO_COLLECT');
 
@@ -1770,6 +1800,105 @@ export async function leaveOrganization(uid: string, orgId: string): Promise<voi
   } catch (error) {
     if (error instanceof Error && error.message === 'LEADER_CANNOT_LEAVE') throw error;
     handleFirestoreError(error, OperationType.DELETE, `organization_members/${orgId}_${uid}`);
+  }
+}
+
+export async function kickOrgMember(
+  actorUid: string,
+  orgId: string,
+  targetUid: string
+): Promise<void> {
+  if (!actorUid || actorUid === targetUid) throw new Error('CANNOT_KICK_SELF');
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const orgRef = doc(db, 'organizations', orgId);
+      const actorRef = doc(db, 'organization_members', `${orgId}_${actorUid}`);
+      const targetRef = doc(db, 'organization_members', `${orgId}_${targetUid}`);
+      const [orgSnap, actorSnap, targetSnap] = await Promise.all([
+        tx.get(orgRef),
+        tx.get(actorRef),
+        tx.get(targetRef),
+      ]);
+
+      if (!orgSnap.exists() || !actorSnap.exists() || !targetSnap.exists()) {
+        throw new Error('NOT_FOUND');
+      }
+
+      const actor = actorSnap.data() as OrganizationMember;
+      const target = targetSnap.data() as OrganizationMember;
+      if (!hasOrgPermission(actor, 'manage_members')) throw new Error('UNAUTHORIZED');
+      if (!canManageOrgMember(actor.role, target.role)) throw new Error('RANK_TOO_HIGH');
+
+      const org = orgSnap.data() as Organization;
+      tx.delete(targetRef);
+      tx.update(orgRef, {
+        memberCount: Math.max(1, org.memberCount - 1),
+        updatedAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      ['CANNOT_KICK_SELF', 'NOT_FOUND', 'UNAUTHORIZED', 'RANK_TOO_HIGH'].includes(error.message)
+    ) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.DELETE, `organization_members/${orgId}_${targetUid}`);
+  }
+}
+
+export async function upgradeOrganization(
+  uid: string,
+  username: string,
+  orgId: string
+): Promise<number> {
+  const orgTxId = genId('otx');
+  try {
+    let nextLevel = 1;
+    await runTransaction(db, async (tx) => {
+      const orgRef = doc(db, 'organizations', orgId);
+      const memberRef = doc(db, 'organization_members', `${orgId}_${uid}`);
+      const [orgSnap, memberSnap] = await Promise.all([tx.get(orgRef), tx.get(memberRef)]);
+      if (!orgSnap.exists() || !memberSnap.exists()) throw new Error('NOT_FOUND');
+
+      const member = memberSnap.data() as OrganizationMember;
+      if (!hasOrgPermission(member, 'manage_org')) throw new Error('UNAUTHORIZED');
+
+      const org = orgSnap.data() as Organization;
+      if (org.level >= ORG_MAX_LEVEL) throw new Error('MAX_LEVEL');
+
+      const cost = calculateOrgUpgradeCost(org.level);
+      if (org.treasuryBalance < cost) throw new Error('INSUFFICIENT_TREASURY');
+
+      nextLevel = org.level + 1;
+      tx.update(orgRef, {
+        level: nextLevel,
+        treasuryBalance: org.treasuryBalance - cost,
+        reputation: org.reputation + 25,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.set(doc(db, 'organization_transactions', orgTxId), {
+        id: orgTxId,
+        orgId,
+        uid,
+        username,
+        type: 'upgrade',
+        amount: cost,
+        note: `Upgraded [${org.tag}] to Lv.${nextLevel}`.slice(0, 160),
+        createdAt: serverTimestamp(),
+      });
+    });
+    return nextLevel;
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      ['NOT_FOUND', 'UNAUTHORIZED', 'MAX_LEVEL', 'INSUFFICIENT_TREASURY'].includes(error.message)
+    ) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.UPDATE, `organizations/${orgId}`);
   }
 }
 
