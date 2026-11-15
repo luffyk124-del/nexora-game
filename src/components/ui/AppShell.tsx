@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import { AmbientSoundtrack } from './AmbientSoundtrack';
+import { GameAudioFeedback } from './GameAudioFeedback';
 import { useState, type ReactNode } from 'react';
 import { BRAND_ASSETS } from '../../data/catalog';
 import { useTranslations } from '../../i18n/translations';
@@ -52,6 +53,7 @@ export function AppShell({
 
   return (
     <div className="min-h-screen bg-[#0B0D12] text-[#F4F5F7] flex flex-col">
+      <GameAudioFeedback />
       {/* Compact Sticky Top Bar (< 8% mobile viewport height) */}
       <header className="sticky top-0 z-30 h-14 pt-safe bg-[#0B0D12]/90 backdrop-blur-md border-b border-white/8">
         <div className="max-w-6xl mx-auto h-full px-4 lg:px-6 flex items-center justify-between gap-4">
