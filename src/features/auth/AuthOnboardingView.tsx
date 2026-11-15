@@ -166,7 +166,106 @@ export function AuthOnboardingView({
               <div>
                 <p className="text-[#9299A6]">{language === 'ar' ? 'رأس المال' : 'Capital'}</p>
                 <p className="font-mono-num text-[#F4F5F7] font-semibold mt-0.5">
-                  {STARTING_CREDITS.toLocaleString()}
+                  {'
+                </p>
+              </div>
+              <div>
+                <p className="text-[#9299A6]">{language === 'ar' ? 'القطاعات' : 'Sectors'}</p>
+                <p className="font-mono-num text-[#F4F5F7] font-semibold mt-0.5">5</p>
+              </div>
+              <div>
+                <p className="text-[#9299A6]">{language === 'ar' ? 'المهارات' : 'Skills'}</p>
+                <p className="font-mono-num text-[#F4F5F7] font-semibold mt-0.5">6</p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleGoogleLogin}
+              disabled={busy}
+              className="w-full min-h-[48px] px-5 py-3 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white font-semibold text-sm transition-colors flex items-center justify-center gap-2.5 disabled:opacity-60"
+            >
+              <ShieldCheck className="w-4 h-4" />
+              <span>{busy ? t.signingIn : t.signInButton}</span>
+            </button>
+          </div>
+        ) : (
+          <form
+            onSubmit={handleCreateCharacter}
+            className="bg-[#141821] border border-white/8 rounded-2xl p-6 sm:p-7 shadow-2xl space-y-5"
+          >
+            <div className="space-y-1.5">
+              <h1 className="text-xl font-bold text-[#F4F5F7]">{t.onboardingTitle}</h1>
+              <p className="text-sm text-[#9299A6]">{t.onboardingSubtitle}</p>
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="nexora-username" className="block text-sm font-medium text-[#F4F5F7]">
+                {t.usernameLabel}
+              </label>
+              <input
+                id="nexora-username"
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder={t.usernamePlaceholder}
+                dir="ltr"
+                maxLength={24}
+                required
+                className="w-full min-h-[44px] px-4 py-2.5 rounded-xl bg-[#0B0D12] border border-white/10 text-[#F4F5F7] placeholder:text-[#9299A6]/60 focus:outline-none focus:border-[#E04455] text-sm"
+              />
+              <p className="text-xs text-[#9299A6]">{t.usernameHint}</p>
+            </div>
+
+            <div className="space-y-2.5">
+              <p className="text-sm font-medium text-[#F4F5F7]">{t.chooseAvatar}</p>
+              <div className="grid grid-cols-3 gap-3">
+                {AVATARS.map((av) => {
+                  const selected = avatarId === av.id;
+                  return (
+                    <button
+                      key={av.id}
+                      type="button"
+                      onClick={() => setAvatarId(av.id)}
+                      className={`p-2 rounded-xl border text-center transition-colors ${
+                        selected
+                          ? 'bg-[#1B2230] border-[#E04455]'
+                          : 'bg-[#0B0D12] border-white/8 hover:border-white/20'
+                      }`}
+                    >
+                      <img
+                        src={av.src}
+                        alt={language === 'ar' ? av.labelAr : av.labelEn}
+                        referrerPolicy="no-referrer"
+                        className="w-full aspect-square rounded-lg object-cover mb-2"
+                      />
+                      <span className="block text-[11px] font-medium text-[#F4F5F7] truncate">
+                        {language === 'ar' ? av.labelAr : av.labelEn}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={busy}
+              className="w-full min-h-[48px] px-5 py-3 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white font-semibold text-sm transition-colors disabled:opacity-60"
+            >
+              {busy ? t.loading : t.createCharacterBtn}
+            </button>
+          </form>
+        )}
+      </div>
+
+      <footer className="max-w-4xl w-full mx-auto text-center text-xs text-[#9299A6]">
+        NEXORA · {t.tagline}
+      </footer>
+    </div>
+  );
+}
+}{STARTING_CREDITS.toLocaleString()}
                 </p>
               </div>
               <div>
