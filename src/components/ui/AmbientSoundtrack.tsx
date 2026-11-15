@@ -1,4 +1,5 @@
 import { Music2, VolumeX } from 'lucide-react';
+import { getGameAudioContext } from '../../lib/gameAudio';
 import { useEffect, useRef, useState } from 'react';
 
 type SoundEngine = {
@@ -17,7 +18,8 @@ const PROGRESSION = [
 ];
 
 function createSoundtrack(): SoundEngine {
-  const context = new AudioContext();
+  const context = getGameAudioContext();
+  if (!context) throw new Error('Web Audio is unavailable');
   const master = context.createGain();
   const filter = context.createBiquadFilter();
   filter.type = 'lowpass';
@@ -70,7 +72,7 @@ export function AmbientSoundtrack({ language }: { language: 'ar' | 'en' }) {
       const active = engine.current;
       if (active) {
         active.master.gain.setTargetAtTime(0.0001, active.context.currentTime, 0.8);
-        await active.context.suspend();
+        // Keep the shared context running so button feedback remains available.
       }
       if (interval.current !== null) window.clearInterval(interval.current);
       interval.current = null;
