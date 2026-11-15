@@ -1,10 +1,14 @@
 let sharedAudioContext: AudioContext | null = null;
 
 export function getGameAudioContext(): AudioContext | null {
-  if (typeof window === 'undefined' || typeof window.AudioContext === 'undefined') return null;
+  if (typeof window === 'undefined') return null;
+
+  const audioWindow = window as Window & { webkitAudioContext?: typeof AudioContext };
+  const AudioContextConstructor = window.AudioContext ?? audioWindow.webkitAudioContext;
+  if (!AudioContextConstructor) return null;
 
   try {
-    sharedAudioContext ??= new window.AudioContext({ latencyHint: 'interactive' });
+    sharedAudioContext ??= new AudioContextConstructor({ latencyHint: 'interactive' });
     return sharedAudioContext;
   } catch {
     return null;
