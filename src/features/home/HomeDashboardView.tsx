@@ -363,7 +363,7 @@ export function HomeDashboardView({
                           <span className="font-mono-num">
                             {Math.min(val, m.targetCount)}/{m.targetCount}
                           </span>{' '}
-                          · +{m.rewardCredits} {t.currency} · +{m.rewardXp} XP
+                          · +${m.rewardCredits} · +{m.rewardXp} XP
                         </p>
                       </div>
                       <button

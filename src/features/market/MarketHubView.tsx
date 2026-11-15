@@ -578,7 +578,7 @@ export function MarketHubView({
                             <p className="text-sm font-mono-num font-bold text-[#F4F5F7]">
                               {'$'}{listing.unitPrice.toLocaleString()}
                             </p>
-                            <p className="text-[11px] text-[#9299A6]">/ {t.currency}</p>
+                            <p className="text-[11px] text-[#9299A6]">{language === 'ar' ? 'لكل وحدة' : 'per unit'}</p>
                           </div>
 
                           {isMine ? (
@@ -684,7 +684,7 @@ export function MarketHubView({
                   <div className="flex items-center justify-between">
                     <span className="text-[#9299A6]">{language === 'ar' ? 'العائد' : 'Payout'}</span>
                     <span className="font-mono-num font-bold text-emerald-400">
-                      +{payout.toLocaleString()} {t.currency}
+                      +{'$'}{payout.toLocaleString()}
                     </span>
                   </div>
                 </div>
@@ -783,7 +783,7 @@ export function MarketHubView({
                           <span className="font-mono-num">{ord.quantity}</span>
                         </p>
                         <p className="text-[11px] text-[#9299A6] mt-0.5 font-mono-num">
-                          {'$'}{ord.unitPrice.toLocaleString()} / {t.currency} · {ord.id}
+                          {'$'}{ord.unitPrice.toLocaleString()} / {language === 'ar' ? 'وحدة' : 'unit'} · {ord.id}
                         </p>
                       </div>
                       <div className="text-end shrink-0">

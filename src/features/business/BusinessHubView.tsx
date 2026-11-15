@@ -522,7 +522,7 @@ export function BusinessHubView({
                       <div>
                         <p className="text-[#9299A6]">{language === 'ar' ? 'الإيراد المتراكم' : 'Accrued'}</p>
                         <p className="font-mono-num font-semibold text-[#F4F5F7] mt-0.5">
-                          {accrued.toLocaleString()} {t.currency}
+                          {'$'}{accrued.toLocaleString()}
                         </p>
                       </div>
                       <div>
@@ -661,13 +661,13 @@ export function BusinessHubView({
                   <div className="flex items-center justify-between text-xs pt-2 border-t border-white/6">
                     <span className="text-[#9299A6]">{t.processingCost}</span>
                     <span className="font-mono-num font-semibold text-[#F4F5F7]">
-                      {cost.toLocaleString()} {t.currency}
+                      {'$'}{cost.toLocaleString()}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-[#9299A6]">{t.estMarketValue}</span>
                     <span className="font-mono-num text-[#F4F5F7]">
-                      ~{estOutputValue.toLocaleString()} {t.currency}
+                      ~{'$'}{estOutputValue.toLocaleString()}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-xs">
@@ -911,7 +911,7 @@ export function BusinessHubView({
                           {language === 'ar' ? item.nameAr : item.nameEn}
                         </p>
                         <p className="text-xs text-[#9299A6] mt-0.5">
-                          ~{item.basePrice} {t.currency}
+                          ~{'$'}{item.basePrice}
                         </p>
                       </div>
                       <span className="text-lg font-mono-num font-bold text-[#E04455]">
