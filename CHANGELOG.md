@@ -1,3 +1,8 @@
+## [Unreleased] - 2026-11-15
+### Test Coverage
+- Added 7 focused regression tests for the server-side world event rotation engine, covering activation caps, expiry boundaries, active-event preservation, duplicate stack-group removal, and configured event durations.
+- Validation is pending GitHub Actions; these tests are not yet counted as passing.
+
 # Changelog
 
 ## [1.1.1] - 2026-11-15
