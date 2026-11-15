@@ -8,7 +8,7 @@ import {
   query,
   where,
 } from 'firebase/firestore';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ACHIEVEMENTS } from '../data/catalog';
 import { hasOrgPermission } from '../lib/economy';
 import { auth, db, googleAuthProvider, handleFirestoreError, OperationType } from '../lib/firebase';
@@ -57,6 +57,7 @@ export interface GameDataState {
   myOrgMember: OrganizationMember | null;
   orgMembers: OrganizationMember[];
   orgRequests: OrganizationRequest[];
+  myPendingOrgIds: Set<string>;
   orgTransactions: OrganizationTransaction[];
   claimedMissions: PlayerMissionClaim[];
   claimedDailyToday: boolean;
@@ -89,6 +90,7 @@ export function useGameData(): GameDataState {
   const [orgMemberLoaded, setOrgMemberLoaded] = useState(false);
   const [orgMembers, setOrgMembers] = useState<OrganizationMember[]>([]);
   const [orgRequests, setOrgRequests] = useState<OrganizationRequest[]>([]);
+  const [myPendingOrgIds, setMyPendingOrgIds] = useState<Set<string>>(new Set());
   const [orgTransactions, setOrgTransactions] = useState<OrganizationTransaction[]>([]);
   const [claimedMissions, setClaimedMissions] = useState<PlayerMissionClaim[]>([]);
   const [claimedDailyToday, setClaimedDailyToday] = useState(false);
@@ -96,7 +98,9 @@ export function useGameData(): GameDataState {
   const [unlockedAchievements, setUnlockedAchievements] = useState<Set<string>>(new Set());
   const [notifications, setNotifications] = useState<GameNotification[]>([]);
   const [worldEvents, setWorldEvents] = useState<WorldEvent[]>([]);
+  const [utcDateKey, setUtcDateKey] = useState(() => getUtcDateKey());
   const [language, setLanguage] = useState<Language>('ar');
+  const attemptedAchievementsRef = useRef<Set<string>>(new Set());
 
   const setLanguageLocal = useCallback((lang: Language) => {
     setLanguage(lang);
@@ -110,21 +114,48 @@ export function useGameData(): GameDataState {
   }, [language]);
 
   useEffect(() => {
+    const syncDateKey = () => {
+      const latest = getUtcDateKey();
+      setUtcDateKey((prev) => (prev === latest ? prev : latest));
+    };
+    const interval = setInterval(syncDateKey, 60_000);
+    window.addEventListener('focus', syncDateKey);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', syncDateKey);
+    };
+  }, []);
+
+  useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       setAuthUser(user);
       setAuthReady(true);
       if (!user) {
+        attemptedAchievementsRef.current.clear();
         setProfile(null);
         setProfileLoading(false);
         setUserPrivate(null);
         setWallet(null);
         setInventory([]);
         setTransactions([]);
+        setMarketListings([]);
+        setMarketOrders([]);
         setCompanies([]);
+        setCompanyLogs([]);
         setProperties([]);
+        setOrganizations([]);
         setMyOrgMember(null);
         setOrgMemberLoaded(false);
+        setOrgMembers([]);
+        setOrgRequests([]);
+        setMyPendingOrgIds(new Set());
+        setOrgTransactions([]);
+        setClaimedMissions([]);
+        setClaimedDailyToday(false);
+        setClaimedContractsToday(new Set());
+        setUnlockedAchievements(new Set());
         setNotifications([]);
+        setWorldEvents([]);
       }
     });
     return () => unsub();
@@ -302,6 +333,23 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
+        query(collection(db, 'organization_requests'), where('uid', '==', uid)),
+        (snap) => {
+          const pendingIds = new Set<string>();
+          snap.docs.forEach((d) => {
+            const req = d.data() as OrganizationRequest;
+            if (req.status === 'pending') {
+              pendingIds.add(req.orgId);
+            }
+          });
+          setMyPendingOrgIds(pendingIds);
+        },
+        onSnapErr('organization_requests/self')
+      )
+    );
+
+    unsubs.push(
+      onSnapshot(
         query(collection(db, 'player_missions'), where('uid', '==', uid)),
         (snap) => {
           setClaimedMissions(snap.docs.map((d) => d.data() as PlayerMissionClaim));
@@ -310,14 +358,13 @@ export function useGameData(): GameDataState {
       )
     );
 
-    const todayKey = getUtcDateKey();
     unsubs.push(
       onSnapshot(
-        doc(db, 'daily_claims', `${uid}_${todayKey}`),
+        doc(db, 'daily_claims', `${uid}_${utcDateKey}`),
         (snap) => {
           setClaimedDailyToday(snap.exists());
         },
-        onSnapErr(`daily_claims/${uid}_${todayKey}`)
+        onSnapErr(`daily_claims/${uid}_${utcDateKey}`)
       )
     );
 
@@ -374,7 +421,7 @@ export function useGameData(): GameDataState {
     return () => {
       unsubs.forEach((fn) => fn());
     };
-  }, [authUser, setLanguageLocal]);
+  }, [authUser, setLanguageLocal, utcDateKey]);
 
   // Sync organization membership onto profile if approved while away
   useEffect(() => {
@@ -446,10 +493,21 @@ export function useGameData(): GameDataState {
     };
   }, [authUser, myOrgMember]);
 
-  // Auto-unlock eligible achievements
+  // Auto-unlock eligible achievements (deduplicated per session)
   useEffect(() => {
     if (!authUser || !profile) return;
-    checkAndUnlockAchievements(authUser.uid, profile, unlockedAchievements, ACHIEVEMENTS);
+    const alreadySkipped = new Set([
+      ...unlockedAchievements,
+      ...attemptedAchievementsRef.current,
+    ]);
+    const pendingToAttempt = ACHIEVEMENTS.filter((a) => !alreadySkipped.has(a.id));
+    if (pendingToAttempt.length === 0) return;
+
+    checkAndUnlockAchievements(authUser.uid, profile, alreadySkipped, pendingToAttempt).then(
+      (unlockedNow) => {
+        unlockedNow.forEach((id) => attemptedAchievementsRef.current.add(id));
+      }
+    );
   }, [authUser, profile, unlockedAchievements]);
 
   const loginWithGoogle = useCallback(async () => {
@@ -478,6 +536,7 @@ export function useGameData(): GameDataState {
     myOrgMember,
     orgMembers,
     orgRequests,
+    myPendingOrgIds,
     orgTransactions,
     claimedMissions,
     claimedDailyToday,

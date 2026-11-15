@@ -42,4 +42,4 @@ Default UI language is **Arabic (`RTL`)** with instant switching to **English (`
 - `npm run build --prefix functions` — Build Cloud Functions Gen 2 TypeScript backend
 - `npm run lint` — TypeScript type checking (`tsc --noEmit`)
 - `npm run lint:rules` — Validate `firestore.rules` with `@firebase/eslint-plugin-security-rules`
-- `npm run test` — Run unit, economy, and diagnostics security tests via Vitest
+- `npm run test` — Run unit, economy, diagnostics, and security audit tests via Vitest (`src/tests/*.test.ts`)

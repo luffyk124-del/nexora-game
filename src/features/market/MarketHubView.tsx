@@ -11,8 +11,14 @@ import { useState } from 'react';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useToast } from '../../components/ui/ToastProvider';
 import { BRAND_ASSETS, CATALOG_ITEMS, ITEM_MAP, TRADE_CONTRACTS } from '../../data/catalog';
-import { useTranslations } from '../../i18n/translations';
-import { calculateDynamicItemPrice, calculateMarketTaxRate } from '../../lib/economy';
+import { useTranslations, formatTxType } from '../../i18n/translations';
+import {
+  calculateDynamicItemPrice,
+  calculateMarketTaxRate,
+  LISTING_MAX_PRICE,
+  LISTING_MAX_QTY,
+  sanitizePositiveInt,
+} from '../../lib/economy';
 import {
   buyMarketListing,
   cancelMarketListing,
@@ -65,9 +71,10 @@ export function MarketHubView({
 
   // Create Sell Listing form
   const ownedStacks = inventory.filter((i) => i.quantity > 0);
-  const [sellItemId, setSellItemId] = useState(ownedStacks[0]?.itemId || 'silicon_ore');
+  const initialSellId = ownedStacks[0]?.itemId || 'silicon_ore';
+  const [sellItemId, setSellItemId] = useState(initialSellId);
   const [sellQty, setSellQty] = useState(1);
-  const [sellPrice, setSellPrice] = useState(40);
+  const [sellPrice, setSellPrice] = useState(ITEM_MAP[initialSellId]?.basePrice || 40);
 
   // Bank Transfer form
   const [recipientName, setRecipientName] = useState('');
@@ -96,7 +103,10 @@ export function MarketHubView({
   });
 
   async function handleBuy(listing: MarketListing) {
-    const qty = Math.min(listing.remainingQty, Math.max(1, buyQuantities[listing.id] || 1));
+    const qty = Math.min(
+      listing.remainingQty,
+      sanitizePositiveInt(buyQuantities[listing.id], 1, listing.remainingQty)
+    );
     setBusyKey(`buy_${listing.id}`);
     try {
       await buyMarketListing(profile.uid, listing.id, qty, taxRate);
@@ -117,6 +127,10 @@ export function MarketHubView({
           ? language === 'ar'
             ? 'لا يمكنك شراء عرضك الخاص.'
             : 'You cannot purchase your own listing.'
+          : code === 'INSUFFICIENT_LISTING_QTY'
+          ? language === 'ar'
+            ? 'الكمية المتبقية في العرض لم تعد كافية.'
+            : 'Requested quantity is no longer available.'
           : language === 'ar'
           ? 'تعذر إتمام الشراء.'
           : 'Purchase failed.',
@@ -129,16 +143,23 @@ export function MarketHubView({
 
   async function handleCreateListing(e: React.FormEvent) {
     e.preventDefault();
+    const cleanQty = sanitizePositiveInt(sellQty, 1, LISTING_MAX_QTY);
+    const cleanPrice = sanitizePositiveInt(sellPrice, 1, LISTING_MAX_PRICE);
     setBusyKey('sell_create');
     try {
-      await createMarketListing(profile.uid, profile.username, sellItemId, sellQty, sellPrice);
+      await createMarketListing(profile.uid, profile.username, sellItemId, cleanQty, cleanPrice);
       showToast(
         language === 'ar' ? 'تم نشر عرض البيع في السوق.' : 'Sell offer published on market.',
         'success'
       );
-    } catch {
+    } catch (err) {
+      const code = err instanceof Error ? err.message : '';
       showToast(
-        language === 'ar'
+        code === 'INVALID_LISTING_PARAMS'
+          ? language === 'ar'
+            ? 'تأكد من إدخال كمية وسعر صالحين ضمن الحدود المسموحة.'
+            : 'Enter a valid quantity and unit price within market limits.'
+          : language === 'ar'
           ? 'تأكد من توفر الكمية في مخزونك.'
           : 'Verify you have enough inventory to list.',
         'error'
@@ -180,9 +201,13 @@ export function MarketHubView({
           ? language === 'ar'
             ? 'المنتج المطلوب غير متوفر في المخزون.'
             : 'Required product missing from inventory.'
+          : code === 'CONTRACT_ALREADY_FULFILLED'
+          ? language === 'ar'
+            ? 'تم تنفيذ هذا العقد اليوم بالفعل.'
+            : 'Contract already fulfilled today.'
           : language === 'ar'
-          ? 'تم تنفيذ هذا العقد اليوم بالفعل.'
-          : 'Contract already fulfilled today.',
+          ? 'تعذر تنفيذ العقد التجاري.'
+          : 'Could not fulfill trade contract.',
         'error'
       );
     } finally {
@@ -191,9 +216,19 @@ export function MarketHubView({
   }
 
   async function executeTransfer() {
+    const cleanAmount = sanitizePositiveInt(transferAmount, 0);
+    if (cleanAmount <= 0) {
+      setConfirmTransferOpen(false);
+      showToast(
+        language === 'ar' ? 'أدخل مبلغ تحويل صحيح.' : 'Enter a valid transfer amount.',
+        'error'
+      );
+      return;
+    }
+
     setBusyKey('transfer');
     try {
-      await transferCredits(profile.uid, recipientName, transferAmount, transferNote);
+      await transferCredits(profile.uid, recipientName, cleanAmount, transferNote);
       setConfirmTransferOpen(false);
       setRecipientName('');
       setTransferNote('');
@@ -203,11 +238,18 @@ export function MarketHubView({
       );
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
+      if (code === 'SELF_OR_MISSING_RECIPIENT' || code === 'INVALID_AMOUNT') {
+        setConfirmTransferOpen(false);
+      }
       showToast(
         code === 'RECIPIENT_NOT_FOUND'
           ? language === 'ar'
             ? 'اسم المستخدم غير موجود.'
             : 'Recipient username not found.'
+          : code === 'SELF_OR_MISSING_RECIPIENT'
+          ? language === 'ar'
+            ? 'لا يمكنك التحويل لنفسك أو لحساب فارغ.'
+            : 'Cannot transfer to your own account.'
           : code === 'INSUFFICIENT_FUNDS'
           ? language === 'ar'
             ? 'الرصيد غير كافٍ.'
@@ -324,9 +366,13 @@ export function MarketHubView({
                   <input
                     type="number"
                     min={1}
-                    max={Math.max(1, invMap.get(sellItemId) || 1)}
-                    value={sellQty}
-                    onChange={(e) => setSellQty(Math.max(1, Number(e.target.value)))}
+                    max={Math.min(LISTING_MAX_QTY, Math.max(1, invMap.get(sellItemId) || 1))}
+                    value={sellQty || ''}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setSellQty(v === '' ? 0 : sanitizePositiveInt(v, 1, LISTING_MAX_QTY));
+                    }}
+                    onBlur={() => setSellQty((v) => sanitizePositiveInt(v, 1, LISTING_MAX_QTY))}
                     className="w-full min-h-[44px] px-3 rounded-xl bg-[#0B0D12] border border-white/10 text-sm font-mono-num text-[#F4F5F7] focus:outline-none focus:border-[#E04455]"
                   />
                 </div>
@@ -335,8 +381,13 @@ export function MarketHubView({
                   <input
                     type="number"
                     min={1}
-                    value={sellPrice}
-                    onChange={(e) => setSellPrice(Math.max(1, Number(e.target.value)))}
+                    max={LISTING_MAX_PRICE}
+                    value={sellPrice || ''}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setSellPrice(v === '' ? 0 : sanitizePositiveInt(v, 1, LISTING_MAX_PRICE));
+                    }}
+                    onBlur={() => setSellPrice((v) => sanitizePositiveInt(v, 1, LISTING_MAX_PRICE))}
                     className="w-full min-h-[44px] px-3 rounded-xl bg-[#0B0D12] border border-white/10 text-sm font-mono-num text-[#F4F5F7] focus:outline-none focus:border-[#E04455]"
                   />
                 </div>
@@ -344,7 +395,12 @@ export function MarketHubView({
 
               <button
                 type="submit"
-                disabled={busyKey === 'sell_create' || (invMap.get(sellItemId) || 0) < sellQty}
+                disabled={
+                  busyKey === 'sell_create' ||
+                  sellQty < 1 ||
+                  sellPrice < 1 ||
+                  (invMap.get(sellItemId) || 0) < sellQty
+                }
                 className="w-full min-h-[44px] px-4 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white text-sm font-semibold transition-colors disabled:bg-[#1B2230] disabled:text-[#9299A6]"
               >
                 {busyKey === 'sell_create' ? '...' : t.createListing}
@@ -404,7 +460,10 @@ export function MarketHubView({
                     const item = ITEM_MAP[listing.itemId];
                     if (!item) return null;
                     const isMine = listing.sellerUid === profile.uid;
-                    const selectedQty = buyQuantities[listing.id] || 1;
+                    const effectiveBuyQty = Math.min(
+                      listing.remainingQty,
+                      sanitizePositiveInt(buyQuantities[listing.id], 1, listing.remainingQty)
+                    );
                     const refPrice = calculateDynamicItemPrice(
                       listing.itemId,
                       listing.remainingQty,
@@ -457,13 +516,14 @@ export function MarketHubView({
                                 type="number"
                                 min={1}
                                 max={listing.remainingQty}
-                                value={selectedQty}
+                                value={effectiveBuyQty}
                                 onChange={(e) =>
                                   setBuyQuantities((prev) => ({
                                     ...prev,
-                                    [listing.id]: Math.min(
-                                      listing.remainingQty,
-                                      Math.max(1, Number(e.target.value))
+                                    [listing.id]: sanitizePositiveInt(
+                                      e.target.value,
+                                      1,
+                                      listing.remainingQty
                                     ),
                                   }))
                                 }
@@ -474,7 +534,7 @@ export function MarketHubView({
                                 type="button"
                                 disabled={
                                   busyKey === `buy_${listing.id}` ||
-                                  (wallet?.balance ?? 0) < listing.unitPrice * selectedQty
+                                  (wallet?.balance ?? 0) < listing.unitPrice * effectiveBuyQty
                                 }
                                 onClick={() => handleBuy(listing)}
                                 className="min-h-[40px] px-4 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white text-xs font-semibold whitespace-nowrap disabled:bg-[#1B2230] disabled:text-[#9299A6]"
@@ -482,7 +542,7 @@ export function MarketHubView({
                                 {busyKey === `buy_${listing.id}`
                                   ? '...'
                                   : `${t.buyNow} (${(
-                                      listing.unitPrice * selectedQty
+                                      listing.unitPrice * effectiveBuyQty
                                     ).toLocaleString()})`}
                               </button>
                             </>
@@ -588,8 +648,12 @@ export function MarketHubView({
               type="number"
               min={1}
               max={wallet?.balance ?? 0}
-              value={transferAmount}
-              onChange={(e) => setTransferAmount(Math.max(1, Number(e.target.value)))}
+              value={transferAmount || ''}
+              onChange={(e) => {
+                const v = e.target.value;
+                setTransferAmount(v === '' ? 0 : sanitizePositiveInt(v, 1));
+              }}
+              onBlur={() => setTransferAmount((v) => sanitizePositiveInt(v, 1))}
               className="w-full min-h-[44px] px-3.5 rounded-xl bg-[#0B0D12] border border-white/10 text-sm font-mono-num text-[#F4F5F7] focus:outline-none focus:border-[#E04455]"
             />
           </div>
@@ -645,8 +709,8 @@ export function MarketHubView({
                         <p className="text-xs font-medium text-[#F4F5F7] truncate">
                           {tx.description}
                         </p>
-                        <p className="text-[11px] text-[#9299A6] font-mono-num mt-0.5">
-                          {tx.id} · {tx.type}
+                        <p className="text-[11px] text-[#9299A6] mt-0.5">
+                          <span className="font-mono-num">{tx.id}</span> · {formatTxType(tx.type, language)}
                         </p>
                       </div>
                     </div>

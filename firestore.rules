@@ -109,7 +109,7 @@ service cloud.firestore {
         && data.netAmount is number && data.netAmount >= 0 && data.netAmount == data.amount - data.fee
         && data.type in [
           'transfer', 'market_buy', 'mission_reward', 'daily_stipend',
-          'company_create', 'company_upgrade', 'company_collect',
+          'company_create', 'company_upgrade', 'company_collect', 'company_hire',
           'property_buy', 'property_upgrade', 'property_collect',
           'manufacturing', 'org_create', 'org_deposit', 'org_withdraw', 'contract_deal'
         ]
@@ -138,6 +138,8 @@ service cloud.firestore {
 
     function isAuthorizedMarketBuy(tx) {
       return tx.fromUid == request.auth.uid
+        && tx.fee >= 0
+        && tx.fee <= (tx.amount * 0.12) + 0.5
         && exists(/databases/$(database)/documents/market_listings/$(tx.referenceId))
         && get(/databases/$(database)/documents/market_listings/$(tx.referenceId)).data.sellerUid == tx.toUid
         && get(/databases/$(database)/documents/market_listings/$(tx.referenceId)).data.sellerUid != request.auth.uid
@@ -154,11 +156,12 @@ service cloud.firestore {
         (tx.type == 'contract_deal' && tx.fromUid == 'SYSTEM' && tx.toUid == request.auth.uid && tx.amount <= 2500 && tx.fee == 0 && !exists(/databases/$(database)/documents/contract_claims/$(tx.referenceId)) && getAfter(/databases/$(database)/documents/contract_claims/$(tx.referenceId)).data.uid == request.auth.uid && getAfter(/databases/$(database)/documents/contract_claims/$(tx.referenceId)).data.amount == tx.amount) ||
         (tx.type == 'company_create' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount >= 500 && tx.fee == 0 && !exists(/databases/$(database)/documents/companies/$(tx.referenceId)) && getAfter(/databases/$(database)/documents/companies/$(tx.referenceId)).data.ownerUid == request.auth.uid) ||
         (tx.type == 'company_upgrade' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount >= 250 && tx.fee == 0 && get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.ownerUid == request.auth.uid && getAfter(/databases/$(database)/documents/companies/$(tx.referenceId)).data.level > get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.level) ||
+        (tx.type == 'company_hire' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount == 250 && tx.fee == 0 && get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.ownerUid == request.auth.uid && getAfter(/databases/$(database)/documents/companies/$(tx.referenceId)).data.employeesCount == get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.employeesCount + 1) ||
         (tx.type == 'company_collect' && tx.fromUid == 'SYSTEM' && tx.toUid == request.auth.uid && tx.amount <= 25000 && tx.fee == 0 && get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.ownerUid == request.auth.uid && getAfter(/databases/$(database)/documents/companies/$(tx.referenceId)).data.lastCollectedAt == request.time && tx.amount <= 15 + ((request.time - get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.lastCollectedAt).seconds() * 15)) ||
         (tx.type == 'property_buy' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount >= 800 && tx.fee == 0 && !exists(/databases/$(database)/documents/properties/$(tx.referenceId)) && getAfter(/databases/$(database)/documents/properties/$(tx.referenceId)).data.ownerUid == request.auth.uid) ||
         (tx.type == 'property_upgrade' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount >= 400 && tx.fee == 0 && get(/databases/$(database)/documents/properties/$(tx.referenceId)).data.ownerUid == request.auth.uid && getAfter(/databases/$(database)/documents/properties/$(tx.referenceId)).data.level > get(/databases/$(database)/documents/properties/$(tx.referenceId)).data.level) ||
         (tx.type == 'property_collect' && tx.fromUid == 'SYSTEM' && tx.toUid == request.auth.uid && tx.amount <= 15000 && tx.fee == 0 && get(/databases/$(database)/documents/properties/$(tx.referenceId)).data.ownerUid == request.auth.uid && getAfter(/databases/$(database)/documents/properties/$(tx.referenceId)).data.lastCollectedAt == request.time && tx.amount <= 15 + ((request.time - get(/databases/$(database)/documents/properties/$(tx.referenceId)).data.lastCollectedAt).seconds() * 10)) ||
-        (tx.type == 'manufacturing' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount >= 10 && tx.fee == 0) ||
+        (tx.type == 'manufacturing' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount >= 10 && tx.fee == 0 && tx.referenceId in ['rec_microchips', 'rec_precision_frame', 'rec_synth_polymer', 'rec_quantum_server', 'rec_logistics_drone', 'rec_bio_module']) ||
         (tx.type == 'org_create' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount == 1000 && tx.fee == 0 && !exists(/databases/$(database)/documents/organizations/$(tx.referenceId)) && getAfter(/databases/$(database)/documents/organizations/$(tx.referenceId)).data.leaderUid == request.auth.uid) ||
         (tx.type == 'org_deposit' && tx.fromUid == request.auth.uid && tx.toUid == 'ORG' && tx.fee == 0 && getAfter(/databases/$(database)/documents/organizations/$(tx.referenceId)).data.treasuryBalance == get(/databases/$(database)/documents/organizations/$(tx.referenceId)).data.treasuryBalance + tx.amount) ||
         (tx.type == 'org_withdraw' && tx.fromUid == 'ORG' && tx.toUid == request.auth.uid && tx.fee == 0 && hasOrgPermission(tx.referenceId, 'manage_treasury') && getAfter(/databases/$(database)/documents/organizations/$(tx.referenceId)).data.treasuryBalance == get(/databases/$(database)/documents/organizations/$(tx.referenceId)).data.treasuryBalance - tx.amount)
@@ -178,7 +181,20 @@ service cloud.firestore {
       return (
         hasNewWalletTx(uid) &&
         newWalletTx(uid).fromUid == uid &&
-        newWalletTx(uid).type in ['market_buy', 'manufacturing']
+        (
+          (
+            newWalletTx(uid).type == 'market_buy' &&
+            exists(/databases/$(database)/documents/market_listings/$(newWalletTx(uid).referenceId)) &&
+            get(/databases/$(database)/documents/market_listings/$(newWalletTx(uid).referenceId)).data.itemId == itemId &&
+            addedQty == get(/databases/$(database)/documents/market_listings/$(newWalletTx(uid).referenceId)).data.remainingQty - getAfter(/databases/$(database)/documents/market_listings/$(newWalletTx(uid).referenceId)).data.remainingQty
+          ) ||
+          (
+            newWalletTx(uid).type == 'manufacturing' &&
+            newWalletTx(uid).referenceId in ['rec_microchips', 'rec_precision_frame', 'rec_synth_polymer', 'rec_quantum_server', 'rec_logistics_drone', 'rec_bio_module'] &&
+            addedQty >= 1 &&
+            addedQty <= 2
+          )
+        )
       ) || (
         'lastListingId' in data &&
         exists(/databases/$(database)/documents/market_listings/$(data.lastListingId)) &&
@@ -619,7 +635,12 @@ service cloud.firestore {
         && incoming().id == orderId
         && incoming().buyerUid == request.auth.uid
         && incoming().createdAt == request.time
-        && existsAfter(/databases/$(database)/documents/transactions/$(incoming().txId));
+        && hasNewWalletTx(request.auth.uid)
+        && incoming().txId == walletNewTxId(request.auth.uid)
+        && newWalletTx(request.auth.uid).type == 'market_buy'
+        && newWalletTx(request.auth.uid).referenceId == incoming().listingId
+        && newWalletTx(request.auth.uid).toUid == incoming().sellerUid
+        && newWalletTx(request.auth.uid).amount == incoming().totalPrice;
       allow update, delete: if false;
     }
 
@@ -667,7 +688,7 @@ service cloud.firestore {
             incoming().diff(existing()).affectedKeys().hasOnly(['employeesCount', 'updatedAt']) &&
             incoming().employeesCount == existing().employeesCount + 1 &&
             hasNewWalletTx(request.auth.uid) &&
-            newWalletTx(request.auth.uid).type == 'manufacturing' &&
+            newWalletTx(request.auth.uid).type == 'company_hire' &&
             newWalletTx(request.auth.uid).referenceId == companyId &&
             newWalletTx(request.auth.uid).amount == 250
           ) ||
@@ -840,7 +861,8 @@ service cloud.firestore {
     match /organization_requests/{reqId} {
       allow get: if isSignedIn() && isValidId(reqId)
         && (resource == null || existing().uid == request.auth.uid || hasOrgPermission(existing().orgId, 'manage_members'));
-      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || resource.data.status == 'pending');
+      allow list: if isSignedIn()
+        && (resource.data.uid == request.auth.uid || (resource.data.status == 'pending' && hasOrgPermission(resource.data.orgId, 'manage_members')));
       allow create: if isSignedIn() && isValidId(reqId)
         && isValidOrgRequest(incoming())
         && incoming().id == reqId

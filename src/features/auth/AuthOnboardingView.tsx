@@ -36,7 +36,32 @@ export function AuthOnboardingView({
     try {
       await onLogin();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Sign-in failed';
+      const code =
+        typeof err === 'object' && err !== null && 'code' in err
+          ? String((err as { code?: unknown }).code || '')
+          : '';
+      let msg: string;
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        msg =
+          language === 'ar'
+            ? 'تم إغلاق نافذة تسجيل الدخول قبل الإتمام.'
+            : 'Sign-in pop-up was closed before completion.';
+      } else if (code === 'auth/popup-blocked') {
+        msg =
+          language === 'ar'
+            ? 'حظر المتصفح النافذة المنبثقة. اسمح بالنوافذ المنبثقة ثم أعد المحاولة.'
+            : 'Sign-in pop-up was blocked by your browser. Allow pop-ups and retry.';
+      } else if (code === 'auth/network-request-failed') {
+        msg =
+          language === 'ar'
+            ? 'تعذر الاتصال بالشبكة. تحقق من اتصالك بالإنترنت.'
+            : 'Network error. Check your internet connection and retry.';
+      } else {
+        msg =
+          language === 'ar'
+            ? 'تعذر تسجيل الدخول عبر Google. حاول مرة أخرى.'
+            : 'Google sign-in failed. Please try again.';
+      }
       showToast(msg, 'error');
     } finally {
       setBusy(false);

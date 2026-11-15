@@ -142,6 +142,10 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     leaderboardCompanies: 'الشركات',
     leaderboardOrgs: 'المنظمات',
     achievementsTitle: 'الإنجازات',
+    requestPending: 'طلب قيد المراجعة',
+    maxLevelReached: 'الحد الأقصى',
+    allMissions: 'عرض جميع المهام',
+    leaderboardError: 'تعذر تحميل التصنيفات. تحقق من الاتصال وأعد المحاولة.',
   },
   en: {
     appName: 'NEXORA',
@@ -284,9 +288,95 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     leaderboardCompanies: 'Companies',
     leaderboardOrgs: 'Organizations',
     achievementsTitle: 'Achievements',
+    requestPending: 'Request Pending',
+    maxLevelReached: 'MAX LEVEL',
+    allMissions: 'View All Missions',
+    leaderboardError: 'Unable to load leaderboards. Check your connection and retry.',
   },
 };
 
 export function useTranslations(lang: Language) {
   return TRANSLATIONS[lang];
 }
+
+const TX_TYPE_LABELS: Record<Language, Record<string, string>> = {
+  ar: {
+    transfer: 'تحويل مالي',
+    market_buy: 'شراء من السوق',
+    mission_reward: 'مكافأة مهمة',
+    daily_stipend: 'العائد اليومي',
+    company_create: 'تأسيس شركة',
+    company_upgrade: 'ترقية شركة',
+    company_collect: 'إيرادات شركة',
+    company_hire: 'توظيف كوادر',
+    property_buy: 'شراء عقار',
+    property_upgrade: 'ترقية عقار',
+    property_collect: 'إيجار عقار',
+    manufacturing: 'تصنيع صناعي',
+    org_create: 'تأسيس منظمة',
+    org_deposit: 'إيداع خزينة',
+    org_withdraw: 'سحب خزينة',
+    contract_deal: 'عقد تجاري',
+  },
+  en: {
+    transfer: 'Transfer',
+    market_buy: 'Market Purchase',
+    mission_reward: 'Mission Reward',
+    daily_stipend: 'Daily Stipend',
+    company_create: 'Company Founding',
+    company_upgrade: 'Company Upgrade',
+    company_collect: 'Company Revenue',
+    company_hire: 'Staff Hire',
+    property_buy: 'Property Purchase',
+    property_upgrade: 'Property Upgrade',
+    property_collect: 'Property Rent',
+    manufacturing: 'Manufacturing',
+    org_create: 'Org Founding',
+    org_deposit: 'Treasury Deposit',
+    org_withdraw: 'Treasury Withdrawal',
+    contract_deal: 'Trade Contract',
+  },
+};
+
+const MISSION_CATEGORY_LABELS: Record<Language, Record<string, string>> = {
+  ar: {
+    tutorial: 'أساسية',
+    daily: 'يومية',
+    weekly: 'أسبوعية',
+    seasonal: 'موسمية',
+  },
+  en: {
+    tutorial: 'Tutorial',
+    daily: 'Daily',
+    weekly: 'Weekly',
+    seasonal: 'Seasonal',
+  },
+};
+
+const ORG_ROLE_LABELS: Record<Language, Record<string, string>> = {
+  ar: {
+    leader: 'القائد',
+    deputy: 'النائب',
+    officer: 'ضابط',
+    member: 'عضو',
+  },
+  en: {
+    leader: 'Leader',
+    deputy: 'Deputy',
+    officer: 'Officer',
+    member: 'Member',
+  },
+};
+
+export function formatTxType(type: string, lang: Language): string {
+  return TX_TYPE_LABELS[lang][type] ?? type;
+}
+
+export function formatMissionCategory(category: string, lang: Language): string {
+  return MISSION_CATEGORY_LABELS[lang][category] ?? category;
+}
+
+export function formatOrgRole(role: string, lang: Language): string {
+  return ORG_ROLE_LABELS[lang][role] ?? role;
+}
+

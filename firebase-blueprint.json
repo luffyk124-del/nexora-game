@@ -74,7 +74,7 @@
         "amount": { "type": "number" },
         "fee": { "type": "number" },
         "netAmount": { "type": "number" },
-        "type": { "type": "string", "enum": ["transfer", "market_buy", "mission_reward", "daily_stipend", "company_create", "company_upgrade", "company_collect", "property_buy", "property_upgrade", "property_collect", "manufacturing", "org_create", "org_deposit", "org_withdraw", "contract_deal"] },
+        "type": { "type": "string", "enum": ["transfer", "market_buy", "mission_reward", "daily_stipend", "company_create", "company_upgrade", "company_collect", "company_hire", "property_buy", "property_upgrade", "property_collect", "manufacturing", "org_create", "org_deposit", "org_withdraw", "contract_deal"] },
         "referenceId": { "type": "string", "minLength": 1, "maxLength": 128 },
         "description": { "type": "string", "maxLength": 240 },
         "status": { "type": "string", "enum": ["completed"] },

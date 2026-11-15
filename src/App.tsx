@@ -112,6 +112,7 @@ function NexoraAppContent() {
           myOrgMember={game.myOrgMember}
           orgMembers={game.orgMembers}
           orgRequests={game.orgRequests}
+          myPendingOrgIds={game.myPendingOrgIds}
           orgTransactions={game.orgTransactions}
           language={game.language}
         />

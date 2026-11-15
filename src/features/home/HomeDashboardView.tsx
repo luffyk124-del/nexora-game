@@ -3,12 +3,13 @@ import { useState } from 'react';
 import { EconomicChart } from '../../components/ui/EconomicChart';
 import { useToast } from '../../components/ui/ToastProvider';
 import { AVATARS, CATALOG_ITEMS, MISSIONS } from '../../data/catalog';
-import { useTranslations } from '../../i18n/translations';
+import { useTranslations, formatTxType } from '../../i18n/translations';
 import {
   calculateDailyStipend,
   calculateDynamicItemPrice,
   calculateLevelProgress,
   calculateMarketTaxRate,
+  getMissionProgress,
 } from '../../lib/economy';
 import { claimDailyStipend, claimMissionReward } from '../../services/gameService';
 import type {
@@ -105,7 +106,11 @@ export function HomeDashboardView({
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
       showToast(
-        code === 'MISSION_NOT_COMPLETE'
+        code === 'MISSION_ALREADY_CLAIMED'
+          ? language === 'ar'
+            ? 'تم استلام مكافأة هذه المهمة بالفعل.'
+            : 'Mission reward already claimed.'
+          : code === 'MISSION_NOT_COMPLETE'
           ? language === 'ar'
             ? 'لم تكتمل شروط المهمة بعد.'
             : 'Mission requirements not met yet.'
@@ -265,7 +270,7 @@ export function HomeDashboardView({
                     <span className="text-xs font-mono-num text-[#E04455] shrink-0">
                       {evt.priceMultiplier !== 1
                         ? `×${evt.priceMultiplier.toFixed(2)}`
-                        : `${(evt.taxDelta * 100).toFixed(0)}% Tax`}
+                        : `${(evt.taxDelta * 100).toFixed(0)}% ${t.marketTax}`}
                     </span>
                   </div>
                   <p className="text-xs text-[#9299A6] leading-relaxed">
@@ -281,62 +286,68 @@ export function HomeDashboardView({
       {/* Active Missions & Recent Activity */}
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-3.5">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-[#F4F5F7]">{t.activeMissions}</h2>
-            <Award className="w-4 h-4 text-[#E04455]" />
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Award className="w-4 h-4 text-[#E04455]" />
+              <h2 className="text-base font-semibold text-[#F4F5F7]">{t.activeMissions}</h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigate('profile')}
+              className="text-xs font-medium text-[#E04455] hover:underline whitespace-nowrap"
+            >
+              {t.allMissions}
+            </button>
           </div>
           <div className="space-y-2.5">
-            {MISSIONS.slice(0, 4).map((m) => {
-              const isClaimed = claimedSet.has(m.id);
-              const val =
-                m.metric === 'trades'
-                  ? profile.stats.tradesCount
-                  : m.metric === 'companies'
-                  ? profile.stats.companiesOwned
-                  : m.metric === 'properties'
-                  ? profile.stats.propertiesOwned
-                  : m.metric === 'produced'
-                  ? profile.stats.totalProduced
-                  : m.metric === 'org'
-                  ? profile.orgId
-                    ? 1
-                    : 0
-                  : profile.level;
-              const ready = val >= m.targetCount && !isClaimed;
+            {[...MISSIONS]
+              .sort((a, b) => {
+                const aClaimed = claimedSet.has(a.id) ? 1 : 0;
+                const bClaimed = claimedSet.has(b.id) ? 1 : 0;
+                if (aClaimed !== bClaimed) return aClaimed - bClaimed;
+                const aReady = getMissionProgress(a.metric, profile) >= a.targetCount ? 0 : 1;
+                const bReady = getMissionProgress(b.metric, profile) >= b.targetCount ? 0 : 1;
+                return aReady - bReady;
+              })
+              .slice(0, 4)
+              .map((m) => {
+                const isClaimed = claimedSet.has(m.id);
+                const val = getMissionProgress(m.metric, profile);
+                const ready = val >= m.targetCount && !isClaimed;
 
-              return (
-                <div
-                  key={m.id}
-                  className="p-3.5 rounded-xl bg-[#0B0D12] border border-white/6 flex items-center justify-between gap-3"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-[#F4F5F7] truncate">
-                      {language === 'ar' ? m.titleAr : m.titleEn}
-                    </p>
-                    <p className="text-xs text-[#9299A6] mt-0.5">
-                      <span className="font-mono-num">
-                        {Math.min(val, m.targetCount)}/{m.targetCount}
-                      </span>{' '}
-                      · +{m.rewardCredits} {t.currency} · +{m.rewardXp} XP
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={!ready || busyId === m.id}
-                    onClick={() => handleClaimMission(m.id)}
-                    className={`min-h-[40px] px-3.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-colors ${
-                      isClaimed
-                        ? 'bg-[#1B2230] text-[#9299A6]'
-                        : ready
-                        ? 'bg-[#B91C32] hover:bg-[#E04455] text-white'
-                        : 'bg-[#1B2230] text-[#9299A6]/70'
-                    }`}
+                return (
+                  <div
+                    key={m.id}
+                    className="p-3.5 rounded-xl bg-[#0B0D12] border border-white/6 flex items-center justify-between gap-3"
                   >
-                    {isClaimed ? t.claimed : ready ? t.claimReward : t.inProgress}
-                  </button>
-                </div>
-              );
-            })}
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-[#F4F5F7] truncate">
+                        {language === 'ar' ? m.titleAr : m.titleEn}
+                      </p>
+                      <p className="text-xs text-[#9299A6] mt-0.5">
+                        <span className="font-mono-num">
+                          {Math.min(val, m.targetCount)}/{m.targetCount}
+                        </span>{' '}
+                        · +{m.rewardCredits} {t.currency} · +{m.rewardXp} XP
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!ready || busyId === m.id}
+                      onClick={() => handleClaimMission(m.id)}
+                      className={`min-h-[40px] px-3.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-colors ${
+                        isClaimed
+                          ? 'bg-[#1B2230] text-[#9299A6]'
+                          : ready
+                          ? 'bg-[#B91C32] hover:bg-[#E04455] text-white'
+                          : 'bg-[#1B2230] text-[#9299A6]/70'
+                      }`}
+                    >
+                      {isClaimed ? t.claimed : ready ? t.claimReward : t.inProgress}
+                    </button>
+                  </div>
+                );
+              })}
           </div>
         </div>
 
@@ -369,7 +380,7 @@ export function HomeDashboardView({
                         <p className="text-xs font-medium text-[#F4F5F7] truncate">
                           {tx.description}
                         </p>
-                        <p className="text-[11px] text-[#9299A6] mt-0.5">{tx.type}</p>
+                        <p className="text-[11px] text-[#9299A6] mt-0.5">{formatTxType(tx.type, language)}</p>
                       </div>
                     </div>
                     <span

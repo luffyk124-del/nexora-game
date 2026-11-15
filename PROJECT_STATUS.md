@@ -1,7 +1,7 @@
 # حالة مشروع NEXORA — المرجع الرسمي (`PROJECT_STATUS.md`)
 
 > آخر تحديث: `2026-11-15`  
-> الإصدار الحالي: `1.1.0`  
+> الإصدار الحالي: `1.1.1`  
 > المستودع المستهدف: `https://github.com/luffyk124-del/nexora-game`
 
 ---
@@ -21,12 +21,13 @@
 ---
 
 ## 2. الحالة الحالية
-- **نسبة الإنجاز التقديرية**: **~92%** من نطاق MVP + نظام التشخيص (جميع أنظمة اللعبة الأساسية + نظام التشخيص والمراقبة الآمن من جهة الواجهة وخادم Cloud Functions Gen 2 مبنية ومختبرة؛ يتبقى نشر Cloud Functions Gen 2 من CLI مصادَق عليه + تفعيل صلاحية المالك عبر Custom Claim أو `diagnostics_admins/{uid}` + إتمام `git push` إلى GitHub).
-- **المرحلة الحالية**: إتمام بناء واختبار **NEXORA Diagnostics System** (إصدار `1.1.0`) ونشر قاعدة `diagnostics_admins/{uid}` في `firestore.rules`.
+- **نسبة الإنجاز التقديرية**: **~95%** من نطاق MVP + المراجعة الشاملة والاستقرار (`1.1.1`): تم إغلاق الثغرات الأمنية وإصلاحات الاستقرار والواجهة، وتقسيم حزم البناء (`manualChunks` + تحميل كسول لـ `DiagnosticsView`)، وتوسيع الاختبارات إلى `27/27` اختباراً ناجحاً. يتبقى نشر `firestore.rules` المحدثة ونشر `nexoraDiagnostics` Cloud Function Gen 2 على Firebase وتعيين صلاحية المالك وإتمام `git push` إلى GitHub.
+- **المرحلة الحالية**: إتمام المراجعة التقنية والوظيفية الشاملة (**NEXORA Comprehensive Audit & Stabilization — `1.1.1`**) والتحضير للنشر الإنتاجي.
 - **آخر نقطة وصل إليها التطوير**:
-  - بناء نظام التشخيص القرائي المقيد بالمالك (`src/features/diagnostics/DiagnosticsView.tsx`, `src/services/diagnosticsService.ts`, `src/lib/diagnosticsSanitizer.ts`) مع الأقسام الخمسة وتصدير/نسخ تقرير JSON موحد ومنقّح بالكامل.
-  - بناء حزمة **Cloud Functions Gen 2** (`functions/src/index.ts`, `functions/src/diagnosticsCore.ts`, `firebase.json`) والتحقق من بنائها (`tsc` ناجح) مع التحقق الخادمي من ID Token، وتحديد معدل الطلبات، ورفض التعديل والاستعلامات العشوائية، وتنقيح الأسرار.
-  - إضافة قاعدة `diagnostics_admins/{uid}` للقراءة فقط في `firestore.rules` ونشرها عبر `DeployRules`، وتوثيق النظام في `docs/DIAGNOSTICS.md`.
+  - تشديد `firestore.rules` محلياً (`company_hire` المستقل، سقف رسوم السوق، مطابقة `itemId` وكمية العرض عند الشراء، قصر `manufacturing` على الوصفات الرسمية، ربط `market_orders` بمعاملة المحفظة، وتقييد `organization_requests` `allow list` بصلاحية `manage_members`).
+  - إصلاح دورة الحياة في `useGameData.ts` (تصفير كامل عند تسجيل الخروج، اشتراك `myPendingOrgIds`، تحديث `utcDateKey` تلقائياً عند منتصف الليل UTC، ومنع تكرار محاولات الإنجازات) وتوحيد حدود الاقتصاد وحسابات المهام والإنجازات في `economy.ts` و`gameService.ts`.
+  - تحسين الواجهة في جميع التبويبات الستة (`Auth`, `Home`, `Business`, `Market`, `Organization`, `Profile`)، وتعريب أنواع المعاملات والرتب وفئات المهام، وإضافة حالات التحميل والخطأ والحدود القصوى (`MAX`)، وتقسيم حزم البناء في `vite.config.ts`.
+  - إضافة ملف اختبارات المراجعة `src/tests/audit.test.ts` (7 اختبارات إضافية، ليصل الإجمالي إلى `27/27`).
 
 ---
 
@@ -46,8 +47,8 @@
 ---
 
 ## 4. الأنظمة قيد التطوير والتحقق
-- **نشر Cloud Functions Gen 2 (`nexoraDiagnostics`)**: الكود مبني ومختبر محلياً في `/functions`، ويتطلب تنفيذه على خادم Firebase تفعيل `firebase login` والنشر via `firebase deploy --only functions --project gen-lang-client-0074900177` (إضافة إلى منح المالك `diagnosticsOwner: true` أو سجل `diagnostics_admins/{uid}`).
-- **اختبار اللعب الحي بعد تشديد القواعد**: التحقق من جميع التدفقات داخل المتصفح بعد نشر حزمة `1.1.0` من `firestore.rules`.
+- **نشر حزمة `firestore.rules` (`1.1.1`) المتزامن مع الواجهة الجديدة**: تم تحديث `firestore.rules` محلياً (ويجتاز `npm run lint:rules` و`audit.test.ts`) ولم يُنشر بعد في هذه المراجعة؛ وبما أن `hireCompanyStaff` باتت تصدر `type: 'company_hire'` بدلاً من `'manufacturing'`، يجب نشر `firestore.rules` المحدثة قبل أو بالتوازي مع نشر الواجهة المحدثة حتى لا ترفض القواعد القديمة (`1.1.0`) عملية توظيف الكوادر.
+- **نشر Cloud Functions Gen 2 (`nexoraDiagnostics`)**: الكود مبني ومختبر محلياً في `/functions`، ويتطلب تنفيذه على خادم Firebase تفعيل خطة Blaze والخدمات المطلوبة ثم `firebase login` و`firebase deploy --only functions --project gen-lang-client-0074900177` (إضافة إلى منح المالك `diagnosticsOwner: true` أو سجل `diagnostics_admins/{uid}`).
 - **إتمام الرفع إلى GitHub (`origin/main`)**: المستودع المحلي مهيأ وموثق بـ commits واضحة، وينتظر تنفيذه من بيئة تملك صلاحية مصادقة GitHub.
 
 ---
@@ -108,7 +109,7 @@
 - `src/features/*` و`src/components/ui/*`: شاشات ومكونات الواجهة بما فيها `src/features/diagnostics/DiagnosticsView.tsx`.
 - `functions/src/index.ts`, `functions/src/diagnosticsCore.ts`, `firebase.json`: دالة Cloud Functions Gen 2 ونواتها الأمنية.
 - `firestore.rules`, `firebase-blueprint.json`, `security_spec.md`, `eslint.config.js`: القواعد والمخطط ومواصفات الأمان.
-- `src/tests/economy.test.ts`, `src/tests/diagnostics.test.ts`: اختبارات Vitest.
+- `src/tests/economy.test.ts`, `src/tests/diagnostics.test.ts`, `src/tests/audit.test.ts`: اختبارات Vitest (`27` اختباراً إجمالياً).
 - `README.md`, `CHANGELOG.md`, `docs/ARCHITECTURE.md`, `docs/DATABASE.md`, `docs/DIAGNOSTICS.md`, `PROJECT_STATUS.md`: التوثيق الرسمي الموحد.
 
 ---
@@ -117,24 +118,23 @@
 - `npm run lint:rules` (`eslint firestore.rules`): ناجح (خروج `0`، 0 أخطاء، 0 تحذيرات).
 - `npx tsc --noEmit`: ناجح (خروج `0`، 0 أخطاء).
 - `npm run build --prefix functions`: ناجح (بناء `functions/lib/` دون أخطاء).
-- `npm run test` (`vitest run`): ناجح (`20/20` اختباراً — `10/10` في `economy.test.ts` + `10/10` في `diagnostics.test.ts`).
-- `npm run build` (`vite build`): ناجح (بناء `dist/` في `1.22s`).
-- `DeployRules` (نشر `firestore.rules` على Firebase): ناجح (`{}`).
-- **ملاحظة**: لم تُنشر Cloud Functions Gen 2 فعلياً من هذه البيئة لعدم توفر جلسة OAuth لـ `firebase` CLI (`firebase projects:list` أعاد 403/No OAuth tokens).
-- **مراجعة ما قبل النشر (`Pre-Deployment Audit`)**: تم تأكيد `projectId: gen-lang-client-0074900177` ووجود قاعدة البيانات المسماة `ai-studio-74843d9e-8228-49b7-a616-317cadd90bff` فعلياً عبر Firestore REST API (`404 NOT_FOUND` للمستند غير الموجود `test/connection` مع `403 PERMISSION_DENIED` على `diagnostics_admins`)، وتشديد فحص المالك بإزالة قبول `claims.admin === true` منفرداً واشتراط `claims.diagnosticsOwner === true` صراحةً، مع اشتراط `role === 'owner'` في `diagnostics_admins/{uid}` وإضافة `"database"` في `firebase.json`.
+- `npm run test` (`vitest run`): ناجح (`27/27` اختباراً — `10/10` في `economy.test.ts` + `10/10` في `diagnostics.test.ts` + `7/7` في `audit.test.ts`).
+- `npm run build` (`vite build`): ناجح (بناء `dist/` في `1.12s` مع تقسيم الحزم إلى `index` `222.28 kB` و`DiagnosticsView` الكسول `23.84 kB` و`react-vendor` `404.70 kB` و`firebase` `583.27 kB` و`icons` `33.17 kB`).
+- **ملاحظة نشر**: في حزمة `1.1.1` لم يُنفذ نشر `firestore.rules` أو Cloud Functions Gen 2 (`nexoraDiagnostics`) التزاماً بتعليمات عدم النشر قبل الاعتماد؛ القواعد والوظائف جاهزة ومحققة محلياً.
+- **مراجعة ما قبل النشر (`Pre-Deployment Audit`)**: تم تأكيد `projectId: gen-lang-client-0074900177` ووجود قاعدة البيانات المسماة `ai-studio-74843d9e-8228-49b7-a616-317cadd90bff` فعلياً عبر Firestore REST API، وتشديد فحص المالك بإزالة قبول `claims.admin === true` منفرداً واشتراط `claims.diagnosticsOwner === true` صراحةً، مع اشتراط `role === 'owner'` في `diagnostics_admins/{uid}` وإضافة `"database"` في `firebase.json`.
 
 ---
 
 ## 11. المشكلات المفتوحة والمغلقة
 - **مغلقة**:
-  - إغلاق ثغرات التعديل المباشر في `firestore.rules` وإزالة قواعد `allow list: if isSignedIn();` المفتوحة.
-  - إصلاح سباق تصفير `profile.orgId` عبر `orgMemberLoaded` وتقييد مستمع `organization_requests` بصلاحية `manage_members`.
-  - توحيد جميع وثائق المشروع على Firebase وإزالة أي التباس معماري.
-  - بناء نظام التشخيص والمراقبة الآمن (`NEXORA Diagnostics System`) مع حجب PII/الأسرار واختبار رفض غير المصرح لهم والتعديل والاستعلامات العشوائية، وتشديد `diagnosticsOwner` وإلغاء الاعتماد على `admin` العام وحده.
+  - إغلاق ثغرات التعديل المباشر في `firestore.rules`، وفصل معاملات توظيف الكوادر (`company_hire`)، وتقييد `organization_requests` `allow list` على `manage_members`، وحماية `market_orders` و`inventory` عند الشراء والتصنيع.
+  - معالجة حالات التسجيل الخروج، وتبديل الحسابات، وإشعارات الأخطاء، والتعريب الكامل، وتقسيم حزم البناء في الواجهة.
+  - بناء نظام التشخيص والمراقبة الآمن (`NEXORA Diagnostics System`) مع حجب PII/الأسرار واختبار رفض غير المصرح لهم والتعديل والاستعلامات العشوائية، وتشديد `diagnosticsOwner`.
 - **مفتوحة**:
-  1. **نشر Cloud Functions Gen 2 ومنح صلاحية المالك**: يتطلب خطة **Blaze** وتفعيل خدمات `cloudfunctions.googleapis.com` و`cloudbuild.googleapis.com` و`run.googleapis.com` و`artifactregistry.googleapis.com` في مشروع `gen-lang-client-0074900177`، ثم `firebase login` و`firebase deploy --only functions --project gen-lang-client-0074900177` وتعيين Custom Claim `diagnosticsOwner: true` أو سجل `diagnostics_admins/{uid}` (`enabled: true`, `role: "owner"`).
-  2. **الرفع إلى GitHub (`https://github.com/luffyk124-del/nexora-game`)**: بيئة التشغيل المعزولة لا تحتوي على `gh` CLI أو مفتاح SSH أو PAT، مما يؤدي إلى فشل `git push -u origin main`. الـ commits المحلية جاهزة بالكامل على فرع `main`.
-  3. **التحقق الحي في المتصفح**: مراجعة تجربة اللاعب الفعلية بعد نشر حزمة `1.1.0`.
+  1. **نشر `firestore.rules` المحدثة (`1.1.1`)**: لازم قبل اختبار توظيف الكوادر (`company_hire`) في الإنتاج.
+  2. **نشر Cloud Functions Gen 2 ومنح صلاحية المالك**: يتطلب خطة **Blaze** وتفعيل خدمات `cloudfunctions.googleapis.com` و`cloudbuild.googleapis.com` و`run.googleapis.com` و`artifactregistry.googleapis.com` في مشروع `gen-lang-client-0074900177`، ثم `firebase login` و`firebase deploy --only functions --project gen-lang-client-0074900177` وتعيين Custom Claim `diagnosticsOwner: true` أو سجل `diagnostics_admins/{uid}` (`enabled: true`, `role: "owner"`).
+  3. **الرفع إلى GitHub (`https://github.com/luffyk124-del/nexora-game`)**: بيئة التشغيل المعزولة لا تحتوي على `gh` CLI أو مفتاح SSH أو PAT، مما يؤدي إلى فشل `git push -u origin main`. الـ commits المحلية جاهزة بالكامل على فرع `main`.
+  4. **التحقق الحي في المتصفح**: مراجعة تجربة اللاعب الفعلية بعد نشر حزمة `1.1.1`.
 
 ---
 
@@ -155,3 +155,4 @@
 | `2026-11-15` | `firestore.rules`, `firebase-blueprint.json`, `src/services/gameService.ts`, `src/hooks/useGameData.ts`, `README.md`, `docs/ARCHITECTURE.md`, `docs/DATABASE.md`, `CHANGELOG.md`, `PROJECT_STATUS.md` | تشديد `firestore.rules` (إلغاء كل `allow list: if isSignedIn();`، وإغلاق ثغرات التلاعب في المحافظ والمخزون والسوق والشركات والعقارات والمنظمات والملف الشخصي)، تحديث استعلامات التصنيف و`cancelMarketListing` وقصر `organization_requests` على `manage_members`، نشر القواعد عبر `DeployRules`، وتوحيد التوثيق على Firebase. | تنفيذ الأولويات الخمس للمراجعة الأمنية الشاملة وتوحيد التوثيق والتحقق والرفع. | `npm run lint:rules` ناجح، `npm run test` (`10/10`)، `npx tsc --noEmit` ناجح، `npm run build` ناجح، `DeployRules` ناجح. |
 | `2026-11-15` | `functions/*`, `firebase.json`, `firestore.rules`, `firebase-blueprint.json`, `src/lib/diagnosticsSanitizer.ts`, `src/services/diagnosticsService.ts`, `src/features/diagnostics/DiagnosticsView.tsx`, `src/features/profile/ProfileHubView.tsx`, `src/tests/diagnostics.test.ts`, `docs/DIAGNOSTICS.md`, `README.md`, `CHANGELOG.md`, `PROJECT_STATUS.md` | بناء **NEXORA Diagnostics System** (قراءة فقط ومقيد بالمالك، 5 أقسام، تصدير JSON منقّح، خادم Cloud Functions Gen 2، وقاعدة `diagnostics_admins/{uid}`). | إتاحة فحص صحة اللعبة وقاعدة البيانات واستخراج تقارير JSON آمنة خالية من الأسرار وPII. | `lint:rules` ناجح، `tsc --noEmit` ناجح، `functions` build ناجح، `vitest` (`20/20`)، `vite build` ناجح، `DeployRules` ناجح. |
 | `2026-11-15` | `functions/src/diagnosticsCore.ts`, `functions/src/index.ts`, `src/services/diagnosticsService.ts`, `firebase.json`, `src/tests/diagnostics.test.ts`, `docs/DIAGNOSTICS.md`, `PROJECT_STATUS.md` | مراجعة ما قبل النشر: إزالة قبول `claims.admin === true` منفرداً واشتراط `claims.diagnosticsOwner === true`، التحقق من `role === 'owner'` في `diagnostics_admins/{uid}`، وتثبيت `database` في `firebase.json` (دون نشر). | تشديد التفويض بحيث لا يعتمد على `admin` العام وحده ومطابقة إعدادات قاعدة البيانات المسماة. | `lint:rules` ناجح، `tsc --noEmit` ناجح، `functions` build ناجح، `vitest` (`20/20`)، `vite build` ناجح. |
+| `2026-11-15` | `firestore.rules`, `firebase-blueprint.json`, `vite.config.ts`, `src/types/game.ts`, `src/lib/economy.ts`, `src/services/gameService.ts`, `src/hooks/useGameData.ts`, `src/i18n/translations.ts`, `src/App.tsx`, `src/features/*`, `src/tests/audit.test.ts`, `README.md`, `CHANGELOG.md`, `docs/*`, `PROJECT_STATUS.md` | تنفيذ المراجعة الشاملة (`1.1.1`): فصل `company_hire` وتشديد قواعد `market_orders`/`inventory`/`organization_requests`، تصفير الحالة عند الخروج ودعم `myPendingOrgIds` وتحديث منتصف الليل UTC، تحسين أخطاء وحدود وحقول جميع الشاشات، تعريب السجل والرتب والمهام، التحميل الكسول لـ `DiagnosticsView` وتقسيم حزم `vite.config.ts`، وإضافة `audit.test.ts` (7 اختبارات). | رفع الأمان والاستقرار والأداء وتجربة اللعب وتغطية الاختبارات دون كسر البيانات الحالية أو نشر القواعد قبل الاعتماد. | `lint:rules` ناجح، `tsc --noEmit` ناجح، `functions` build ناجح، `vitest` (`27/27`)، `vite build` ناجح، `compile_applet` و`lint_applet` ناجحان. |

@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.1] - 2026-11-15
+### Security, Stability & UX Audit
+- **Security Hardening (`firestore.rules` — staged locally pending deploy)**:
+  - Separated staff hiring into dedicated transaction type `'company_hire'` across `src/types/game.ts`, `firebase-blueprint.json`, `src/services/gameService.ts`, and `firestore.rules`.
+  - Bounded `market_buy` fee (`0 <= fee <= (amount * 0.12) + 0.5`), verified `market_buy` itemId + exact `remainingQty` delta and `manufacturing` canonical recipe IDs on `inventory`, validated `txId` + `market_buy` fields on `market_orders`, and restricted `organization_requests` pending `allow list` to members with `manage_members` permission.
+- **Data Lifecycle & Service Fixes (`src/hooks/useGameData.ts`, `src/services/gameService.ts`, `src/lib/economy.ts`)**:
+  - Reset all scoped listeners and state collections cleanly on sign-out, subscribed to `myPendingOrgIds`, refreshed `utcDateKey` automatically across UTC midnight, and deduplicated achievement unlock writes.
+  - Added shared progression/cap constants (`COMPANY_MAX_LEVEL`, `COMPANY_MAX_STAFF`, `COMPANY_HIRE_COST`, `PROPERTY_MAX_LEVEL`, `LISTING_MAX_QTY`, `LISTING_MAX_PRICE`), `sanitizePositiveInt`, `getMissionProgress`, and `getAchievementProgress`, plus duplicate/capacity guards on organization join requests and approvals.
+- **UI/UX & Performance (`src/features/*`, `src/i18n/translations.ts`, `vite.config.ts`)**:
+  - Added localized Firebase Auth error feedback, active mission sorting + shortcut, `MAX` caps & busy/error handling for property lease/upgrade and org join decisions, sanitized numeric inputs and market preview clamping, leaderboard error/retry & empty states, owner-gated Diagnostics shortcut in Settings, lazy-loaded `DiagnosticsView`, and Vite `manualChunks` bundle splitting.
+- **Regression Tests**: Added `src/tests/audit.test.ts` (7 tests, bringing suite total to 27/27 passing tests).
+
 ## [1.1.0] - 2026-11-15
 ### Added — NEXORA Diagnostics System
 - Added read-only, owner-restricted **NEXORA Diagnostics System** (`src/features/diagnostics/DiagnosticsView.tsx`, `src/services/diagnosticsService.ts`, `src/lib/diagnosticsSanitizer.ts`) integrated into `ProfileHubView` (`Settings` / `Diagnostics` tab).

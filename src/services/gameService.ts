@@ -35,7 +35,15 @@ import {
   calculateLevelProgress,
   calculateManufacturingCost,
   calculatePropertyHourlyNet,
+  COMPANY_HIRE_COST,
+  COMPANY_MAX_LEVEL,
+  COMPANY_MAX_STAFF,
+  getAchievementProgress,
+  getMissionProgress,
   isValidUsername,
+  LISTING_MAX_PRICE,
+  LISTING_MAX_QTY,
+  PROPERTY_MAX_LEVEL,
   validateTransfer,
 } from '../lib/economy';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
@@ -461,10 +469,12 @@ export async function createMarketListing(
   qtyRaw: number,
   unitPriceRaw: number
 ): Promise<void> {
-  const qty = Math.floor(qtyRaw);
-  const unitPrice = Math.round(unitPriceRaw);
+  const qty = Number.isFinite(qtyRaw) ? Math.floor(qtyRaw) : 0;
+  const unitPrice = Number.isFinite(unitPriceRaw) ? Math.round(unitPriceRaw) : 0;
   if (!ITEM_MAP[itemId]) throw new Error('INVALID_ITEM');
-  if (qty < 1 || qty > 10000 || unitPrice < 1) throw new Error('INVALID_LISTING_PARAMS');
+  if (qty < 1 || qty > LISTING_MAX_QTY || unitPrice < 1 || unitPrice > LISTING_MAX_PRICE) {
+    throw new Error('INVALID_LISTING_PARAMS');
+  }
 
   const invDocId = `${uid}_${itemId}`;
   const listingId = genId('lst');
@@ -1014,7 +1024,7 @@ export async function upgradeCompany(uid: string, companyId: string): Promise<vo
       if (!compSnap.exists()) throw new Error('COMPANY_NOT_FOUND');
       const comp = compSnap.data() as Company;
       if (comp.ownerUid !== uid) throw new Error('UNAUTHORIZED');
-      if (comp.level >= 20) throw new Error('MAX_LEVEL');
+      if (comp.level >= COMPANY_MAX_LEVEL) throw new Error('MAX_LEVEL');
 
       const cost = comp.level * 550;
       const wallet = walletSnap.data() as Wallet;
@@ -1075,7 +1085,7 @@ export async function upgradeCompany(uid: string, companyId: string): Promise<vo
 export async function hireCompanyStaff(uid: string, companyId: string): Promise<void> {
   const txId = genId('tx');
   const logId = genId('clog');
-  const hireCost = 250;
+  const hireCost = COMPANY_HIRE_COST;
 
   try {
     await runTransaction(db, async (tx) => {
@@ -1085,7 +1095,7 @@ export async function hireCompanyStaff(uid: string, companyId: string): Promise<
       if (!compSnap.exists()) throw new Error('COMPANY_NOT_FOUND');
       const comp = compSnap.data() as Company;
       if (comp.ownerUid !== uid) throw new Error('UNAUTHORIZED');
-      if (comp.employeesCount >= 500) throw new Error('MAX_STAFF');
+      if (comp.employeesCount >= COMPANY_MAX_STAFF) throw new Error('MAX_STAFF');
 
       const wallet = walletSnap.data() as Wallet;
       if (wallet.balance < hireCost) throw new Error('INSUFFICIENT_FUNDS');
@@ -1097,7 +1107,7 @@ export async function hireCompanyStaff(uid: string, companyId: string): Promise<
         amount: hireCost,
         fee: 0,
         netAmount: hireCost,
-        type: 'manufacturing',
+        type: 'company_hire',
         referenceId: companyId,
         description: `Hired specialist for ${comp.name}`,
         status: 'completed',
@@ -1323,7 +1333,7 @@ export async function upgradeProperty(uid: string, propertyId: string): Promise<
       if (!propSnap.exists()) throw new Error('PROPERTY_NOT_FOUND');
       const prop = propSnap.data() as PropertyAsset;
       if (prop.ownerUid !== uid) throw new Error('UNAUTHORIZED');
-      if (prop.level >= 15) throw new Error('MAX_LEVEL');
+      if (prop.level >= PROPERTY_MAX_LEVEL) throw new Error('MAX_LEVEL');
 
       const cost = prop.level * 480;
       const wallet = walletSnap.data() as Wallet;
@@ -1452,20 +1462,7 @@ export async function claimMissionReward(uid: string, missionId: string): Promis
       const wallet = walletSnap.data() as Wallet;
       const profile = profileSnap.data() as PlayerProfile;
 
-      const currentProgress =
-        mission.metric === 'trades'
-          ? profile.stats.tradesCount
-          : mission.metric === 'companies'
-          ? profile.stats.companiesOwned
-          : mission.metric === 'properties'
-          ? profile.stats.propertiesOwned
-          : mission.metric === 'produced'
-          ? profile.stats.totalProduced
-          : mission.metric === 'org'
-          ? profile.orgId
-            ? 1
-            : 0
-          : profile.level;
+      const currentProgress = getMissionProgress(mission.metric, profile);
 
       if (currentProgress < mission.targetCount) {
         throw new Error('MISSION_NOT_COMPLETE');
@@ -1614,6 +1611,22 @@ export async function requestJoinOrganization(
 ): Promise<void> {
   const reqId = `${orgId}_${uid}_${Date.now()}`;
   try {
+    const [profileSnap, existingReqsSnap] = await Promise.all([
+      getDoc(doc(db, 'profiles', uid)),
+      getDocs(query(collection(db, 'organization_requests'), where('uid', '==', uid))),
+    ]);
+    if (profileSnap.exists()) {
+      const p = profileSnap.data() as PlayerProfile;
+      if (p.orgId) throw new Error('ALREADY_IN_ORG');
+    }
+    const alreadyPending = existingReqsSnap.docs.some((d) => {
+      const data = d.data() as { orgId?: string; status?: string };
+      return data.orgId === orgId && data.status === 'pending';
+    });
+    if (alreadyPending) {
+      throw new Error('REQUEST_ALREADY_PENDING');
+    }
+
     await setDoc(doc(db, 'organization_requests', reqId), {
       id: reqId,
       orgId,
@@ -1623,6 +1636,9 @@ export async function requestJoinOrganization(
       createdAt: serverTimestamp(),
     });
   } catch (error) {
+    if (error instanceof Error && ['ALREADY_IN_ORG', 'REQUEST_ALREADY_PENDING'].includes(error.message)) {
+      throw error;
+    }
     handleFirestoreError(error, OperationType.CREATE, `organization_requests/${reqId}`);
   }
 }
@@ -1638,14 +1654,39 @@ export async function handleOrgJoinRequest(
     await runTransaction(db, async (tx) => {
       const reqRef = doc(db, 'organization_requests', reqId);
       const orgRef = doc(db, 'organizations', orgId);
-      const [reqSnap, orgSnap] = await Promise.all([tx.get(reqRef), tx.get(orgRef)]);
+      const memberRef = doc(db, 'organization_members', `${orgId}_${applicantUid}`);
+      const applicantProfileRef = doc(db, 'profiles', applicantUid);
+
+      const [reqSnap, orgSnap, memberSnap, applicantProfileSnap] = await Promise.all([
+        tx.get(reqRef),
+        tx.get(orgRef),
+        tx.get(memberRef),
+        tx.get(applicantProfileRef),
+      ]);
       if (!reqSnap.exists() || !orgSnap.exists()) throw new Error('NOT_FOUND');
 
-      tx.update(reqRef, { status: decision });
+      const reqData = reqSnap.data() as { status: string };
+      if (reqData.status !== 'pending') {
+        throw new Error('REQUEST_ALREADY_HANDLED');
+      }
 
       if (decision === 'approved') {
         const org = orgSnap.data() as Organization;
-        tx.set(doc(db, 'organization_members', `${orgId}_${applicantUid}`), {
+        if (memberSnap.exists()) {
+          throw new Error('ALREADY_ORG_MEMBER');
+        }
+        if (applicantProfileSnap.exists()) {
+          const applicantProfile = applicantProfileSnap.data() as PlayerProfile;
+          if (applicantProfile.orgId && applicantProfile.orgId !== orgId) {
+            throw new Error('APPLICANT_IN_OTHER_ORG');
+          }
+        }
+        if (org.memberCount >= 200) {
+          throw new Error('ORG_FULL');
+        }
+
+        tx.update(reqRef, { status: decision });
+        tx.set(memberRef, {
           orgId,
           uid: applicantUid,
           username: applicantUsername,
@@ -1657,9 +1698,23 @@ export async function handleOrgJoinRequest(
           memberCount: org.memberCount + 1,
           updatedAt: serverTimestamp(),
         });
+      } else {
+        tx.update(reqRef, { status: decision });
       }
     });
   } catch (error) {
+    if (
+      error instanceof Error &&
+      [
+        'NOT_FOUND',
+        'REQUEST_ALREADY_HANDLED',
+        'ALREADY_ORG_MEMBER',
+        'APPLICANT_IN_OTHER_ORG',
+        'ORG_FULL',
+      ].includes(error.message)
+    ) {
+      throw error;
+    }
     handleFirestoreError(error, OperationType.UPDATE, `organization_requests/${reqId}`);
   }
 }
@@ -1923,36 +1978,32 @@ export async function checkAndUnlockAchievements(
   uid: string,
   profile: PlayerProfile,
   unlockedIds: Set<string>,
-  achievements: { id: string; metric: string; threshold: number }[]
-): Promise<void> {
-  for (const ach of achievements) {
-    if (unlockedIds.has(ach.id)) continue;
-    const val =
-      ach.metric === 'trades'
-        ? profile.stats.tradesCount
-        : ach.metric === 'companies'
-        ? profile.stats.companiesOwned
-        : ach.metric === 'properties'
-        ? profile.stats.propertiesOwned
-        : ach.metric === 'produced'
-        ? profile.stats.totalProduced
-        : ach.metric === 'reputation'
-        ? profile.reputation
-        : profile.level;
+  achievements: {
+    id: string;
+    metric: 'trades' | 'companies' | 'properties' | 'produced' | 'level' | 'reputation';
+    threshold: number;
+  }[]
+): Promise<string[]> {
+  const eligible = achievements.filter((ach) => {
+    if (unlockedIds.has(ach.id)) return false;
+    return getAchievementProgress(ach.metric, profile) >= ach.threshold;
+  });
 
-    if (val >= ach.threshold) {
+  if (eligible.length === 0) return [];
+
+  const unlockedNow: string[] = [];
+  await Promise.allSettled(
+    eligible.map(async (ach) => {
       const docId = `${uid}_${ach.id}`;
-      try {
-        await setDoc(doc(db, 'player_achievements', docId), {
-          uid,
-          achievementId: ach.id,
-          unlockedAt: serverTimestamp(),
-        });
-      } catch {
-        // Ignore duplicate race
-      }
-    }
-  }
+      await setDoc(doc(db, 'player_achievements', docId), {
+        uid,
+        achievementId: ach.id,
+        unlockedAt: serverTimestamp(),
+      });
+      unlockedNow.push(ach.id);
+    })
+  );
+  return unlockedNow;
 }
 
 export async function fetchOrgPendingRequests(orgId: string) {

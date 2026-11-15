@@ -69,6 +69,7 @@ export type TransactionType =
   | 'company_create'
   | 'company_upgrade'
   | 'company_collect'
+  | 'company_hire'
   | 'property_buy'
   | 'property_upgrade'
   | 'property_collect'

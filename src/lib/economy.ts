@@ -224,8 +224,82 @@ export function calculateAccruedPayout(
   lastCollectedMs: number,
   nowMs: number
 ): number {
-  if (netPerHour <= 0) return 0;
+  if (netPerHour <= 0 || !Number.isFinite(lastCollectedMs) || !Number.isFinite(nowMs)) return 0;
   const elapsedMs = Math.max(0, nowMs - lastCollectedMs);
   const cappedHours = Math.min(12, elapsedMs / 3_600_000);
   return Math.max(0, Math.floor(netPerHour * cappedHours));
 }
+
+export const COMPANY_MAX_LEVEL = 20;
+export const COMPANY_MAX_STAFF = 500;
+export const COMPANY_HIRE_COST = 250;
+export const PROPERTY_MAX_LEVEL = 15;
+export const LISTING_MAX_QTY = 10_000;
+export const LISTING_MAX_PRICE = 1_000_000;
+
+export function sanitizePositiveInt(raw: unknown, fallback = 1, max = Number.MAX_SAFE_INTEGER): number {
+  const num = typeof raw === 'number' ? raw : Number(raw);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.min(max, Math.max(1, Math.floor(num)));
+}
+
+export function getMissionProgress(
+  metric: 'trades' | 'companies' | 'properties' | 'produced' | 'level' | 'org',
+  profile: {
+    level: number;
+    orgId?: string | null;
+    stats: {
+      tradesCount: number;
+      companiesOwned: number;
+      propertiesOwned: number;
+      totalProduced: number;
+    };
+  }
+): number {
+  switch (metric) {
+    case 'trades':
+      return profile.stats.tradesCount;
+    case 'companies':
+      return profile.stats.companiesOwned;
+    case 'properties':
+      return profile.stats.propertiesOwned;
+    case 'produced':
+      return profile.stats.totalProduced;
+    case 'org':
+      return profile.orgId ? 1 : 0;
+    case 'level':
+    default:
+      return profile.level;
+  }
+}
+
+export function getAchievementProgress(
+  metric: 'trades' | 'companies' | 'properties' | 'produced' | 'level' | 'reputation',
+  profile: {
+    level: number;
+    reputation: number;
+    stats: {
+      tradesCount: number;
+      companiesOwned: number;
+      propertiesOwned: number;
+      totalProduced: number;
+    };
+  }
+): number {
+  switch (metric) {
+    case 'trades':
+      return profile.stats.tradesCount;
+    case 'companies':
+      return profile.stats.companiesOwned;
+    case 'properties':
+      return profile.stats.propertiesOwned;
+    case 'produced':
+      return profile.stats.totalProduced;
+    case 'reputation':
+      return profile.reputation;
+    case 'level':
+    default:
+      return profile.level;
+  }
+}
+

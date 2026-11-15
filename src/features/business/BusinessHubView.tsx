@@ -22,6 +22,10 @@ import {
   calculateCompanyHourlyNet,
   calculateManufacturingCost,
   calculatePropertyHourlyNet,
+  COMPANY_HIRE_COST,
+  COMPANY_MAX_LEVEL,
+  COMPANY_MAX_STAFF,
+  PROPERTY_MAX_LEVEL,
 } from '../../lib/economy';
 import {
   buyProperty,
@@ -162,8 +166,22 @@ export function BusinessHubView({
     try {
       await upgradeCompany(profile.uid, companyId);
       showToast(language === 'ar' ? 'تمت ترقية الشركة.' : 'Company upgraded.', 'success');
-    } catch {
-      showToast(language === 'ar' ? 'الرصيد غير كافٍ للترقية.' : 'Insufficient funds to upgrade.', 'error');
+    } catch (err) {
+      const code = err instanceof Error ? err.message : '';
+      showToast(
+        code === 'MAX_LEVEL'
+          ? language === 'ar'
+            ? `وصلت الشركة إلى الحد الأقصى للمستوى (${COMPANY_MAX_LEVEL}).`
+            : `Company reached maximum level (${COMPANY_MAX_LEVEL}).`
+          : code === 'INSUFFICIENT_FUNDS'
+          ? language === 'ar'
+            ? 'الرصيد غير كافٍ للترقية.'
+            : 'Insufficient funds to upgrade.'
+          : language === 'ar'
+          ? 'تعذر ترقية الشركة.'
+          : 'Company upgrade failed.',
+        'error'
+      );
     } finally {
       setBusyKey(null);
     }
@@ -174,8 +192,22 @@ export function BusinessHubView({
     try {
       await hireCompanyStaff(profile.uid, companyId);
       showToast(language === 'ar' ? 'تم توظيف كادر جديد.' : 'Staff member hired.', 'success');
-    } catch {
-      showToast(language === 'ar' ? 'الرصيد غير كافٍ (250 N-Credits).' : 'Insufficient funds (250).', 'error');
+    } catch (err) {
+      const code = err instanceof Error ? err.message : '';
+      showToast(
+        code === 'MAX_STAFF'
+          ? language === 'ar'
+            ? `وصلت الشركة إلى الحد الأقصى للكوادر (${COMPANY_MAX_STAFF}).`
+            : `Company reached staff cap (${COMPANY_MAX_STAFF}).`
+          : code === 'INSUFFICIENT_FUNDS'
+          ? language === 'ar'
+            ? `الرصيد غير كافٍ (${COMPANY_HIRE_COST} N-Credits).`
+            : `Insufficient funds (${COMPANY_HIRE_COST} N-Credits).`
+          : language === 'ar'
+          ? 'تعذر إتمام التوظيف.'
+          : 'Hiring failed.',
+        'error'
+      );
     } finally {
       setBusyKey(null);
     }
@@ -239,9 +271,66 @@ export function BusinessHubView({
         language === 'ar' ? `تم تحصيل +${earned} N-Credits إيجار.` : `Collected +${earned} N-Credits rent.`,
         'success'
       );
+    } catch (err) {
+      const code = err instanceof Error ? err.message : '';
+      showToast(
+        code === 'PROPERTY_VACANT'
+          ? language === 'ar'
+            ? 'العقار شاغر حالياً. فعّل التأجير أولاً لتحصيل الإيجار.'
+            : 'Property is vacant. Enable leasing first.'
+          : language === 'ar'
+          ? 'لم يتراكم إيجار قابل للتحصيل بعد.'
+          : 'No accrued rent ready yet.',
+        'error'
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function handleTogglePropertyLease(propId: string, nextState: boolean) {
+    setBusyKey(`plea_${propId}`);
+    try {
+      await togglePropertyLease(profile.uid, propId, nextState);
+      showToast(
+        nextState
+          ? language === 'ar'
+            ? 'تم تفعيل تأجير العقار.'
+            : 'Property is now leased.'
+          : language === 'ar'
+          ? 'تم تحويل العقار إلى شاغر.'
+          : 'Property set to vacant.',
+        'info'
+      );
     } catch {
       showToast(
-        language === 'ar' ? 'لم يتراكم إيجار قابل للتحصيل بعد.' : 'No accrued rent ready yet.',
+        language === 'ar' ? 'تعذر تحديث حالة العقار.' : 'Could not update lease status.',
+        'error'
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function handleUpgradeProperty(propId: string) {
+    setBusyKey(`pupg_${propId}`);
+    try {
+      await upgradeProperty(profile.uid, propId);
+      showToast(language === 'ar' ? 'تمت ترقية العقار بنجاح.' : 'Property upgraded.', 'success');
+    } catch (err) {
+      const code = err instanceof Error ? err.message : '';
+      showToast(
+        code === 'MAX_LEVEL'
+          ? language === 'ar'
+            ? `وصل العقار إلى الحد الأقصى للمستوى (${PROPERTY_MAX_LEVEL}).`
+            : `Property reached maximum level (${PROPERTY_MAX_LEVEL}).`
+          : code === 'INSUFFICIENT_FUNDS'
+          ? language === 'ar'
+            ? 'الرصيد غير كافٍ لترقية العقار.'
+            : 'Insufficient funds to upgrade property.'
+          : language === 'ar'
+          ? 'تعذر ترقية العقار.'
+          : 'Property upgrade failed.',
         'error'
       );
     } finally {
@@ -365,6 +454,8 @@ export function BusinessHubView({
                   nowMs
                 );
                 const upgradeCost = c.level * 550;
+                const isMaxLevel = c.level >= COMPANY_MAX_LEVEL;
+                const isMaxStaff = c.employeesCount >= COMPANY_MAX_STAFF;
                 const sectorSpec = COMPANY_SECTORS.find((s) => s.sector === c.sector);
 
                 return (
@@ -406,7 +497,7 @@ export function BusinessHubView({
                       <div>
                         <p className="text-[#9299A6]">{language === 'ar' ? 'تكلفة التطوير' : 'Upgrade Cost'}</p>
                         <p className="font-mono-num font-semibold text-[#F4F5F7] mt-0.5">
-                          {upgradeCost.toLocaleString()}
+                          {isMaxLevel ? t.maxLevelReached : upgradeCost.toLocaleString()}
                         </p>
                       </div>
                     </div>
@@ -422,20 +513,20 @@ export function BusinessHubView({
                       </button>
                       <button
                         type="button"
-                        disabled={busyKey === `upg_${c.id}` || (wallet?.balance ?? 0) < upgradeCost}
+                        disabled={isMaxLevel || busyKey === `upg_${c.id}` || (wallet?.balance ?? 0) < upgradeCost}
                         onClick={() => handleUpgradeCompany(c.id)}
                         className="min-h-[42px] px-3.5 rounded-xl bg-[#1B2230] hover:bg-[#232C3E] text-[#F4F5F7] text-xs font-semibold whitespace-nowrap disabled:opacity-50 transition-colors"
                       >
-                        {t.upgradeCompany}
+                        {isMaxLevel ? t.maxLevelReached : t.upgradeCompany}
                       </button>
                       <button
                         type="button"
-                        disabled={busyKey === `hire_${c.id}` || (wallet?.balance ?? 0) < 250}
+                        disabled={isMaxStaff || busyKey === `hire_${c.id}` || (wallet?.balance ?? 0) < COMPANY_HIRE_COST}
                         onClick={() => handleHireStaff(c.id)}
                         className="min-h-[42px] px-3.5 rounded-xl bg-[#1B2230] hover:bg-[#232C3E] text-[#F4F5F7] text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 transition-colors"
                       >
                         <UserPlus className="w-3.5 h-3.5" />
-                        <span>{t.hireStaff} (250)</span>
+                        <span>{isMaxStaff ? t.maxLevelReached : `${t.hireStaff} (${COMPANY_HIRE_COST})`}</span>
                       </button>
                     </div>
                   </div>
@@ -643,6 +734,7 @@ export function BusinessHubView({
                   nowMs
                 );
                 const upgradeCost = p.level * 480;
+                const isMaxLevel = p.level >= PROPERTY_MAX_LEVEL;
 
                 return (
                   <div
@@ -657,7 +749,11 @@ export function BusinessHubView({
                           <span className="font-mono-num text-[#F4F5F7]">{p.level}</span>
                         </p>
                       </div>
-                      <span className="text-sm font-mono-num font-bold text-emerald-400">
+                      <span
+                        className={`text-sm font-mono-num font-bold ${
+                          netHourly >= 0 ? 'text-emerald-400' : 'text-[#E04455]'
+                        }`}
+                      >
                         {netHourly >= 0 ? `+${netHourly}/hr` : `${netHourly}/hr`}
                       </span>
                     </div>
@@ -673,18 +769,19 @@ export function BusinessHubView({
                       </button>
                       <button
                         type="button"
-                        onClick={() => togglePropertyLease(profile.uid, p.id, !p.isRented)}
-                        className="min-h-[42px] px-3.5 rounded-xl bg-[#1B2230] hover:bg-[#232C3E] text-[#F4F5F7] text-xs font-semibold whitespace-nowrap"
+                        disabled={busyKey === `plea_${p.id}`}
+                        onClick={() => handleTogglePropertyLease(p.id, !p.isRented)}
+                        className="min-h-[42px] px-3.5 rounded-xl bg-[#1B2230] hover:bg-[#232C3E] text-[#F4F5F7] text-xs font-semibold whitespace-nowrap disabled:opacity-50"
                       >
                         {t.toggleRent}
                       </button>
                       <button
                         type="button"
-                        disabled={(wallet?.balance ?? 0) < upgradeCost}
-                        onClick={() => upgradeProperty(profile.uid, p.id)}
+                        disabled={isMaxLevel || busyKey === `pupg_${p.id}` || (wallet?.balance ?? 0) < upgradeCost}
+                        onClick={() => handleUpgradeProperty(p.id)}
                         className="min-h-[42px] px-3.5 rounded-xl bg-[#1B2230] hover:bg-[#232C3E] text-[#F4F5F7] text-xs font-semibold whitespace-nowrap disabled:opacity-50"
                       >
-                        {t.upgradeProperty} ({upgradeCost})
+                        {isMaxLevel ? t.maxLevelReached : `${t.upgradeProperty} (${upgradeCost})`}
                       </button>
                     </div>
                   </div>
@@ -786,8 +883,12 @@ export function BusinessHubView({
               <span>{language === 'ar' ? 'صافي العقارات / ساعة' : 'Properties Net / hr'}</span>
               <Landmark className="w-4 h-4 text-[#9299A6]" />
             </div>
-            <p className="text-xl font-bold font-mono-num text-emerald-400 mt-2">
-              +{totalPropNetHr.toLocaleString()}
+            <p
+              className={`text-xl font-bold font-mono-num mt-2 ${
+                totalPropNetHr >= 0 ? 'text-emerald-400' : 'text-[#E04455]'
+              }`}
+            >
+              {totalPropNetHr >= 0 ? `+${totalPropNetHr.toLocaleString()}` : totalPropNetHr.toLocaleString()}
             </p>
           </div>
         </div>

@@ -1,8 +1,9 @@
 import { Activity, Award, Globe, LogOut, ShieldCheck, Sliders, Trophy, Zap } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { useToast } from '../../components/ui/ToastProvider';
 import { ACHIEVEMENTS, AVATARS, MISSIONS, SKILL_DEFINITIONS } from '../../data/catalog';
-import { useTranslations } from '../../i18n/translations';
+import { formatMissionCategory, useTranslations } from '../../i18n/translations';
+import { getMissionProgress } from '../../lib/economy';
 import {
   verifyDiagnosticsOwnerAccess,
   type ClientSnapshotContext,
@@ -24,7 +25,10 @@ import type {
   SkillKey,
   UserPrivate,
 } from '../../types/game';
-import { DiagnosticsView } from '../diagnostics/DiagnosticsView';
+
+const DiagnosticsView = lazy(() =>
+  import('../diagnostics/DiagnosticsView').then((m) => ({ default: m.DiagnosticsView }))
+);
 
 interface ProfileHubViewProps {
   profile: PlayerProfile;
@@ -60,6 +64,7 @@ export function ProfileHubView({
     organizations: Organization[];
   }>({ players: [], companies: [], organizations: [] });
   const [lbLoading, setLbLoading] = useState(false);
+  const [lbError, setLbError] = useState(false);
 
   const claimedSet = new Set(claimedMissions.map((m) => m.missionId));
   const avatar = AVATARS.find((a) => a.id === profile.avatarId) || AVATARS[0];
@@ -70,23 +75,55 @@ export function ProfileHubView({
       .catch(() => setIsOwnerAuthorized(false));
   }, [profile.uid]);
 
-  useEffect(() => {
-    if (subTab !== 'rankings') return;
+  const loadLeaderboards = useCallback(() => {
     setLbLoading(true);
+    setLbError(false);
     fetchLeaderboards()
       .then((res) => setLeaderboards(res))
-      .catch(() => {})
+      .catch(() => setLbError(true))
       .finally(() => setLbLoading(false));
-  }, [subTab]);
+  }, []);
+
+  useEffect(() => {
+    if (subTab !== 'rankings') return;
+    loadLeaderboards();
+  }, [subTab, loadLeaderboards]);
+
+  async function handleAvatarChange(avatarId: string) {
+    if (profile.avatarId === avatarId) return;
+    setBusyKey(`av_${avatarId}`);
+    try {
+      await updatePlayerAvatar(profile.uid, avatarId);
+      showToast(language === 'ar' ? 'تم تحديث الصورة الشخصية.' : 'Avatar updated.', 'success');
+    } catch {
+      showToast(
+        language === 'ar' ? 'تعذر تحديث الصورة الشخصية.' : 'Could not update avatar.',
+        'error'
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  }
 
   async function handleUpgradeSkill(key: SkillKey) {
     setBusyKey(`sk_${key}`);
     try {
       await upgradeSkill(profile.uid, key);
       showToast(language === 'ar' ? 'تم تطوير المهارة بنجاح.' : 'Skill upgraded.', 'success');
-    } catch {
+    } catch (err) {
+      const code = err instanceof Error ? err.message : '';
       showToast(
-        language === 'ar' ? 'لا توجد نقاط مهارة متاحة.' : 'No skill points available.',
+        code === 'SKILL_MAXED'
+          ? language === 'ar'
+            ? 'وصلت هذه المهارة إلى الحد الأقصى.'
+            : 'This skill is already at maximum level.'
+          : code === 'NO_SKILL_POINTS'
+          ? language === 'ar'
+            ? 'لا توجد نقاط مهارة متاحة.'
+            : 'No skill points available.'
+          : language === 'ar'
+          ? 'تعذر تطوير المهارة.'
+          : 'Could not upgrade skill.',
         'error'
       );
     } finally {
@@ -99,9 +136,20 @@ export function ProfileHubView({
     try {
       await claimMissionReward(profile.uid, missionId);
       showToast(language === 'ar' ? 'تم استلام المكافأة.' : 'Reward claimed.', 'success');
-    } catch {
+    } catch (err) {
+      const code = err instanceof Error ? err.message : '';
       showToast(
-        language === 'ar' ? 'المهمة لم تكتمل بعد.' : 'Mission requirements not yet met.',
+        code === 'MISSION_ALREADY_CLAIMED'
+          ? language === 'ar'
+            ? 'تم استلام مكافأة هذه المهمة بالفعل.'
+            : 'Mission reward already claimed.'
+          : code === 'MISSION_NOT_COMPLETE'
+          ? language === 'ar'
+            ? 'المهمة لم تكتمل بعد.'
+            : 'Mission requirements not yet met.'
+          : language === 'ar'
+          ? 'تعذر استلام المكافأة.'
+          : 'Could not claim reward.',
         'error'
       );
     } finally {
@@ -187,8 +235,9 @@ export function ProfileHubView({
                 <button
                   key={av.id}
                   type="button"
-                  onClick={() => updatePlayerAvatar(profile.uid, av.id)}
-                  className={`w-10 h-10 rounded-xl overflow-hidden border transition-colors ${
+                  disabled={busyKey === `av_${av.id}`}
+                  onClick={() => handleAvatarChange(av.id)}
+                  className={`w-10 h-10 rounded-xl overflow-hidden border transition-colors disabled:opacity-50 ${
                     profile.avatarId === av.id ? 'border-[#E04455]' : 'border-white/10 opacity-70 hover:opacity-100'
                   }`}
                 >
@@ -310,20 +359,7 @@ export function ProfileHubView({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {MISSIONS.map((m) => {
             const isClaimed = claimedSet.has(m.id);
-            const val =
-              m.metric === 'trades'
-                ? profile.stats.tradesCount
-                : m.metric === 'companies'
-                ? profile.stats.companiesOwned
-                : m.metric === 'properties'
-                ? profile.stats.propertiesOwned
-                : m.metric === 'produced'
-                ? profile.stats.totalProduced
-                : m.metric === 'org'
-                ? profile.orgId
-                  ? 1
-                  : 0
-                : profile.level;
+            const val = getMissionProgress(m.metric, profile);
             const ready = val >= m.targetCount && !isClaimed;
 
             return (
@@ -339,7 +375,8 @@ export function ProfileHubView({
                     <Award className="w-4 h-4 text-[#E04455] shrink-0" />
                   </div>
                   <p className="text-xs text-[#9299A6]">
-                    {m.category} · <span className="font-mono-num">{Math.min(val, m.targetCount)}/{m.targetCount}</span>
+                    {formatMissionCategory(m.category, language)} ·{' '}
+                    <span className="font-mono-num">{Math.min(val, m.targetCount)}/{m.targetCount}</span>
                   </p>
                   <p className="text-xs text-[#9299A6] pt-1 leading-relaxed">
                     {language === 'ar' ? m.descriptionAr : m.descriptionEn}
@@ -391,46 +428,67 @@ export function ProfileHubView({
 
           {lbLoading ? (
             <p className="text-sm text-[#9299A6] py-8 text-center">{t.loading}</p>
+          ) : lbError ? (
+            <div className="py-8 text-center space-y-3">
+              <p className="text-sm text-[#E04455]">{t.leaderboardError}</p>
+              <button
+                type="button"
+                onClick={loadLeaderboards}
+                className="min-h-[40px] px-4 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white text-xs font-semibold"
+              >
+                {t.errorRetry}
+              </button>
+            </div>
           ) : lbTab === 'players' ? (
-            <div className="space-y-2">
-              {leaderboards.players.map((p, idx) => (
-                <div
-                  key={p.uid}
-                  className="p-3.5 rounded-xl bg-[#0B0D12] border border-white/6 flex items-center justify-between gap-3"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className="w-6 text-center font-mono-num text-xs font-bold text-[#E04455]">
-                      #{idx + 1}
-                    </span>
-                    <span className="text-sm font-medium text-[#F4F5F7] truncate">
-                      {p.username}
+            leaderboards.players.length === 0 ? (
+              <p className="text-sm text-[#9299A6] py-8 text-center">{t.noActivity}</p>
+            ) : (
+              <div className="space-y-2">
+                {leaderboards.players.map((p, idx) => (
+                  <div
+                    key={p.uid}
+                    className="p-3.5 rounded-xl bg-[#0B0D12] border border-white/6 flex items-center justify-between gap-3"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="w-6 text-center font-mono-num text-xs font-bold text-[#E04455]">
+                        #{idx + 1}
+                      </span>
+                      <span className="text-sm font-medium text-[#F4F5F7] truncate">
+                        {p.username}
+                      </span>
+                    </div>
+                    <span className="text-xs font-mono-num text-[#9299A6]">
+                      Lv.{p.level} · {p.influence} {t.influence}
                     </span>
                   </div>
-                  <span className="text-xs font-mono-num text-[#9299A6]">
-                    Lv.{p.level} · {p.influence} {t.influence}
-                  </span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )
           ) : lbTab === 'companies' ? (
-            <div className="space-y-2">
-              {leaderboards.companies.map((c, idx) => (
-                <div
-                  key={c.id}
-                  className="p-3.5 rounded-xl bg-[#0B0D12] border border-white/6 flex items-center justify-between gap-3"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className="w-6 text-center font-mono-num text-xs font-bold text-[#E04455]">
-                      #{idx + 1}
+            leaderboards.companies.length === 0 ? (
+              <p className="text-sm text-[#9299A6] py-8 text-center">{t.noActivity}</p>
+            ) : (
+              <div className="space-y-2">
+                {leaderboards.companies.map((c, idx) => (
+                  <div
+                    key={c.id}
+                    className="p-3.5 rounded-xl bg-[#0B0D12] border border-white/6 flex items-center justify-between gap-3"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="w-6 text-center font-mono-num text-xs font-bold text-[#E04455]">
+                        #{idx + 1}
+                      </span>
+                      <span className="text-sm font-medium text-[#F4F5F7] truncate">{c.name}</span>
+                    </div>
+                    <span className="text-xs font-mono-num text-emerald-400">
+                      {c.totalRevenue.toLocaleString()} {t.currency}
                     </span>
-                    <span className="text-sm font-medium text-[#F4F5F7] truncate">{c.name}</span>
                   </div>
-                  <span className="text-xs font-mono-num text-emerald-400">
-                    {c.totalRevenue.toLocaleString()} {t.currency}
-                  </span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )
+          ) : leaderboards.organizations.length === 0 ? (
+            <p className="text-sm text-[#9299A6] py-8 text-center">{t.noActivity}</p>
           ) : (
             <div className="space-y-2">
               {leaderboards.organizations.map((o, idx) => (
@@ -519,19 +577,21 @@ export function ProfileHubView({
             </button>
           </div>
 
-          <div className="pt-2 border-t border-white/8 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5">
-              <Activity className="w-4 h-4 text-[#E04455]" />
-              <span className="text-sm text-[#F4F5F7]">{t.subDiagnostics}</span>
+          {isOwnerAuthorized && (
+            <div className="pt-2 border-t border-white/8 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <Activity className="w-4 h-4 text-[#E04455]" />
+                <span className="text-sm text-[#F4F5F7]">{t.subDiagnostics}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSubTab('diagnostics')}
+                className="min-h-[40px] px-4 rounded-xl bg-[#0B0D12] border border-white/8 hover:border-[#B91C32]/50 text-xs font-semibold text-[#F4F5F7] whitespace-nowrap shrink-0 transition-colors"
+              >
+                {t.diagTitle}
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => setSubTab('diagnostics')}
-              className="min-h-[40px] px-4 rounded-xl bg-[#0B0D12] border border-white/8 hover:border-[#B91C32]/50 text-xs font-semibold text-[#F4F5F7] whitespace-nowrap shrink-0 transition-colors"
-            >
-              {t.diagTitle}
-            </button>
-          </div>
+          )}
 
           <button
             type="button"
@@ -544,9 +604,17 @@ export function ProfileHubView({
         </div>
       )}
 
-      {/* 6. DIAGNOSTICS (Owner-Gated) */}
-      {subTab === 'diagnostics' && (
-        <DiagnosticsView language={language} snapshotContext={diagnosticsContext} />
+      {/* 6. DIAGNOSTICS (Owner-Gated, Lazy-Loaded) */}
+      {subTab === 'diagnostics' && isOwnerAuthorized && (
+        <Suspense
+          fallback={
+            <div className="bg-[#141821] border border-white/8 rounded-2xl p-8 text-center text-sm text-[#9299A6]">
+              {t.loading}
+            </div>
+          }
+        >
+          <DiagnosticsView language={language} snapshotContext={diagnosticsContext} />
+        </Suspense>
       )}
     </div>
   );

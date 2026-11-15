@@ -3,8 +3,8 @@ import { useState } from 'react';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useToast } from '../../components/ui/ToastProvider';
 import { ORG_CREATION_COST } from '../../data/catalog';
-import { useTranslations } from '../../i18n/translations';
-import { hasOrgPermission } from '../../lib/economy';
+import { useTranslations, formatOrgRole } from '../../i18n/translations';
+import { hasOrgPermission, sanitizePositiveInt } from '../../lib/economy';
 import {
   createOrganization,
   depositToOrgTreasury,
@@ -32,6 +32,7 @@ interface OrganizationHubViewProps {
   myOrgMember: OrganizationMember | null;
   orgMembers: OrganizationMember[];
   orgRequests: OrganizationRequest[];
+  myPendingOrgIds: Set<string>;
   orgTransactions: OrganizationTransaction[];
   language: Language;
 }
@@ -43,6 +44,7 @@ export function OrganizationHubView({
   myOrgMember,
   orgMembers,
   orgRequests,
+  myPendingOrgIds,
   orgTransactions,
   language,
 }: OrganizationHubViewProps) {
@@ -101,8 +103,69 @@ export function OrganizationHubView({
         language === 'ar' ? 'تم إرسال طلب الانضمام للإدارة.' : 'Join request sent to leadership.',
         'success'
       );
-    } catch {
-      showToast(language === 'ar' ? 'تعذر إرسال الطلب.' : 'Could not submit request.', 'error');
+    } catch (err) {
+      const code = err instanceof Error ? err.message : '';
+      showToast(
+        code === 'REQUEST_ALREADY_PENDING'
+          ? language === 'ar'
+            ? 'لديك طلب انضمام قيد المراجعة لهذه المنظمة بالفعل.'
+            : 'You already have a pending request for this organization.'
+          : code === 'ALREADY_IN_ORG'
+          ? language === 'ar'
+            ? 'أنت عضو في منظمة أخرى بالفعل.'
+            : 'You are already a member of an organization.'
+          : language === 'ar'
+          ? 'تعذر إرسال الطلب.'
+          : 'Could not submit request.',
+        'error'
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function handleJoinDecision(
+    req: OrganizationRequest,
+    decision: 'approved' | 'rejected'
+  ) {
+    if (!currentOrg) return;
+    setBusyKey(`req_${req.id}`);
+    try {
+      await handleOrgJoinRequest(currentOrg.id, req.id, req.uid, req.username, decision);
+      showToast(
+        decision === 'approved'
+          ? language === 'ar'
+            ? `تم قبول ${req.username} في المنظمة.`
+            : `${req.username} approved.`
+          : language === 'ar'
+          ? `تم رفض طلب ${req.username}.`
+          : `Request from ${req.username} rejected.`,
+        decision === 'approved' ? 'success' : 'info'
+      );
+    } catch (err) {
+      const code = err instanceof Error ? err.message : '';
+      showToast(
+        code === 'REQUEST_ALREADY_HANDLED'
+          ? language === 'ar'
+            ? 'تمت معالجة هذا الطلب مسبقاً.'
+            : 'This request has already been handled.'
+          : code === 'ALREADY_ORG_MEMBER'
+          ? language === 'ar'
+            ? 'اللاعب عضو في هذه المنظمة بالفعل.'
+            : 'Player is already a member.'
+          : code === 'APPLICANT_IN_OTHER_ORG'
+          ? language === 'ar'
+            ? 'اللاعب انضم بالفعل إلى منظمة أخرى.'
+            : 'Applicant already joined another organization.'
+          : code === 'ORG_FULL'
+          ? language === 'ar'
+            ? 'وصلت المنظمة إلى الحد الأقصى للأعضاء.'
+            : 'Organization has reached member capacity.'
+          : language === 'ar'
+          ? 'تعذر تنفيذ القرار.'
+          : 'Could not process request.',
+        'error'
+      );
     } finally {
       setBusyKey(null);
     }
@@ -254,36 +317,39 @@ export function OrganizationHubView({
               </p>
             </div>
           ) : (
-            organizations.map((org) => (
-              <div
-                key={org.id}
-                className="bg-[#141821] border border-white/8 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-              >
-                <div className="space-y-1">
-                  <h3 className="text-base font-bold text-[#F4F5F7]">
-                    [{org.tag}] {org.name}
-                  </h3>
-                  <p className="text-xs text-[#9299A6]">
-                    {org.leaderName} · {t.members}:{' '}
-                    <span className="font-mono-num text-[#F4F5F7]">{org.memberCount}</span> ·{' '}
-                    {t.reputation}:{' '}
-                    <span className="font-mono-num text-[#F4F5F7]">{org.reputation}</span>
-                  </p>
-                  {org.description && (
-                    <p className="text-xs text-[#9299A6]/90 pt-1">{org.description}</p>
-                  )}
-                </div>
+              organizations.map((org) => {
+                const isPending = myPendingOrgIds.has(org.id);
+                return (
+                  <div
+                    key={org.id}
+                    className="bg-[#141821] border border-white/8 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                  >
+                    <div className="space-y-1">
+                      <h3 className="text-base font-bold text-[#F4F5F7]">
+                        [{org.tag}] {org.name}
+                      </h3>
+                      <p className="text-xs text-[#9299A6]">
+                        {org.leaderName} · {t.members}:{' '}
+                        <span className="font-mono-num text-[#F4F5F7]">{org.memberCount}</span> ·{' '}
+                        {t.reputation}:{' '}
+                        <span className="font-mono-num text-[#F4F5F7]">{org.reputation}</span>
+                      </p>
+                      {org.description && (
+                        <p className="text-xs text-[#9299A6]/90 pt-1">{org.description}</p>
+                      )}
+                    </div>
 
-                <button
-                  type="button"
-                  disabled={busyKey === `join_${org.id}`}
-                  onClick={() => handleRequestJoin(org.id)}
-                  className="min-h-[42px] px-4 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white text-xs font-semibold whitespace-nowrap shrink-0"
-                >
-                  {t.joinOrg}
-                </button>
-              </div>
-            ))
+                    <button
+                      type="button"
+                      disabled={isPending || busyKey === `join_${org.id}`}
+                      onClick={() => handleRequestJoin(org.id)}
+                      className="min-h-[42px] px-4 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white text-xs font-semibold whitespace-nowrap shrink-0 disabled:bg-[#1B2230] disabled:text-[#9299A6]"
+                    >
+                      {isPending ? t.requestPending : busyKey === `join_${org.id}` ? '...' : t.joinOrg}
+                    </button>
+                  </div>
+                );
+              })
           )}
         </div>
       </div>
@@ -341,13 +407,17 @@ export function OrganizationHubView({
             <input
               type="number"
               min={1}
-              value={treasuryAmt}
-              onChange={(e) => setTreasuryAmt(Math.max(1, Number(e.target.value)))}
+              value={treasuryAmt || ''}
+              onChange={(e) => {
+                const v = e.target.value;
+                setTreasuryAmt(v === '' ? 0 : sanitizePositiveInt(v, 1));
+              }}
+              onBlur={() => setTreasuryAmt((v) => sanitizePositiveInt(v, 1))}
               className="flex-1 min-h-[44px] px-3.5 rounded-xl bg-[#0B0D12] border border-white/10 text-sm font-mono-num text-[#F4F5F7]"
             />
             <button
               type="button"
-              disabled={busyKey === 'dep' || (wallet?.balance ?? 0) < treasuryAmt}
+              disabled={busyKey === 'dep' || treasuryAmt < 1 || (wallet?.balance ?? 0) < treasuryAmt}
               onClick={handleDeposit}
               className="min-h-[44px] px-4 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white text-xs font-semibold whitespace-nowrap disabled:bg-[#1B2230] disabled:text-[#9299A6]"
             >
@@ -356,7 +426,7 @@ export function OrganizationHubView({
             {canManageTreasury && (
               <button
                 type="button"
-                disabled={busyKey === 'wdr' || currentOrg.treasuryBalance < treasuryAmt}
+                disabled={busyKey === 'wdr' || treasuryAmt < 1 || currentOrg.treasuryBalance < treasuryAmt}
                 onClick={handleWithdraw}
                 className="min-h-[44px] px-4 rounded-xl bg-[#1B2230] hover:bg-[#232C3E] text-[#F4F5F7] text-xs font-semibold whitespace-nowrap disabled:opacity-50"
               >
@@ -375,7 +445,7 @@ export function OrganizationHubView({
                   className="flex items-center justify-between text-xs py-2 border-b border-white/6 last:border-0"
                 >
                   <span className="text-[#9299A6]">
-                    {otx.username} · {otx.type}
+                    {otx.username} · {otx.type === 'deposit' ? t.deposit : t.withdraw}
                   </span>
                   <span
                     className={`font-mono-num font-semibold ${
@@ -406,32 +476,18 @@ export function OrganizationHubView({
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() =>
-                          handleOrgJoinRequest(
-                            currentOrg.id,
-                            req.id,
-                            req.uid,
-                            req.username,
-                            'approved'
-                          )
-                        }
-                        className="min-h-[38px] px-3 rounded-lg bg-[#B91C32] text-white text-xs font-semibold flex items-center gap-1"
+                        disabled={busyKey === `req_${req.id}`}
+                        onClick={() => handleJoinDecision(req, 'approved')}
+                        className="min-h-[38px] px-3 rounded-lg bg-[#B91C32] hover:bg-[#E04455] text-white text-xs font-semibold flex items-center gap-1 disabled:opacity-50"
                       >
                         <Check className="w-3.5 h-3.5" />
                         <span>{t.approve}</span>
                       </button>
                       <button
                         type="button"
-                        onClick={() =>
-                          handleOrgJoinRequest(
-                            currentOrg.id,
-                            req.id,
-                            req.uid,
-                            req.username,
-                            'rejected'
-                          )
-                        }
-                        className="min-h-[38px] px-3 rounded-lg bg-[#1B2230] text-[#9299A6] text-xs font-semibold flex items-center gap-1"
+                        disabled={busyKey === `req_${req.id}`}
+                        onClick={() => handleJoinDecision(req, 'rejected')}
+                        className="min-h-[38px] px-3 rounded-lg bg-[#1B2230] hover:bg-[#232C3E] text-[#9299A6] text-xs font-semibold flex items-center gap-1 disabled:opacity-50"
                       >
                         <X className="w-3.5 h-3.5" />
                         <span>{t.reject}</span>
@@ -456,7 +512,7 @@ export function OrganizationHubView({
                 >
                   <div>
                     <p className="text-sm font-medium text-[#F4F5F7]">{m.username}</p>
-                    <p className="text-xs text-[#9299A6] mt-0.5">{m.role}</p>
+                    <p className="text-xs text-[#9299A6] mt-0.5">{formatOrgRole(m.role, language)}</p>
                   </div>
                   {canManageRoles && m.role !== 'leader' && m.uid !== profile.uid && (
                     <select
@@ -467,9 +523,9 @@ export function OrganizationHubView({
                       }
                       className="min-h-[38px] px-2.5 rounded-lg bg-[#141821] border border-white/10 text-xs text-[#F4F5F7]"
                     >
-                      <option value="member">member</option>
-                      <option value="officer">officer</option>
-                      <option value="deputy">deputy</option>
+                      <option value="member">{formatOrgRole('member', language)}</option>
+                      <option value="officer">{formatOrgRole('officer', language)}</option>
+                      <option value="deputy">{formatOrgRole('deputy', language)}</option>
                     </select>
                   )}
                 </div>
