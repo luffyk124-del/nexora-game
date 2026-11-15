@@ -63,40 +63,38 @@
 
 
 /* Tactile response shared by the game's buttons and navigation controls. */
-@layer base {
-  button,
-  [role="button"],
-  a[href],
-  input[type="button"],
-  input[type="submit"] {
+button,
+[role="button"],
+a[href],
+input[type="button"],
+input[type="submit"] {
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
     transition-property: transform, filter, background-color, border-color, color, box-shadow;
     transition-duration: 140ms;
     transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
+}
 
-  button:active:not(:disabled),
+button:active:not(:disabled),
   [role="button"]:active,
   a[href]:active,
   input[type="button"]:active:not(:disabled),
   input[type="submit"]:active:not(:disabled) {
     transform: scale(0.975);
     filter: brightness(1.12);
-  }
+}
 
-  button:disabled,
+button:disabled,
   input:disabled {
     cursor: not-allowed;
-  }
+}
 
-  button:focus-visible,
+button:focus-visible,
   [role="button"]:focus-visible,
   a[href]:focus-visible,
   input:focus-visible {
     outline: 2px solid rgba(224, 68, 85, 0.8);
     outline-offset: 3px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
