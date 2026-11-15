@@ -66,3 +66,15 @@ export function playButtonFeedback(context: AudioContext): void {
     output.disconnect();
   };
 }
+
+export async function closeGameAudioContext(): Promise<void> {
+  const active = sharedAudioContext;
+  sharedAudioContext = null;
+  if (active && active.state !== 'closed') {
+    try {
+      await active.close();
+    } catch {
+      // Closing an already-interrupted browser context is safe to ignore.
+    }
+  }
+}
