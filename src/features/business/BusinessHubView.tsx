@@ -522,7 +522,7 @@ export function BusinessHubView({
                       <div>
                         <p className="text-[#9299A6]">{language === 'ar' ? 'الإيراد المتراكم' : 'Accrued'}</p>
                         <p className="font-mono-num font-semibold text-[#F4F5F7] mt-0.5">
-                          {'$'}{accrued.toLocaleString()} {t.currency}
+                          {accrued.toLocaleString()} {t.currency}
                         </p>
                       </div>
                       <div>

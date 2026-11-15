@@ -217,7 +217,7 @@ export function HomeDashboardView({
           </div>
 
           <div className="bg-[#0B0D12] border border-white/6 rounded-xl p-3.5 flex items-center justify-between">
-            <span className="text-xs text-[#9299A6]">{t.currency}</span>
+            <span className="text-xs text-[#9299A6]">{language === 'ar' ? 'المكافأة' : 'Payout'}</span>
             <span className="text-base font-bold font-mono-num text-[#F4F5F7]">
               +{'$'}{dailyAmount.toLocaleString()}
             </span>

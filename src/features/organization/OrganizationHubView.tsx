@@ -478,7 +478,7 @@ export function OrganizationHubView({
           <div className="text-end">
             <p className="text-xs text-[#9299A6]">{t.orgTreasury}</p>
             <p className="text-lg font-bold font-mono-num text-emerald-400">
-              {'$'}{currentOrg.treasuryBalance.toLocaleString()} {t.currency}
+              {currentOrg.treasuryBalance.toLocaleString()} {t.currency}
             </p>
           </div>
           {canManageOrg && (
