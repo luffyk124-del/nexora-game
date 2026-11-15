@@ -1,5 +1,8 @@
 ## [Unreleased] - 2026-11-15
 ### Currency & Audio Experience
+- Added a shared Web Audio engine: the soundtrack and UI feedback reuse one lazily-created `AudioContext`; button tones are synthesized live with oscillators and gain envelopes, with no MP3/WAV assets or audio network requests.
+- Added global short confirmation tones for buttons, navigation links, and role-button controls after the first user gesture. The first pointer/keyboard interaction attempts `AudioContext.resume()` synchronously within the gesture path and safely handles unsupported/blocked audio.
+- Added responsive pressed states (`scale(0.975)`, brightness feedback), keyboard focus visibility, and reduced-motion support for interactive controls.
 - Replaced the visible N-Credits label with the `$` symbol across onboarding, wallet, market, business, organization, mission rewards, and transaction history; wallet values and economy calculations remain unchanged.
 - Added an original low-volume ambient electronic soundtrack using Web Audio, with smooth chord transitions and an explicit play/pause control in the app header.
 
