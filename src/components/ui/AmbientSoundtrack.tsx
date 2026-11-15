@@ -1,5 +1,5 @@
 import { Music2, VolumeX } from 'lucide-react';
-import { getGameAudioContext } from '../../lib/gameAudio';
+import { closeGameAudioContext, getGameAudioContext } from '../../lib/gameAudio';
 import { useEffect, useRef, useState } from 'react';
 
 type SoundEngine = {
@@ -64,7 +64,11 @@ export function AmbientSoundtrack({ language }: { language: 'ar' | 'en' }) {
     if (interval.current !== null) window.clearInterval(interval.current);
     const active = engine.current;
     engine.current = null;
-    if (active) void active.context.close();
+    if (active) {
+      active.voices.forEach((voice) => voice.stop());
+      active.bass.stop();
+      void closeGameAudioContext();
+    }
   }, []);
 
   async function toggleSoundtrack() {
