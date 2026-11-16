@@ -1464,7 +1464,8 @@ export async function handleOrgJoinRequest(
             throw new Error('APPLICANT_IN_OTHER_ORG');
           }
         }
-        const memberCapacity = typeof org.memberCapacity === 'number' ? org.memberCapacity : Math.min(70, 20 + (Math.max(1, org.level) - 1) * 5);\n        if (org.memberCount >= memberCapacity) {
+        const memberCapacity = typeof org.memberCapacity === 'number' ? org.memberCapacity : Math.min(70, 20 + (Math.max(1, org.level) - 1) * 5);
+        if (org.memberCount >= memberCapacity) {
           throw new Error('ORG_FULL');
         }
 
