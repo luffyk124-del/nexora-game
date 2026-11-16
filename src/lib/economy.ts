@@ -368,10 +368,21 @@ export function hasOrgPermission(
   return ROLE_DEFAULT_PERMISSIONS[member.role]?.includes(permission) ?? false;
 }
 
-export const ORG_MAX_LEVEL = 50;
+export const ORG_MAX_LEVEL = 10;
 
 export function calculateOrgUpgradeCost(level: number): number {
-  return Math.max(1, Math.floor(level)) * 1500;
+  const safeLevel = Math.max(1, Math.min(ORG_MAX_LEVEL, Math.floor(level)));
+  return 12_000 * safeLevel * safeLevel;
+}
+
+export function calculateOrgUpgradeDurationMs(targetLevel: number): number {
+  const safeTarget = Math.max(2, Math.min(ORG_MAX_LEVEL, Math.floor(targetLevel)));
+  return Math.round(8 * 60 * 60 * 1000 * Math.pow(1.5, safeTarget - 2));
+}
+
+export function getOrgMemberCapacity(level: number): number {
+  const safeLevel = Math.max(1, Math.min(ORG_MAX_LEVEL, Math.floor(level)));
+  return Math.min(70, 20 + (safeLevel - 1) * 5);
 }
 
 const ROLE_WEIGHT: Record<OrgRole, number> = {
