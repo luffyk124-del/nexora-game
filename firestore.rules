@@ -357,9 +357,19 @@ service cloud.firestore {
         || (data.type == 'facility' && txAmount == 2800 && data.purchasePrice == 2800 && data.rentPerHour == 350 && data.maintenancePerHour == 80);
     }
 
+    function isValidOrgResearch(research) {
+      return research is map
+        && research.keys().hasOnly(['commerce', 'engineering', 'expansion', 'finance', 'diplomacy'])
+        && (!('commerce' in research) || (research.commerce is int && research.commerce >= 0 && research.commerce <= 10))
+        && (!('engineering' in research) || (research.engineering is int && research.engineering >= 0 && research.engineering <= 10))
+        && (!('expansion' in research) || (research.expansion is int && research.expansion >= 0 && research.expansion <= 10))
+        && (!('finance' in research) || (research.finance is int && research.finance >= 0 && research.finance <= 10))
+        && (!('diplomacy' in research) || (research.diplomacy is int && research.diplomacy >= 0 && research.diplomacy <= 10));
+    }
+
     function isValidOrganization(data) {
       return data.keys().hasAll(['id', 'name', 'tag', 'description', 'leaderUid', 'leaderName', 'treasuryBalance', 'memberCount', 'reputation', 'level', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'name', 'tag', 'description', 'leaderUid', 'leaderName', 'treasuryBalance', 'memberCount', 'reputation', 'level', 'memberCapacity', 'upgradeStartedAt', 'upgradeEndsAt', 'upgradeTargetLevel', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'name', 'tag', 'description', 'leaderUid', 'leaderName', 'treasuryBalance', 'memberCount', 'reputation', 'level', 'memberCapacity', 'research', 'upgradeStartedAt', 'upgradeEndsAt', 'upgradeTargetLevel', 'createdAt', 'updatedAt'])
         && isValidId(data.id)
         && data.name is string && data.name.size() >= 3 && data.name.size() <= 40
         && data.tag is string && data.tag.size() >= 2 && data.tag.size() <= 6
@@ -370,7 +380,8 @@ service cloud.firestore {
         && data.memberCount is int && data.memberCount >= 1 && data.memberCount <= 200
         && data.reputation is int && data.reputation >= 0
         && data.level is int && data.level >= 1 && data.level <= 50
-        && (!('memberCapacity' in data) || (data.memberCapacity is int && data.memberCapacity >= 20 && data.memberCapacity <= 70))
+        && (!('memberCapacity' in data) || (data.memberCapacity is int && data.memberCapacity >= 20 && data.memberCapacity <= 80))
+        && (!('research' in data) || isValidOrgResearch(data.research))
         && (!('upgradeStartedAt' in data) || data.upgradeStartedAt is number)
         && (!('upgradeEndsAt' in data) || data.upgradeEndsAt == null || data.upgradeEndsAt is number)
         && (!('upgradeTargetLevel' in data) || data.upgradeTargetLevel == null || (data.upgradeTargetLevel is int && data.upgradeTargetLevel >= 2 && data.upgradeTargetLevel <= 10));
@@ -919,7 +930,7 @@ false
             newWalletTx(request.auth.uid).referenceId == orgId &&
             incoming().treasuryBalance == existing().treasuryBalance + newWalletTx(request.auth.uid).amount &&
             incoming().reputation >= existing().reputation &&
-            incoming().reputation == existing().reputation + math.max(1, math.floor(newWalletTx(request.auth.uid).amount / 100))
+            incoming().reputation == existing().reputation + math.max(1, math.floor((newWalletTx(request.auth.uid).amount / 100) * (1 + ((('research' in existing()) && ('diplomacy' in existing().research)) ? existing().research.diplomacy : 0) * 0.01)))
           ) ||
           // Action 2: Authorized treasurer withdraws from treasury (paired with atomic wallet credit)
           (
