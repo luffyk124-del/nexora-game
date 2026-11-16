@@ -1,4 +1,4 @@
-import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
+import { onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut, type User } from 'firebase/auth';
 import {
   collection,
   doc,
@@ -547,7 +547,30 @@ export function useGameData(): GameDataState {
   }, [authUser, profile, unlockedAchievements]);
 
   const loginWithGoogle = useCallback(async () => {
-    await signInWithPopup(auth, googleAuthProvider);
+    const isMobileBrowser =
+      typeof navigator !== 'undefined' &&
+      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+
+    // Mobile browsers and in-app webviews often block or lose OAuth pop-ups.
+    // Redirect auth survives the browser hand-off and resumes through onAuthStateChanged.
+    if (isMobileBrowser) {
+      await signInWithRedirect(auth, googleAuthProvider);
+      return;
+    }
+
+    try {
+      await signInWithPopup(auth, googleAuthProvider);
+    } catch (error) {
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String((error as { code?: unknown }).code || '')
+          : '';
+      if (code === 'auth/popup-blocked') {
+        await signInWithRedirect(auth, googleAuthProvider);
+        return;
+      }
+      throw error;
+    }
   }, []);
 
   const logout = useCallback(async () => {
