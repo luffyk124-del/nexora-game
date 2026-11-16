@@ -69,7 +69,6 @@ export type TransactionType =
   | 'company_create'
   | 'company_upgrade'
   | 'company_collect'
-  | 'company_hire'
   | 'company_vault_upgrade'
   | 'property_buy'
   | 'property_upgrade'
@@ -161,7 +160,6 @@ export interface Company {
   sector: CompanySector;
   level: number;
   capital: number;
-  employeesCount: number;
   baseRevenuePerHour: number;
   expensePerHour: number;
   totalRevenue: number;
