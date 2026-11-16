@@ -4,6 +4,7 @@ import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useToast } from '../../components/ui/ToastProvider';
 import { ORG_CREATION_COST, ROLE_DEFAULT_PERMISSIONS } from '../../data/catalog';
 import { useTranslations, formatOrgRole } from '../../i18n/translations';
+import { searchAndSortOrganizations, type OrganizationSort } from '../../lib/organizationDirectory';
 import {
   calculateOrgUpgradeCost,
   canManageOrgMember,
@@ -62,6 +63,8 @@ export function OrganizationHubView({
   const [orgName, setOrgName] = useState('');
   const [orgTag, setOrgTag] = useState('');
   const [orgDesc, setOrgDesc] = useState('');
+  const [orgSearch, setOrgSearch] = useState('');
+  const [orgSort, setOrgSort] = useState<OrganizationSort>('reputation');
   const [treasuryAmt, setTreasuryAmt] = useState(100);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
@@ -96,17 +99,27 @@ export function OrganizationHubView({
         'success'
       );
     } catch (err) {
-      const code = err instanceof Error ? err.message : '';
-      showToast(
-        code === 'INSUFFICIENT_FUNDS'
-          ? language === 'ar'
-            ? `يتطلب التأسيس ${ORG_CREATION_COST} N-Credits.`
-            : `Founding requires ${ORG_CREATION_COST} N-Credits.`
-          : language === 'ar'
-          ? 'تأكد من صحة الاسم والرمز.'
-          : 'Check organization name and tag.',
-        'error'
-      );
+      const rawMessage = err instanceof Error ? err.message : '';
+      let code = rawMessage;
+      try {
+        const parsed = JSON.parse(rawMessage) as { code?: unknown };
+        if (typeof parsed.code === 'string') code = parsed.code;
+      } catch {
+        // Keep the original application error code.
+      }
+      const knownMessages: Record<string, string> = {
+        INVALID_NAME: language === 'ar' ? 'اسم المنظمة يجب أن يكون بين 3 و40 حرفاً.' : 'Organization name must be 3–40 characters.',
+        INVALID_TAG: language === 'ar' ? 'رمز المنظمة يجب أن يكون بين حرفين و6 أحرف.' : 'Organization tag must be 2–6 characters.',
+        ALREADY_IN_ORG: language === 'ar' ? 'أنت عضو في منظمة بالفعل.' : 'You are already in an organization.',
+        ACCOUNT_NOT_FOUND: language === 'ar' ? 'تعذر العثور على بيانات الحساب.' : 'Account data was not found.',
+        INSUFFICIENT_FUNDS: language === 'ar' ? `يتطلب التأسيس ${ORG_CREATION_COST} $.` : `Founding requires ${ORG_CREATION_COST} $.`,
+        'permission-denied': language === 'ar' ? 'رفضت قواعد Firestore حفظ المنظمة (permission-denied).' : 'Firestore rules rejected organization creation (permission-denied).',
+        unavailable: language === 'ar' ? 'خدمة قاعدة البيانات غير متاحة حالياً (unavailable).' : 'Database service is currently unavailable (unavailable).',
+      };
+      const message = knownMessages[code] || (code && code !== rawMessage
+        ? (language === 'ar' ? `فشل تأسيس المنظمة: ${code}` : `Organization creation failed: ${code}`)
+        : (language === 'ar' ? 'تعذر تأسيس المنظمة. تحقق من تفاصيل الخطأ.' : 'Organization creation failed. Check the error details.'));
+      showToast(message, 'error');
     } finally {
       setBusyKey(null);
     }
@@ -314,6 +327,8 @@ export function OrganizationHubView({
     }
   }
 
+  const visibleOrganizations = searchAndSortOrganizations(organizations, orgSearch, orgSort);
+
   if (!myOrgMember || !currentOrg) {
     return (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -371,7 +386,7 @@ export function OrganizationHubView({
             disabled={busyKey === 'create_org' || (wallet?.balance ?? 0) < ORG_CREATION_COST}
             className="w-full min-h-[44px] px-4 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white text-sm font-semibold transition-colors disabled:bg-[#1B2230] disabled:text-[#9299A6]"
           >
-            {t.createOrg} ({ORG_CREATION_COST.toLocaleString()})
+            {t.createOrg} ({'$'}{ORG_CREATION_COST.toLocaleString()})
           </button>
         </form>
 
@@ -384,6 +399,18 @@ export function OrganizationHubView({
             <Building2 className="w-4 h-4 text-[#9299A6]" />
           </div>
 
+          {organizations.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_190px] gap-2.5">
+              <input type="search" value={orgSearch} onChange={(e) => setOrgSearch(e.target.value)} placeholder={language === 'ar' ? 'ابحث بالاسم أو الرمز أو القائد...' : 'Search name, tag or leader...'} aria-label={language === 'ar' ? 'البحث عن منظمة' : 'Search organizations'} className="w-full min-h-[44px] px-3.5 rounded-xl bg-[#0B0D12] border border-white/10 text-sm text-[#F4F5F7] focus:outline-none focus:border-[#E04455]" />
+              <select value={orgSort} onChange={(e) => setOrgSort(e.target.value as OrganizationSort)} aria-label={language === 'ar' ? 'ترتيب المنظمات' : 'Sort organizations'} className="w-full min-h-[44px] px-3.5 rounded-xl bg-[#0B0D12] border border-white/10 text-sm text-[#F4F5F7] focus:outline-none focus:border-[#E04455]">
+                <option value="reputation">{language === 'ar' ? 'الأعلى سمعة' : 'Top reputation'}</option>
+                <option value="members">{language === 'ar' ? 'الأكثر أعضاءً' : 'Most members'}</option>
+                <option value="level">{language === 'ar' ? 'الأعلى مستوى' : 'Highest level'}</option>
+                <option value="treasury">{language === 'ar' ? 'الأغنى خزينةً' : 'Largest treasury'}</option>
+              </select>
+            </div>
+          )}
+
           {organizations.length === 0 ? (
             <div className="bg-[#141821] border border-white/8 rounded-2xl p-8 text-center">
               <p className="text-sm text-[#9299A6]">
@@ -393,7 +420,9 @@ export function OrganizationHubView({
               </p>
             </div>
           ) : (
-              organizations.map((org) => {
+              visibleOrganizations.length === 0 ? (
+                <div className="bg-[#141821] border border-white/8 rounded-2xl p-6 text-center text-sm text-[#9299A6]">{language === 'ar' ? 'لا توجد نتائج مطابقة لبحثك.' : 'No organizations match your search.'}</div>
+              ) : visibleOrganizations.map((org) => {
                 const isPending = myPendingOrgIds.has(org.id);
                 return (
                   <div
@@ -459,7 +488,7 @@ export function OrganizationHubView({
           <div className="text-end">
             <p className="text-xs text-[#9299A6]">{t.orgTreasury}</p>
             <p className="text-lg font-bold font-mono-num text-emerald-400">
-              {currentOrg.treasuryBalance.toLocaleString()} {t.currency}
+              {'$'}{currentOrg.treasuryBalance.toLocaleString()}
             </p>
           </div>
           {canManageOrg && (
@@ -477,7 +506,7 @@ export function OrganizationHubView({
               <span>
                 {isOrgMaxLevel
                   ? t.maxLevelReached
-                  : `${t.upgradeOrg} (${orgUpgradeCost.toLocaleString()})`}
+                  : `${t.upgradeOrg} ($${orgUpgradeCost.toLocaleString()})`}
               </span>
             </button>
           )}
@@ -560,7 +589,7 @@ export function OrganizationHubView({
                         }`}
                       >
                         {isInflow ? '+' : '-'}
-                        {otx.amount.toLocaleString()}
+                        {'$'}{otx.amount.toLocaleString()}
                       </span>
                     </div>
                   );
@@ -683,7 +712,7 @@ export function OrganizationHubView({
                         {formatOrgRole(m.role, language)}
                         {contributed > 0 && (
                           <span className="ms-2 font-mono-num text-emerald-400">
-                            · +{contributed.toLocaleString()}
+                            · +${contributed.toLocaleString()}
                           </span>
                         )}
                       </p>

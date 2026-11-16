@@ -100,7 +100,7 @@ service cloud.firestore {
         && data.usernameLower is string && data.usernameLower.size() >= 3 && data.usernameLower.size() <= 24
         && data.avatarId is string && data.avatarId.size() >= 1 && data.avatarId.size() <= 64
         && data.title is string && data.title.size() >= 1 && data.title.size() <= 64
-        && data.level is int && data.level >= 1 && data.level <= 200
+        && data.level is int && data.level >= 1 && data.level <= 1000
         && data.xp is int && data.xp >= 0
         && data.reputation is int && data.reputation >= 0
         && data.influence is int && data.influence >= 0
@@ -147,7 +147,7 @@ service cloud.firestore {
         && data.netAmount is number && data.netAmount >= 0 && data.netAmount == data.amount - data.fee
         && data.type in [
           'transfer', 'market_buy', 'mission_reward', 'daily_stipend',
-          'company_create', 'company_upgrade', 'company_collect', 'company_hire',
+          'company_create', 'company_upgrade', 'company_collect', 'company_vault_upgrade',
           'property_buy', 'property_upgrade', 'property_collect',
           'manufacturing', 'org_create', 'org_deposit', 'org_withdraw', 'contract_deal'
         ]
@@ -194,13 +194,13 @@ service cloud.firestore {
         (tx.type == 'contract_deal' && tx.fromUid == 'SYSTEM' && tx.toUid == request.auth.uid && tx.amount <= 2500 && tx.fee == 0 && !exists(/databases/$(database)/documents/contract_claims/$(tx.referenceId)) && getAfter(/databases/$(database)/documents/contract_claims/$(tx.referenceId)).data.uid == request.auth.uid && getAfter(/databases/$(database)/documents/contract_claims/$(tx.referenceId)).data.amount == tx.amount) ||
         (tx.type == 'company_create' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount >= 900 && tx.fee == 0 && !exists(/databases/$(database)/documents/companies/$(tx.referenceId)) && getAfter(/databases/$(database)/documents/companies/$(tx.referenceId)).data.ownerUid == request.auth.uid) ||
         (tx.type == 'company_upgrade' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount >= 550 && tx.fee == 0 && get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.ownerUid == request.auth.uid && getAfter(/databases/$(database)/documents/companies/$(tx.referenceId)).data.level == get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.level + 1) ||
-        (tx.type == 'company_hire' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount == 250 && tx.fee == 0 && get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.ownerUid == request.auth.uid && getAfter(/databases/$(database)/documents/companies/$(tx.referenceId)).data.employeesCount == get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.employeesCount + 1) ||
-        (tx.type == 'company_collect' && tx.fromUid == 'SYSTEM' && tx.toUid == request.auth.uid && tx.amount <= 25000 && tx.fee == 0 && get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.ownerUid == request.auth.uid && getAfter(/databases/$(database)/documents/companies/$(tx.referenceId)).data.lastCollectedAt == request.time && (request.time - get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.lastCollectedAt).seconds() >= 30 && tx.amount <= (request.time - get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.lastCollectedAt).seconds() * 15) ||
+        (tx.type == 'company_vault_upgrade' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.fee == 0 && exists(/databases/$(database)/documents/companies/$(tx.referenceId)) && get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.ownerUid == request.auth.uid && getAfter(/databases/$(database)/documents/companies/$(tx.referenceId)).data.vaultLevel == companyVaultLevel(get(/databases/$(database)/documents/companies/$(tx.referenceId)).data) + 1 && tx.amount == (companyVaultLevel(get(/databases/$(database)/documents/companies/$(tx.referenceId)).data) == 1 ? 1500 : companyVaultLevel(get(/databases/$(database)/documents/companies/$(tx.referenceId)).data) == 2 ? 4000 : companyVaultLevel(get(/databases/$(database)/documents/companies/$(tx.referenceId)).data) == 3 ? 10000 : 25000)) ||
+        (tx.type == 'company_collect' && tx.fromUid == 'SYSTEM' && tx.toUid == request.auth.uid && tx.amount <= (companyVaultLevel(get(/databases/$(database)/documents/companies/$(tx.referenceId)).data) == 1 ? 3500 : companyVaultLevel(get(/databases/$(database)/documents/companies/$(tx.referenceId)).data) == 2 ? 7000 : companyVaultLevel(get(/databases/$(database)/documents/companies/$(tx.referenceId)).data) == 3 ? 14000 : companyVaultLevel(get(/databases/$(database)/documents/companies/$(tx.referenceId)).data) == 4 ? 25000 : 40000) && tx.fee == 0 && get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.ownerUid == request.auth.uid && getAfter(/databases/$(database)/documents/companies/$(tx.referenceId)).data.lastCollectedAt == request.time && (request.time - get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.lastCollectedAt).seconds() >= 30) ||
         (tx.type == 'property_buy' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount >= 950 && tx.fee == 0 && !exists(/databases/$(database)/documents/properties/$(tx.referenceId)) && getAfter(/databases/$(database)/documents/properties/$(tx.referenceId)).data.ownerUid == request.auth.uid) ||
         (tx.type == 'property_upgrade' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount >= 480 && tx.fee == 0 && get(/databases/$(database)/documents/properties/$(tx.referenceId)).data.ownerUid == request.auth.uid && getAfter(/databases/$(database)/documents/properties/$(tx.referenceId)).data.level == get(/databases/$(database)/documents/properties/$(tx.referenceId)).data.level + 1) ||
         (tx.type == 'property_collect' && tx.fromUid == 'SYSTEM' && tx.toUid == request.auth.uid && tx.amount <= 15000 && tx.fee == 0 && get(/databases/$(database)/documents/properties/$(tx.referenceId)).data.ownerUid == request.auth.uid && get(/databases/$(database)/documents/properties/$(tx.referenceId)).data.isRented == true && getAfter(/databases/$(database)/documents/properties/$(tx.referenceId)).data.lastCollectedAt == request.time && (request.time - get(/databases/$(database)/documents/properties/$(tx.referenceId)).data.lastCollectedAt).seconds() >= 60 && tx.amount <= (request.time - get(/databases/$(database)/documents/properties/$(tx.referenceId)).data.lastCollectedAt).seconds() * 10) ||
         (tx.type == 'manufacturing' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount >= 10 && tx.fee == 0 && tx.referenceId in ['rec_microchips', 'rec_precision_frame', 'rec_synth_polymer', 'rec_quantum_server', 'rec_logistics_drone', 'rec_bio_module']) ||
-        (tx.type == 'org_create' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount == 1000 && tx.fee == 0 && !exists(/databases/$(database)/documents/organizations/$(tx.referenceId)) && getAfter(/databases/$(database)/documents/organizations/$(tx.referenceId)).data.leaderUid == request.auth.uid) ||
+        (tx.type == 'org_create' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount == 1000 && tx.fee == 0 && !exists(/databases/$(database)/documents/organizations/$(tx.referenceId))) ||
         (tx.type == 'org_deposit' && tx.fromUid == request.auth.uid && tx.toUid == 'ORG' && tx.fee == 0 && isOrgMember(tx.referenceId) && getAfter(/databases/$(database)/documents/organizations/$(tx.referenceId)).data.treasuryBalance == get(/databases/$(database)/documents/organizations/$(tx.referenceId)).data.treasuryBalance + tx.amount) ||
         (tx.type == 'org_withdraw' && tx.fromUid == 'ORG' && tx.toUid == request.auth.uid && tx.fee == 0 && hasOrgPermission(tx.referenceId, 'manage_treasury') && getAfter(/databases/$(database)/documents/organizations/$(tx.referenceId)).data.treasuryBalance == get(/databases/$(database)/documents/organizations/$(tx.referenceId)).data.treasuryBalance - tx.amount)
       );
@@ -288,28 +288,42 @@ service cloud.firestore {
         && isValidId(data.txId);
     }
 
+    function companyVaultLevel(data) {
+      return ('vaultLevel' in data) ? data.vaultLevel : 1;
+    }
+
+    function hasVaultMaterialSpend(uid, itemId, qty) {
+      return exists(/databases/$(database)/documents/inventory/$(uid + '_' + itemId))
+        && get(/databases/$(database)/documents/inventory/$(uid + '_' + itemId)).data.quantity >= qty
+        && getAfter(/databases/$(database)/documents/inventory/$(uid + '_' + itemId)).data.quantity ==
+          get(/databases/$(database)/documents/inventory/$(uid + '_' + itemId)).data.quantity - qty;
+    }
+
     function isValidCompany(data) {
-      return data.keys().hasAll(['id', 'ownerUid', 'ownerName', 'name', 'sector', 'level', 'capital', 'employeesCount', 'baseRevenuePerHour', 'expensePerHour', 'totalRevenue', 'lastCollectedAt', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'ownerUid', 'ownerName', 'name', 'sector', 'level', 'capital', 'employeesCount', 'baseRevenuePerHour', 'expensePerHour', 'totalRevenue', 'lastCollectedAt', 'createdAt', 'updatedAt'])
+      return data.keys().hasAll(['id', 'ownerUid', 'ownerName', 'name', 'sector', 'level', 'capital', 'baseRevenuePerHour', 'expensePerHour', 'totalRevenue', 'lastCollectedAt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerUid', 'ownerName', 'name', 'sector', 'level', 'capital', 'employeesCount', 'baseRevenuePerHour', 'expensePerHour', 'totalRevenue', 'vaultLevel', 'vaultBalance', 'levelUpgradeStartedAt', 'levelUpgradeEndsAt', 'levelUpgradeTargetLevel', 'levelUpgradeCost', 'vaultUpgradeStartedAt', 'vaultUpgradeEndsAt', 'vaultUpgradeTargetLevel', 'lastCollectedAt', 'createdAt', 'updatedAt'])
         && isValidId(data.id)
         && isValidId(data.ownerUid)
         && data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 64
         && data.name is string && data.name.size() >= 2 && data.name.size() <= 48
         && data.sector in ['trade', 'manufacturing', 'services', 'tech', 'logistics']
-        && data.level is int && data.level >= 1 && data.level <= 20
+        && data.level is int && data.level >= 1 && data.level <= 100
         && data.capital is number && data.capital >= 0
-        && data.employeesCount is int && data.employeesCount >= 1 && data.employeesCount <= 500
         && data.baseRevenuePerHour is number && data.baseRevenuePerHour >= 10 && data.baseRevenuePerHour <= 50000
         && data.expensePerHour is number && data.expensePerHour >= 0
-        && data.totalRevenue is number && data.totalRevenue >= 0;
+        && data.totalRevenue is number && data.totalRevenue >= 0
+        && (!('vaultLevel' in data) || (data.vaultLevel is int && data.vaultLevel >= 1 && data.vaultLevel <= 5 && 'vaultBalance' in data && data.vaultBalance is number && data.vaultBalance >= 0 && data.vaultBalance <= (data.vaultLevel == 1 ? 3500 : data.vaultLevel == 2 ? 7000 : data.vaultLevel == 3 ? 14000 : data.vaultLevel == 4 ? 25000 : 40000)))
+        && (!('vaultBalance' in data) || 'vaultLevel' in data)
+        && (!('levelUpgradeEndsAt' in data) || (data.levelUpgradeEndsAt is number && data.levelUpgradeTargetLevel is int && data.levelUpgradeTargetLevel >= 2 && data.levelUpgradeTargetLevel <= 100 && data.levelUpgradeCost is number))
+        && (!('vaultUpgradeEndsAt' in data) || (data.vaultUpgradeEndsAt is number && data.vaultUpgradeTargetLevel is int && data.vaultUpgradeTargetLevel >= 2 && data.vaultUpgradeTargetLevel <= 5));
     }
 
     function isCanonicalCompanyCreate(data, txAmount) {
-      return (data.sector == 'trade' && txAmount == 900 && data.capital == 900 && data.employeesCount == 3 && data.baseRevenuePerHour == 140 && data.expensePerHour == 35)
-        || (data.sector == 'services' && txAmount == 1100 && data.capital == 1100 && data.employeesCount == 4 && data.baseRevenuePerHour == 175 && data.expensePerHour == 45)
-        || (data.sector == 'logistics' && txAmount == 1400 && data.capital == 1400 && data.employeesCount == 5 && data.baseRevenuePerHour == 225 && data.expensePerHour == 60)
-        || (data.sector == 'manufacturing' && txAmount == 1800 && data.capital == 1800 && data.employeesCount == 6 && data.baseRevenuePerHour == 290 && data.expensePerHour == 80)
-        || (data.sector == 'tech' && txAmount == 2200 && data.capital == 2200 && data.employeesCount == 7 && data.baseRevenuePerHour == 365 && data.expensePerHour == 95);
+      return (data.sector == 'trade' && txAmount == 900 && data.capital == 900 && data.baseRevenuePerHour == 140 && data.expensePerHour == 35)
+        || (data.sector == 'services' && txAmount == 1100 && data.capital == 1100 && data.baseRevenuePerHour == 175 && data.expensePerHour == 45)
+        || (data.sector == 'logistics' && txAmount == 1400 && data.capital == 1400 && data.baseRevenuePerHour == 225 && data.expensePerHour == 60)
+        || (data.sector == 'manufacturing' && txAmount == 1800 && data.capital == 1800 && data.baseRevenuePerHour == 290 && data.expensePerHour == 80)
+        || (data.sector == 'tech' && txAmount == 2200 && data.capital == 2200 && data.baseRevenuePerHour == 365 && data.expensePerHour == 95);
     }
 
     function isValidCompanyLog(data) {
@@ -762,6 +776,8 @@ service cloud.firestore {
         && incoming().ownerUid == request.auth.uid
         && incoming().level == 1
         && incoming().totalRevenue == 0
+        && incoming().vaultLevel == 1
+        && incoming().vaultBalance == 0
         && incoming().lastCollectedAt == request.time
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
@@ -792,24 +808,7 @@ service cloud.firestore {
             newWalletTx(request.auth.uid).referenceId == companyId &&
             newWalletTx(request.auth.uid).amount == existing().level * 550
           ) ||
-          // Action 2: Hire specialist
-          (
-            incoming().diff(existing()).affectedKeys().hasOnly(['employeesCount', 'updatedAt']) &&
-            incoming().employeesCount == existing().employeesCount + 1 &&
-            hasNewWalletTx(request.auth.uid) &&
-            newWalletTx(request.auth.uid).type == 'company_hire' &&
-            newWalletTx(request.auth.uid).referenceId == companyId &&
-            newWalletTx(request.auth.uid).amount == 250
-          ) ||
-          // Action 3: Collect accrued revenue
-          (
-            incoming().diff(existing()).affectedKeys().hasOnly(['totalRevenue', 'lastCollectedAt', 'updatedAt']) &&
-            incoming().lastCollectedAt == request.time &&
-            hasNewWalletTx(request.auth.uid) &&
-            newWalletTx(request.auth.uid).type == 'company_collect' &&
-            newWalletTx(request.auth.uid).referenceId == companyId &&
-            incoming().totalRevenue == existing().totalRevenue + newWalletTx(request.auth.uid).amount
-          )
+false
         );
       allow delete: if false;
     }
@@ -916,7 +915,7 @@ service cloud.firestore {
             newWalletTx(request.auth.uid).referenceId == orgId &&
             incoming().treasuryBalance == existing().treasuryBalance + newWalletTx(request.auth.uid).amount &&
             incoming().reputation >= existing().reputation &&
-            incoming().reputation <= existing().reputation + 100
+            incoming().reputation == existing().reputation + math.max(1, math.floor(newWalletTx(request.auth.uid).amount / 100))
           ) ||
           // Action 2: Authorized treasurer withdraws from treasury (paired with atomic wallet credit)
           (
@@ -1141,3 +1140,7 @@ service cloud.firestore {
     }
   }
 }
+
+// NEXORA rules deployment trigger: 2026-11-16
+// NEXORA rules deployment retry: 2026-11-16
+// NEXORA Firestore rules deployment retry after Service Usage Viewer grant: 2026-11-16

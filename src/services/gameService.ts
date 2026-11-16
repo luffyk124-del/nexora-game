@@ -30,7 +30,6 @@ import {
 } from '../data/catalog';
 import {
   calculateAccruedPayout,
-  calculateCompanyHourlyNet,
   calculateContractPayout,
   calculateDailyStipend,
   calculateLevelProgress,
@@ -38,9 +37,7 @@ import {
   calculateOrgUpgradeCost,
   calculatePropertyHourlyNet,
   canManageOrgMember,
-  COMPANY_HIRE_COST,
   COMPANY_MAX_LEVEL,
-  COMPANY_MAX_STAFF,
   getAchievementProgress,
   getMissionProgress,
   hasOrgPermission,
@@ -52,7 +49,7 @@ import {
   timestampToMs as parseTimestampMs,
   validateTransfer,
 } from '../lib/economy';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
 import type {
   Company,
   CompanySector,
@@ -68,7 +65,6 @@ import type {
   SkillKey,
   SkillsMap,
   Wallet,
-  WorldEvent,
 } from '../types/game';
 
 function genId(prefix: string): string {
@@ -248,8 +244,8 @@ export async function createPlayerCharacter(
         title: language === 'ar' ? 'مرحباً بك في NEXORA' : 'Welcome to NEXORA',
         body:
           language === 'ar'
-            ? `تم إيداع ${STARTING_CREDITS.toLocaleString()} N-Credits في محفظتك وتخصيص 3 نقاط مهارة.`
-            : `${STARTING_CREDITS.toLocaleString()} N-Credits and 3 skill points credited to your account.`,
+            ? `تم إيداع $${STARTING_CREDITS.toLocaleString()} في محفظتك وتخصيص 3 نقاط مهارة.`
+            : `$${STARTING_CREDITS.toLocaleString()} and 3 skill points credited to your account.`,
         type: 'system',
         read: false,
         createdAt: serverTimestamp(),
@@ -329,7 +325,7 @@ export async function claimDailyStipend(uid: string): Promise<number> {
         id: notifId,
         uid,
         title: 'Daily Stipend Credited',
-        body: `+${amount} N-Credits & +40 XP`,
+        body: `+$${amount} & +40 XP`,
         type: 'economy',
         read: false,
         createdAt: serverTimestamp(),
@@ -449,7 +445,7 @@ export async function transferCredits(
         id: notifId,
         uid: fromUid,
         title: 'Transfer Sent',
-        body: `-${amount.toLocaleString()} N-Credits -> ${recipientUsername.trim()}`,
+        body: `-$${amount.toLocaleString()} -> ${recipientUsername.trim()}`,
         type: 'economy',
         read: false,
         createdAt: serverTimestamp(),
@@ -716,9 +712,10 @@ export async function cancelMarketListing(uid: string, listingId: string): Promi
   }
 }
 
-export async function manufactureRecipe(uid: string, recipeId: string): Promise<void> {
+export async function manufactureRecipe(uid: string, recipeId: string, batchQuantity = 1): Promise<void> {
   const recipe = MANUFACTURING_RECIPES.find((r) => r.id === recipeId);
   if (!recipe) throw new Error('INVALID_RECIPE');
+  if (!Number.isInteger(batchQuantity) || batchQuantity < 1 || batchQuantity > 999) throw new Error('INVALID_QUANTITY');
   const txId = genId('tx');
 
   try {
@@ -743,13 +740,13 @@ export async function manufactureRecipe(uid: string, recipeId: string): Promise<
         throw new Error('INDUSTRY_SKILL_TOO_LOW');
       }
 
-      const cost = calculateManufacturingCost(recipe, profile.skills.industry || 0);
+      const cost = calculateManufacturingCost(recipe, profile.skills.industry || 0) * batchQuantity;
       if (wallet.balance < cost) throw new Error('INSUFFICIENT_FUNDS');
 
       for (let i = 0; i < recipe.inputs.length; i++) {
         const inp = recipe.inputs[i];
         const snap = inputSnaps[i];
-        if (!snap.exists() || (snap.data() as InventoryItem).quantity < inp.qty) {
+        if (!snap.exists() || (snap.data() as InventoryItem).quantity < inp.qty * batchQuantity) {
           throw new Error('MISSING_INPUTS');
         }
       }
@@ -763,7 +760,7 @@ export async function manufactureRecipe(uid: string, recipeId: string): Promise<
         netAmount: cost,
         type: 'manufacturing',
         referenceId: recipeId,
-        description: `Manufactured ${recipe.outputQty}x ${recipe.outputItemId}`,
+        description: `Manufactured ${recipe.outputQty * batchQuantity}x ${recipe.outputItemId} (${batchQuantity} batches)`,
         status: 'completed',
         createdAt: serverTimestamp(),
       });
@@ -779,7 +776,7 @@ export async function manufactureRecipe(uid: string, recipeId: string): Promise<
         const inp = recipe.inputs[i];
         const prev = (inputSnaps[i].data() as InventoryItem).quantity;
         tx.update(inputRefs[i], {
-          quantity: prev - inp.qty,
+          quantity: prev - inp.qty * batchQuantity,
           updatedAt: serverTimestamp(),
         });
       }
@@ -787,24 +784,24 @@ export async function manufactureRecipe(uid: string, recipeId: string): Promise<
       if (outInvSnap.exists()) {
         const prevOut = (outInvSnap.data() as InventoryItem).quantity;
         tx.update(outInvRef, {
-          quantity: prevOut + recipe.outputQty,
+          quantity: prevOut + recipe.outputQty * batchQuantity,
           updatedAt: serverTimestamp(),
         });
       } else {
         tx.set(outInvRef, {
           uid,
           itemId: recipe.outputItemId,
-          quantity: recipe.outputQty,
+          quantity: recipe.outputQty * batchQuantity,
           updatedAt: serverTimestamp(),
         });
       }
 
-      const xpUpdate = applyXpAndLevel(profile, recipe.xpReward, 3, 2);
+      const xpUpdate = applyXpAndLevel(profile, recipe.xpReward * batchQuantity, 3, 2);
       tx.update(profileRef, {
         ...xpUpdate,
         stats: {
           ...profile.stats,
-          totalProduced: profile.stats.totalProduced + recipe.outputQty,
+          totalProduced: profile.stats.totalProduced + recipe.outputQty * batchQuantity,
         },
         updatedAt: serverTimestamp(),
       });
@@ -812,7 +809,7 @@ export async function manufactureRecipe(uid: string, recipeId: string): Promise<
   } catch (error) {
     if (
       error instanceof Error &&
-      ['INVALID_RECIPE', 'INDUSTRY_SKILL_TOO_LOW', 'INSUFFICIENT_FUNDS', 'MISSING_INPUTS'].includes(
+      ['INVALID_RECIPE', 'INVALID_QUANTITY', 'INDUSTRY_SKILL_TOO_LOW', 'INSUFFICIENT_FUNDS', 'MISSING_INPUTS'].includes(
         error.message
       )
     ) {
@@ -957,10 +954,11 @@ export async function foundCompany(
         sector,
         level: 1,
         capital: spec.foundingCost,
-        employeesCount: spec.initialEmployees,
         baseRevenuePerHour: spec.baseRevenuePerHour,
         expensePerHour: spec.baseExpensePerHour,
         totalRevenue: 0,
+        vaultLevel: 1,
+        vaultBalance: 0,
         lastCollectedAt: serverTimestamp(),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -1016,246 +1014,48 @@ export async function foundCompany(
 }
 
 export async function upgradeCompany(uid: string, companyId: string): Promise<void> {
-  const txId = genId('tx');
-  const logId = genId('clog');
-
-  try {
-    await runTransaction(db, async (tx) => {
-      const compRef = doc(db, 'companies', companyId);
-      const walletRef = doc(db, 'wallets', uid);
-      const profileRef = doc(db, 'profiles', uid);
-      const [compSnap, walletSnap, profileSnap] = await Promise.all([
-        tx.get(compRef),
-        tx.get(walletRef),
-        tx.get(profileRef),
-      ]);
-
-      if (!compSnap.exists()) throw new Error('COMPANY_NOT_FOUND');
-      const comp = compSnap.data() as Company;
-      if (comp.ownerUid !== uid) throw new Error('UNAUTHORIZED');
-      if (comp.level >= COMPANY_MAX_LEVEL) throw new Error('MAX_LEVEL');
-
-      const cost = comp.level * 550;
-      const wallet = walletSnap.data() as Wallet;
-      const profile = profileSnap.data() as PlayerProfile;
-      if (wallet.balance < cost) throw new Error('INSUFFICIENT_FUNDS');
-
-      tx.set(doc(db, 'transactions', txId), {
-        id: txId,
-        fromUid: uid,
-        toUid: 'SYSTEM',
-        amount: cost,
-        fee: 0,
-        netAmount: cost,
-        type: 'company_upgrade',
-        referenceId: companyId,
-        description: `Upgraded ${comp.name} to Lv.${comp.level + 1}`,
-        status: 'completed',
-        createdAt: serverTimestamp(),
-      });
-
-      tx.update(walletRef, {
-        balance: wallet.balance - cost,
-        totalSpent: wallet.totalSpent + cost,
-        lastTxId: txId,
-        updatedAt: serverTimestamp(),
-      });
-
-      tx.update(compRef, {
-        level: comp.level + 1,
-        capital: comp.capital + cost,
-        updatedAt: serverTimestamp(),
-      });
-
-      const xpUpdate = applyXpAndLevel(profile, 75, 8, 5);
-      tx.update(profileRef, {
-        ...xpUpdate,
-        updatedAt: serverTimestamp(),
-      });
-
-      tx.set(doc(db, 'company_logs', logId), {
-        id: logId,
-        companyId,
-        ownerUid: uid,
-        action: 'upgrade',
-        amount: -cost,
-        details: `Upgraded to Level ${comp.level + 1}`,
-        createdAt: serverTimestamp(),
-      });
-    });
-  } catch (error) {
-    if (error instanceof Error && ['COMPANY_NOT_FOUND', 'UNAUTHORIZED', 'MAX_LEVEL', 'INSUFFICIENT_FUNDS'].includes(error.message)) {
-      throw error;
-    }
-    handleFirestoreError(error, OperationType.UPDATE, `companies/${companyId}`);
-  }
+  await callCompanyVault<{ ok: boolean }>(uid, 'company_upgrade', companyId);
 }
 
-export async function hireCompanyStaff(uid: string, companyId: string): Promise<void> {
-  const txId = genId('tx');
-  const logId = genId('clog');
-  const hireCost = COMPANY_HIRE_COST;
+async function callCompanyVault<T>(
+  uid: string,
+  action: 'upgrade' | 'collect' | 'company_upgrade' | 'company_complete' | 'vault_complete',
+  companyId: string
+): Promise<T> {
+  const currentUser = auth.currentUser;
+  if (!currentUser || currentUser.uid !== uid) throw new Error('UNAUTHORIZED');
 
-  try {
-    await runTransaction(db, async (tx) => {
-      const compRef = doc(db, 'companies', companyId);
-      const walletRef = doc(db, 'wallets', uid);
-      const [compSnap, walletSnap] = await Promise.all([tx.get(compRef), tx.get(walletRef)]);
-      if (!compSnap.exists()) throw new Error('COMPANY_NOT_FOUND');
-      const comp = compSnap.data() as Company;
-      if (comp.ownerUid !== uid) throw new Error('UNAUTHORIZED');
-      if (comp.employeesCount >= COMPANY_MAX_STAFF) throw new Error('MAX_STAFF');
-
-      const wallet = walletSnap.data() as Wallet;
-      if (wallet.balance < hireCost) throw new Error('INSUFFICIENT_FUNDS');
-
-      tx.set(doc(db, 'transactions', txId), {
-        id: txId,
-        fromUid: uid,
-        toUid: 'SYSTEM',
-        amount: hireCost,
-        fee: 0,
-        netAmount: hireCost,
-        type: 'company_hire',
-        referenceId: companyId,
-        description: `Hired specialist for ${comp.name}`,
-        status: 'completed',
-        createdAt: serverTimestamp(),
-      });
-
-      tx.update(walletRef, {
-        balance: wallet.balance - hireCost,
-        totalSpent: wallet.totalSpent + hireCost,
-        lastTxId: txId,
-        updatedAt: serverTimestamp(),
-      });
-
-      tx.update(compRef, {
-        employeesCount: comp.employeesCount + 1,
-        updatedAt: serverTimestamp(),
-      });
-
-      tx.set(doc(db, 'company_logs', logId), {
-        id: logId,
-        companyId,
-        ownerUid: uid,
-        action: 'hire',
-        amount: -hireCost,
-        details: `Staff expanded to ${comp.employeesCount + 1}`,
-        createdAt: serverTimestamp(),
-      });
-    });
-  } catch (error) {
-    if (error instanceof Error && ['COMPANY_NOT_FOUND', 'UNAUTHORIZED', 'MAX_STAFF', 'INSUFFICIENT_FUNDS'].includes(error.message)) {
-      throw error;
-    }
-    handleFirestoreError(error, OperationType.UPDATE, `companies/${companyId}`);
+  const idToken = await currentUser.getIdToken();
+  const response = await fetch('/api/company-vault', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ action, companyId }),
+  });
+  const payload = await response.json().catch(() => ({})) as { error?: unknown } & Record<string, unknown>;
+  if (!response.ok) {
+    throw new Error(typeof payload.error === 'string' ? payload.error : 'COMPANY_VAULT_OPERATION_FAILED');
   }
+  return payload as T;
+}
+
+export async function upgradeCompanyVault(uid: string, companyId: string): Promise<void> {
+  await callCompanyVault<{ ok: boolean }>(uid, 'upgrade', companyId);
+}
+
+export async function completeCompanyUpgrade(uid: string, companyId: string): Promise<void> {
+  await callCompanyVault<{ ok: boolean }>(uid, 'company_complete', companyId);
+}
+
+export async function completeCompanyVaultUpgrade(uid: string, companyId: string): Promise<void> {
+  await callCompanyVault<{ ok: boolean }>(uid, 'vault_complete', companyId);
 }
 
 export async function collectCompanyRevenue(uid: string, companyId: string): Promise<number> {
-  const txId = genId('tx');
-  const logId = genId('clog');
-
-  let worldEvents: WorldEvent[] = [];
-  try {
-    const eventsSnap = await getDocs(
-      query(collection(db, 'world_events'), where('active', '==', true))
-    );
-    worldEvents = eventsSnap.docs.map((d) => d.data() as WorldEvent);
-  } catch {
-    worldEvents = [];
-  }
-
-  try {
-    let payout = 0;
-    await runTransaction(db, async (tx) => {
-      const compRef = doc(db, 'companies', companyId);
-      const walletRef = doc(db, 'wallets', uid);
-      const profileRef = doc(db, 'profiles', uid);
-      const [compSnap, walletSnap, profileSnap] = await Promise.all([
-        tx.get(compRef),
-        tx.get(walletRef),
-        tx.get(profileRef),
-      ]);
-
-      if (!compSnap.exists()) throw new Error('COMPANY_NOT_FOUND');
-      const comp = compSnap.data() as Company;
-      if (comp.ownerUid !== uid) throw new Error('UNAUTHORIZED');
-
-      const nowMs = Date.now();
-      const lastCollectedMs = timestampToMs(comp.lastCollectedAt);
-      if (nowMs - lastCollectedMs < 30_000) {
-        throw new Error('NOTHING_TO_COLLECT');
-      }
-
-      const wallet = walletSnap.data() as Wallet;
-      const profile = profileSnap.data() as PlayerProfile;
-      const { netHourly } = calculateCompanyHourlyNet(
-        comp,
-        {
-          management: profile.skills.management || 0,
-          finance: profile.skills.finance || 0,
-        },
-        worldEvents,
-        nowMs,
-        profile.reputation
-      );
-
-      const rawAccrued = calculateAccruedPayout(netHourly, lastCollectedMs, nowMs);
-      payout = Math.min(25000, rawAccrued);
-      if (payout < 1) throw new Error('NOTHING_TO_COLLECT');
-
-      tx.set(doc(db, 'transactions', txId), {
-        id: txId,
-        fromUid: 'SYSTEM',
-        toUid: uid,
-        amount: payout,
-        fee: 0,
-        netAmount: payout,
-        type: 'company_collect',
-        referenceId: companyId,
-        description: `Company revenue collected: ${comp.name}`,
-        status: 'completed',
-        createdAt: serverTimestamp(),
-      });
-
-      tx.update(walletRef, {
-        balance: wallet.balance + payout,
-        totalEarned: wallet.totalEarned + payout,
-        lastTxId: txId,
-        updatedAt: serverTimestamp(),
-      });
-
-      tx.update(compRef, {
-        totalRevenue: comp.totalRevenue + payout,
-        lastCollectedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-
-      const xpUpdate = applyXpAndLevel(profile, Math.min(80, Math.max(10, Math.floor(payout / 15))), 2, 1);
-      tx.update(profileRef, {
-        ...xpUpdate,
-        updatedAt: serverTimestamp(),
-      });
-
-      tx.set(doc(db, 'company_logs', logId), {
-        id: logId,
-        companyId,
-        ownerUid: uid,
-        action: 'collect',
-        amount: payout,
-        details: `Collected +${payout} N-Credits`,
-        createdAt: serverTimestamp(),
-      });
-    });
-    return payout;
-  } catch (error) {
-    if (error instanceof Error && ['COMPANY_NOT_FOUND', 'UNAUTHORIZED', 'NOTHING_TO_COLLECT'].includes(error.message)) {
-      throw error;
-    }
-    handleFirestoreError(error, OperationType.UPDATE, `companies/${companyId}`);
-  }
+  const result = await callCompanyVault<{ ok: boolean; payout: number }>(uid, 'collect', companyId);
+  return result.payout;
 }
 
 export async function buyProperty(
@@ -1909,7 +1709,7 @@ export async function depositToOrgTreasury(
   amountRaw: number
 ): Promise<void> {
   const amount = Math.floor(amountRaw);
-  if (amount <= 0) throw new Error('INVALID_AMOUNT');
+  if (!Number.isFinite(amountRaw) || amount <= 0 || amount > 10_000_000) throw new Error('INVALID_AMOUNT');
   const txId = genId('tx');
   const orgTxId = genId('otx');
 
@@ -1917,8 +1717,10 @@ export async function depositToOrgTreasury(
     await runTransaction(db, async (tx) => {
       const walletRef = doc(db, 'wallets', uid);
       const orgRef = doc(db, 'organizations', orgId);
-      const [walletSnap, orgSnap] = await Promise.all([tx.get(walletRef), tx.get(orgRef)]);
+      const memberRef = doc(db, 'organization_members', `${orgId}_${uid}`);
+      const [walletSnap, orgSnap, memberSnap] = await Promise.all([tx.get(walletRef), tx.get(orgRef), tx.get(memberRef)]);
       if (!walletSnap.exists() || !orgSnap.exists()) throw new Error('NOT_FOUND');
+      if (!memberSnap.exists()) throw new Error('UNAUTHORIZED');
 
       const wallet = walletSnap.data() as Wallet;
       const org = orgSnap.data() as Organization;
@@ -1963,7 +1765,7 @@ export async function depositToOrgTreasury(
       });
     });
   } catch (error) {
-    if (error instanceof Error && ['INVALID_AMOUNT', 'INSUFFICIENT_FUNDS'].includes(error.message)) {
+    if (error instanceof Error && ['INVALID_AMOUNT', 'INSUFFICIENT_FUNDS', 'UNAUTHORIZED'].includes(error.message)) {
       throw error;
     }
     handleFirestoreError(error, OperationType.WRITE, `organizations/${orgId}`);
@@ -1977,7 +1779,7 @@ export async function withdrawFromOrgTreasury(
   amountRaw: number
 ): Promise<void> {
   const amount = Math.floor(amountRaw);
-  if (amount <= 0) throw new Error('INVALID_AMOUNT');
+  if (!Number.isFinite(amountRaw) || amount <= 0 || amount > 10_000_000) throw new Error('INVALID_AMOUNT');
   const txId = genId('tx');
   const orgTxId = genId('otx');
 
@@ -1985,8 +1787,12 @@ export async function withdrawFromOrgTreasury(
     await runTransaction(db, async (tx) => {
       const walletRef = doc(db, 'wallets', uid);
       const orgRef = doc(db, 'organizations', orgId);
-      const [walletSnap, orgSnap] = await Promise.all([tx.get(walletRef), tx.get(orgRef)]);
+      const memberRef = doc(db, 'organization_members', `${orgId}_${uid}`);
+      const [walletSnap, orgSnap, memberSnap] = await Promise.all([tx.get(walletRef), tx.get(orgRef), tx.get(memberRef)]);
       if (!walletSnap.exists() || !orgSnap.exists()) throw new Error('NOT_FOUND');
+      if (!memberSnap.exists() || !hasOrgPermission(memberSnap.data() as OrganizationMember, 'manage_treasury')) {
+        throw new Error('UNAUTHORIZED');
+      }
 
       const wallet = walletSnap.data() as Wallet;
       const org = orgSnap.data() as Organization;
@@ -2030,7 +1836,7 @@ export async function withdrawFromOrgTreasury(
       });
     });
   } catch (error) {
-    if (error instanceof Error && ['INVALID_AMOUNT', 'INSUFFICIENT_TREASURY'].includes(error.message)) {
+    if (error instanceof Error && ['INVALID_AMOUNT', 'INSUFFICIENT_TREASURY', 'UNAUTHORIZED'].includes(error.message)) {
       throw error;
     }
     handleFirestoreError(error, OperationType.WRITE, `organizations/${orgId}`);

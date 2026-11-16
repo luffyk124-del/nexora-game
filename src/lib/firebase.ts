@@ -14,6 +14,7 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const functions = getFunctions(app, 'us-central1');
 export const googleAuthProvider = new GoogleAuthProvider();
+googleAuthProvider.setCustomParameters({ prompt: 'select_account' });
 
 export enum OperationType {
   CREATE = 'create',
@@ -26,6 +27,7 @@ export enum OperationType {
 
 export interface FirestoreErrorInfo {
   error: string;
+  code?: string | null;
   operationType: OperationType;
   path: string | null;
   authInfo: {
@@ -44,8 +46,14 @@ export function handleFirestoreError(
 ): never {
   const rawMessage = error instanceof Error ? error.message : String(error);
   const sanitizedMessage = sanitizeDiagnosticString(rawMessage, 280);
+  const errorCode =
+    typeof error === 'object' && error !== null && 'code' in error &&
+    typeof (error as { code?: unknown }).code === 'string'
+      ? (error as { code: string }).code
+      : null;
   const errInfo: FirestoreErrorInfo = {
     error: sanitizedMessage,
+    code: errorCode,
     authInfo: {
       userId: maskUid(auth.currentUser?.uid),
       emailVerified: auth.currentUser?.emailVerified ?? null,

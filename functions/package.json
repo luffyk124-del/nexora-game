@@ -1,7 +1,7 @@
 {
   "name": "nexora-functions",
   "private": true,
-  "description": "Read-only owner-restricted Cloud Functions Gen 2 for NEXORA Diagnostics",
+  "description": "NEXORA Firebase Cloud Functions for secure economy operations, diagnostics, and world events",
   "scripts": {
     "build": "tsc",
     "serve": "npm run build && firebase emulators:start --only functions",

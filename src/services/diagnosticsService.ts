@@ -321,6 +321,53 @@ export async function generateDiagnosticReport(
     NEXORA_COLLECTION_CATALOG.map((entry) => runRulesCompliantCount(entry, uid))
   );
 
+  // Verify the Vercel OIDC -> Google WIF -> named Firestore path without writing data.
+  let vaultBackendStatus: DiagnosticStatus = 'unavailable';
+  let vaultBackendMessage = 'Vercel company-vault health check has not completed.';
+  try {
+    const currentUser = auth.currentUser;
+    if (!currentUser) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('/api/company-vault', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({ action: 'health' }),
+      cache: 'no-store',
+    });
+    const health = await response.json() as {
+      ok?: boolean;
+      firebaseAuthVerified?: boolean;
+      wifConnected?: boolean;
+      firestoreReadable?: boolean;
+      profileDocumentExists?: boolean;
+      error?: string;
+    };
+    if (!response.ok || health.ok !== true || health.firebaseAuthVerified !== true ||
+        health.wifConnected !== true || health.firestoreReadable !== true) {
+      throw new Error(health.error || 'VAULT_BACKEND_HEALTH_CHECK_FAILED');
+    }
+    vaultBackendStatus = 'healthy';
+    vaultBackendMessage = health.profileDocumentExists
+      ? 'Firebase ID token verified; Vercel OIDC exchanged through Google WIF; named Firestore profile read succeeded.'
+      : 'Firebase ID token verified; Vercel OIDC and named Firestore read succeeded, but the profile document was not found.';
+    if (!health.profileDocumentExists) vaultBackendStatus = 'warning';
+  } catch (err) {
+    vaultBackendStatus = 'error';
+    vaultBackendMessage = sanitizeDiagnosticString(
+      err instanceof Error ? err.message : String(err),
+      180
+    );
+    recordSanitizedError({
+      source: 'vercel:company-vault-health',
+      message: vaultBackendMessage,
+      category: 'backend',
+      severity: 'error',
+    });
+  }
+
   const countByName = new Map<string, number | null>(
     databaseCollections.map((c) => [c.name, c.count])
   );
@@ -460,7 +507,7 @@ export async function generateDiagnosticReport(
     environment: {
       mode: import.meta.env.MODE || 'production',
       executionSource: 'client_read_only_fallback',
-      backendDeployed: false,
+      backendDeployed: vaultBackendStatus === 'healthy',
       appCheckEnforced: false,
       locale: ctx.locale,
     },
@@ -480,11 +527,11 @@ export async function generateDiagnosticReport(
         message: ownerStatus.reason,
       },
       backendFunctions: {
-        status: 'unavailable',
-        runtime: 'nodejs22-gen2',
-        functionName: 'nexoraDiagnostics',
+        status: vaultBackendStatus,
+        runtime: 'Vercel Node.js + Google WIF',
+        functionName: 'company-vault (read-only health)',
         lastCheckAt: nowIso,
-        message: backendFailureNote,
+        message: vaultBackendMessage,
       },
       lastSuccessfulCheckAt: firestoreStatus === 'healthy' ? nowIso : null,
     },

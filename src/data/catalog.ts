@@ -13,9 +13,17 @@ import type {
   WorldEventEffectType,
 } from '../types/game';
 
+// Import images as build assets so every deployment contains the exact
+// image files for its own commit (no dependency on GitHub's mutable branch URL).
+const emblemImage = new URL('../assets/images/nexora_emblem_1794737992806.jpg', import.meta.url).href;
+const marketBannerImage = new URL('../assets/images/world_market_banner_1794737994643.jpg', import.meta.url).href;
+const strategistAvatar = new URL('../assets/images/avatar_strategist_1794737993416.jpg', import.meta.url).href;
+const industrialistAvatar = new URL('../assets/images/avatar_industrialist_1794737993767.jpg', import.meta.url).href;
+const financierAvatar = new URL('../assets/images/avatar_financier_1794737994701.jpg', import.meta.url).href;
+
 export const BRAND_ASSETS = {
-  emblem: '/src/assets/images/nexora_emblem_1794737992806.jpg',
-  marketBanner: '/src/assets/images/world_market_banner_1794737994643.jpg',
+  emblem: emblemImage,
+  marketBanner: marketBannerImage,
 };
 
 export const AVATARS = [
@@ -23,19 +31,19 @@ export const AVATARS = [
     id: 'strategist',
     labelAr: 'المخطط الاستراتيجي',
     labelEn: 'Corporate Strategist',
-    src: '/src/assets/images/avatar_strategist_1794737993416.jpg',
+    src: strategistAvatar,
   },
   {
     id: 'industrialist',
     labelAr: 'الرائد الصناعي',
     labelEn: 'Tech Industrialist',
-    src: '/src/assets/images/avatar_industrialist_1794737993767.jpg',
+    src: industrialistAvatar,
   },
   {
     id: 'financier',
     labelAr: 'المهندس المالي',
     labelEn: 'Executive Financier',
-    src: '/src/assets/images/avatar_financier_1794737994701.jpg',
+    src: financierAvatar,
   },
 ];
 
@@ -313,7 +321,6 @@ export interface CompanySectorSpec {
   foundingCost: number;
   baseRevenuePerHour: number;
   baseExpensePerHour: number;
-  initialEmployees: number;
 }
 
 export const COMPANY_SECTORS: CompanySectorSpec[] = [
@@ -324,7 +331,6 @@ export const COMPANY_SECTORS: CompanySectorSpec[] = [
     foundingCost: 900,
     baseRevenuePerHour: 140,
     baseExpensePerHour: 35,
-    initialEmployees: 3,
   },
   {
     sector: 'services',
@@ -333,7 +339,6 @@ export const COMPANY_SECTORS: CompanySectorSpec[] = [
     foundingCost: 1100,
     baseRevenuePerHour: 175,
     baseExpensePerHour: 45,
-    initialEmployees: 4,
   },
   {
     sector: 'logistics',
@@ -342,7 +347,6 @@ export const COMPANY_SECTORS: CompanySectorSpec[] = [
     foundingCost: 1400,
     baseRevenuePerHour: 225,
     baseExpensePerHour: 60,
-    initialEmployees: 5,
   },
   {
     sector: 'manufacturing',
@@ -351,7 +355,6 @@ export const COMPANY_SECTORS: CompanySectorSpec[] = [
     foundingCost: 1800,
     baseRevenuePerHour: 290,
     baseExpensePerHour: 80,
-    initialEmployees: 6,
   },
   {
     sector: 'tech',
@@ -360,7 +363,6 @@ export const COMPANY_SECTORS: CompanySectorSpec[] = [
     foundingCost: 2200,
     baseRevenuePerHour: 365,
     baseExpensePerHour: 95,
-    initialEmployees: 7,
   },
 ];
 

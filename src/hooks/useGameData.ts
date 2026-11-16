@@ -1,4 +1,4 @@
-import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
+import { getRedirectResult, onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut, type User } from 'firebase/auth';
 import {
   collection,
   doc,
@@ -174,6 +174,9 @@ export function useGameData(): GameDataState {
   }, []);
 
   useEffect(() => {
+    let redirectResolved = false;
+    let authStateObserved = false;
+
     const unsub = onAuthStateChanged(auth, (user) => {
       const nextUid = user?.uid ?? null;
       if (activeUidRef.current && activeUidRef.current !== nextUid) {
@@ -181,12 +184,24 @@ export function useGameData(): GameDataState {
       }
       activeUidRef.current = nextUid;
       setAuthUser(user);
-      setAuthReady(true);
+      authStateObserved = true;
+      if (redirectResolved) setAuthReady(true);
       if (!user) {
         bootstrappedUidRef.current = null;
         clearSessionState();
       }
     });
+
+    // Complete the Google redirect flow before showing the signed-out screen.
+    getRedirectResult(auth)
+      .catch((error) => {
+        console.error('Google redirect sign-in result error:', error);
+      })
+      .finally(() => {
+        redirectResolved = true;
+        if (authStateObserved) setAuthReady(true);
+      });
+
     return () => unsub();
   }, [clearSessionState]);
 
@@ -547,7 +562,23 @@ export function useGameData(): GameDataState {
   }, [authUser, profile, unlockedAchievements]);
 
   const loginWithGoogle = useCallback(async () => {
-    await signInWithPopup(auth, googleAuthProvider);
+    // Prefer popup on every device. On mobile browsers, redirect-based OAuth can
+    // return to the app without restoring the Firebase session when third-party
+    // storage or the browser's in-app authentication hand-off is restricted.
+    // Keep redirect as a fallback only when the browser explicitly blocks popups.
+    try {
+      await signInWithPopup(auth, googleAuthProvider);
+    } catch (error) {
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String((error as { code?: unknown }).code || '')
+          : '';
+      if (code === 'auth/popup-blocked') {
+        await signInWithRedirect(auth, googleAuthProvider);
+        return;
+      }
+      throw error;
+    }
   }, []);
 
   const logout = useCallback(async () => {

@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { getApps, initializeApp } from 'firebase-admin/app';
-import { FieldValue, getFirestore, Timestamp } from 'firebase-admin/firestore';
+import { FieldValue, getFirestore, Timestamp, type DocumentData } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import {
@@ -53,6 +54,251 @@ function parseAllowlist(raw: string | undefined): string[] {
  * - Rejects arbitrary collection names, free-form queries, and all mutations.
  * - Aggregates collection counts using Firestore count() without full collection downloads or PII leaks.
  */
+
+type VaultCompany = {
+  id: string; ownerUid: string; name: string; sector?: string; level: number;
+  employeesCount: number; baseRevenuePerHour: number; expensePerHour: number;
+  totalRevenue: number; vaultLevel?: number; vaultBalance?: number; lastCollectedAt?: unknown;
+};
+type VaultProfile = {
+  xp: number; level: number; skillPoints: number; reputation: number; influence: number;
+  skills: { management?: number; finance?: number; leadership?: number };
+};
+type VaultWallet = { balance: number; totalEarned: number; totalSpent: number };
+const VAULT_CAPACITIES = [3500, 7000, 14000, 25000, 40000] as const;
+const VAULT_UPGRADES = [
+  { cost: 1500, materials: { copper_wire: 20, crude_alloy: 10 } },
+  { cost: 4000, materials: { silicon_ore: 20, energy_cells: 15 } },
+  { cost: 10000, materials: { carbon_fiber: 15, precision_frame: 10 } },
+  { cost: 25000, materials: { rare_minerals: 20, quantum_server: 5 } },
+] as const;
+const REPUTATION_YIELD_TIERS = [
+  { min: 0, bonus: 0 }, { min: 60, bonus: 0.02 }, { min: 160, bonus: 0.04 },
+  { min: 350, bonus: 0.06 }, { min: 700, bonus: 0.08 },
+] as const;
+
+function vaultLevelOf(company: VaultCompany): number {
+  const level = typeof company.vaultLevel === 'number' && Number.isFinite(company.vaultLevel)
+    ? Math.floor(company.vaultLevel) : 1;
+  return Math.max(1, Math.min(5, level));
+}
+function timestampMillis(value: unknown, fallback: number): number {
+  if (value instanceof Timestamp) return value.toMillis();
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') { const parsed = Date.parse(value); return Number.isFinite(parsed) ? parsed : fallback; }
+  if (value && typeof value === 'object' && 'seconds' in value && typeof (value as {seconds?: unknown}).seconds === 'number') {
+    return Number((value as {seconds:number}).seconds) * 1000;
+  }
+  return fallback;
+}
+function companyNetHourly(company: VaultCompany, profile: VaultProfile, events: DocumentData[], nowMs: number): number {
+  const levelMultiplier = 1 + (company.level - 1) * 0.32;
+  const staffBonus = 1 + Math.max(0, company.employeesCount - 1) * 0.05;
+  const management = Math.max(0, Number(profile.skills?.management) || 0);
+  const finance = Math.max(0, Number(profile.skills?.finance) || 0);
+  const managementBonus = 1 + management * 0.08;
+  const tier = [...REPUTATION_YIELD_TIERS].reverse().find((item) => profile.reputation >= item.min) ?? REPUTATION_YIELD_TIERS[0];
+  const reputationBonus = 1 + tier.bonus;
+  const seenGroups = new Set<string>();
+  let eventMultiplier = 1;
+  let accepted = 0;
+  for (const event of events) {
+    if (event.active !== true) continue;
+    const startsAt = timestampMillis(event.startsAt, 0);
+    const endsAt = timestampMillis(event.endsAt, 0);
+    if ((startsAt > 0 && nowMs < startsAt) || (endsAt > 0 && nowMs >= endsAt)) continue;
+    const group = String(event.stackGroup || event.effectType || event.id);
+    if (seenGroups.has(group)) continue;
+    seenGroups.add(group);
+    if (company.sector && Array.isArray(event.affectedSectors) && event.affectedSectors.includes(company.sector) && typeof event.revenueMultiplier === 'number') {
+      eventMultiplier *= event.revenueMultiplier;
+    }
+    accepted += 1;
+    if (accepted >= 3) break;
+  }
+  eventMultiplier = Number(Math.max(0.75, Math.min(1.4, eventMultiplier)).toFixed(3));
+  const gross = Math.round(company.baseRevenuePerHour * levelMultiplier * staffBonus * managementBonus * eventMultiplier * reputationBonus);
+  const rawExpense = company.expensePerHour * (1 + (company.level - 1) * 0.2) + Math.max(0, company.employeesCount - 3) * 8;
+  const expense = Math.round(rawExpense * (1 - Math.min(0.45, finance * 0.05)));
+  return Math.max(15, gross - expense);
+}
+function calculatedVaultBalance(company: VaultCompany, netHourly: number, nowMs: number): number {
+  const level = vaultLevelOf(company);
+  const capacity = VAULT_CAPACITIES[level - 1];
+  const stored = typeof company.vaultBalance === 'number' && Number.isFinite(company.vaultBalance)
+    ? Math.max(0, company.vaultBalance) : 0;
+  const last = timestampMillis(company.lastCollectedAt, nowMs);
+  const elapsed = Math.max(0, nowMs - last);
+  return Math.min(capacity, stored + Math.max(0, Math.floor((Math.max(0, netHourly) * elapsed) / 3_600_000)));
+}
+function levelForXp(totalXp: number): number {
+  let level = 1;
+  let remaining = Math.max(0, Math.floor(totalXp));
+  while (level < 200) {
+    const step = 200 + Math.max(0, level - 1) * 120;
+    if (remaining < step) return level;
+    remaining -= step;
+    level += 1;
+  }
+  return 200;
+}
+function vaultHttpsError(error: unknown): HttpsError {
+  const message = error instanceof Error ? error.message : 'INTERNAL';
+  const known: Record<string, ConstructorParameters<typeof HttpsError>[0]> = {
+    COMPANY_NOT_FOUND: 'not-found', ACCOUNT_NOT_FOUND: 'failed-precondition',
+    UNAUTHORIZED: 'permission-denied', VAULT_MAX_LEVEL: 'failed-precondition',
+    INSUFFICIENT_FUNDS: 'failed-precondition', MISSING_VAULT_MATERIALS: 'failed-precondition',
+    NOTHING_TO_COLLECT: 'failed-precondition', INVALID_ARGUMENT: 'invalid-argument',
+  };
+  return new HttpsError(known[message] ?? 'internal', known[message] ? message : 'Company vault operation failed.');
+}
+
+export const upgradeCompanyProfitVault = onCall(
+  { region: 'us-central1', maxInstances: 10, timeoutSeconds: 30, memory: '256MiB' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+    const companyId = typeof request.data?.companyId === 'string' ? request.data.companyId.trim() : '';
+    if (!companyId || companyId.length > 128) throw new HttpsError('invalid-argument', 'INVALID_ARGUMENT');
+    try {
+      return await db.runTransaction(async (tx) => {
+        const uid = request.auth!.uid;
+        const companyRef = db.doc(`companies/${companyId}`);
+        const walletRef = db.doc(`wallets/${uid}`);
+        const profileRef = db.doc(`profiles/${uid}`);
+        const [companySnap, walletSnap, profileSnap, eventsSnap] = await Promise.all([
+          tx.get(companyRef), tx.get(walletRef), tx.get(profileRef),
+          tx.get(db.collection('world_events').where('active', '==', true)),
+        ]);
+        if (!companySnap.exists) throw new Error('COMPANY_NOT_FOUND');
+        if (!walletSnap.exists || !profileSnap.exists) throw new Error('ACCOUNT_NOT_FOUND');
+        const company = companySnap.data() as VaultCompany;
+        const wallet = walletSnap.data() as VaultWallet;
+        const profile = profileSnap.data() as VaultProfile;
+        if (company.ownerUid !== uid) throw new Error('UNAUTHORIZED');
+        const oldLevel = vaultLevelOf(company);
+        if (oldLevel >= 5) throw new Error('VAULT_MAX_LEVEL');
+        const upgrade = VAULT_UPGRADES[oldLevel - 1];
+        if (wallet.balance < upgrade.cost) throw new Error('INSUFFICIENT_FUNDS');
+        const inventorySnaps = await Promise.all(Object.entries(upgrade.materials).map(([itemId]) => tx.get(db.doc(`inventory/${uid}_${itemId}`))));
+        const itemEntries = Object.entries(upgrade.materials);
+        for (let i = 0; i < itemEntries.length; i += 1) {
+          const required = itemEntries[i][1];
+          if (!inventorySnaps[i].exists || Number(inventorySnaps[i].data()?.quantity ?? 0) < required) {
+            throw new Error('MISSING_VAULT_MATERIALS');
+          }
+        }
+        const now = Date.now();
+        const events = eventsSnap.docs.map((docSnap) => docSnap.data());
+        const netHourly = companyNetHourly(company, profile, events, now);
+        const preserved = calculatedVaultBalance(company, netHourly, now);
+        const txId = `tx_${randomUUID()}`;
+        const logId = `clog_${crypto.randomUUID()}`;
+        tx.update(walletRef, {
+          balance: wallet.balance - upgrade.cost,
+          totalSpent: wallet.totalSpent + upgrade.cost,
+          lastTxId: txId,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        itemEntries.forEach(([itemId, required], index) => {
+          const itemRef = db.doc(`inventory/${uid}_${itemId}`);
+          const current = Number(inventorySnaps[index].data()?.quantity ?? 0);
+          tx.update(itemRef, { quantity: current - required, updatedAt: FieldValue.serverTimestamp() });
+        });
+        tx.update(companyRef, {
+          vaultLevel: oldLevel + 1,
+          vaultBalance: preserved,
+          lastCollectedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        tx.create(db.doc(`transactions/${txId}`), {
+          id: txId, fromUid: uid, toUid: 'SYSTEM', amount: upgrade.cost, fee: 0,
+          netAmount: upgrade.cost, type: 'company_vault_upgrade', referenceId: companyId,
+          description: `Upgraded ${company.name} profit vault to Lv.${oldLevel + 1}`,
+          status: 'completed', createdAt: FieldValue.serverTimestamp(),
+        });
+        tx.create(db.doc(`company_logs/${logId}`), {
+          id: logId, companyId, ownerUid: uid, action: 'vault_upgrade', amount: -upgrade.cost,
+          details: `Profit vault upgraded to Lv.${oldLevel + 1}; preserved ${preserved}`,
+          createdAt: FieldValue.serverTimestamp(),
+        });
+        return { ok: true, vaultLevel: oldLevel + 1, vaultBalance: preserved, capacity: VAULT_CAPACITIES[oldLevel] };
+      });
+    } catch (error) { throw vaultHttpsError(error); }
+  }
+);
+
+export const collectCompanyRevenueSecure = onCall(
+  { region: 'us-central1', maxInstances: 10, timeoutSeconds: 30, memory: '256MiB' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+    const companyId = typeof request.data?.companyId === 'string' ? request.data.companyId.trim() : '';
+    if (!companyId || companyId.length > 128) throw new HttpsError('invalid-argument', 'INVALID_ARGUMENT');
+    try {
+      return await db.runTransaction(async (tx) => {
+        const uid = request.auth!.uid;
+        const companyRef = db.doc(`companies/${companyId}`);
+        const walletRef = db.doc(`wallets/${uid}`);
+        const profileRef = db.doc(`profiles/${uid}`);
+        const [companySnap, walletSnap, profileSnap, eventsSnap] = await Promise.all([
+          tx.get(companyRef), tx.get(walletRef), tx.get(profileRef),
+          tx.get(db.collection('world_events').where('active', '==', true)),
+        ]);
+        if (!companySnap.exists) throw new Error('COMPANY_NOT_FOUND');
+        if (!walletSnap.exists || !profileSnap.exists) throw new Error('ACCOUNT_NOT_FOUND');
+        const company = companySnap.data() as VaultCompany;
+        const wallet = walletSnap.data() as VaultWallet;
+        const profile = profileSnap.data() as VaultProfile;
+        if (company.ownerUid !== uid) throw new Error('UNAUTHORIZED');
+        const now = Date.now();
+        const lastCollected = timestampMillis(company.lastCollectedAt, now);
+        if (now - lastCollected < 30_000) throw new Error('NOTHING_TO_COLLECT');
+        const events = eventsSnap.docs.map((docSnap) => docSnap.data());
+        const netHourly = companyNetHourly(company, profile, events, now);
+        const payout = calculatedVaultBalance(company, netHourly, now);
+        if (payout < 1) throw new Error('NOTHING_TO_COLLECT');
+        const txId = `tx_${crypto.randomUUID()}`;
+        const logId = `clog_${crypto.randomUUID()}`;
+        const xpGain = Math.min(80, Math.max(10, Math.floor(payout / 15)));
+        const nextXp = profile.xp + xpGain;
+        const nextLevel = levelForXp(nextXp);
+        const levelsGained = Math.max(0, nextLevel - profile.level);
+        const leadershipBonus = 1 + (Math.max(0, Number(profile.skills?.leadership) || 0) * 0.1);
+        tx.update(walletRef, {
+          balance: wallet.balance + payout,
+          totalEarned: wallet.totalEarned + payout,
+          lastTxId: txId,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        tx.update(companyRef, {
+          totalRevenue: company.totalRevenue + payout,
+          vaultBalance: 0,
+          lastCollectedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        tx.update(profileRef, {
+          xp: nextXp,
+          level: nextLevel,
+          skillPoints: profile.skillPoints + levelsGained * 2,
+          reputation: profile.reputation + Math.round(2 * leadershipBonus),
+          influence: profile.influence + Math.round(1 * leadershipBonus),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        tx.create(db.doc(`transactions/${txId}`), {
+          id: txId, fromUid: 'SYSTEM', toUid: uid, amount: payout, fee: 0,
+          netAmount: payout, type: 'company_collect', referenceId: companyId,
+          description: `Company revenue collected: ${company.name}`,
+          status: 'completed', createdAt: FieldValue.serverTimestamp(),
+        });
+        tx.create(db.doc(`company_logs/${logId}`), {
+          id: logId, companyId, ownerUid: uid, action: 'collect', amount: payout,
+          details: `Collected +$${payout}`, createdAt: FieldValue.serverTimestamp(),
+        });
+        return { ok: true, payout };
+      });
+    } catch (error) { throw vaultHttpsError(error); }
+  }
+);
+
 export const nexoraDiagnostics = onCall(
   {
     region: 'us-central1',

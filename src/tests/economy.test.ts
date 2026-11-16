@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { MANUFACTURING_RECIPES } from '../data/catalog';
+import { ITEM_MAP, MANUFACTURING_RECIPES } from '../data/catalog';
 import {
   calculateAccruedPayout,
   calculateCompanyHourlyNet,
+  calculateCompanyVaultBalance,
+  getCompanyVaultCapacity,
+  getCompanyVaultLevel,
   calculateDailyStipend,
   calculateDynamicItemPrice,
   calculateLevelProgress,
@@ -42,6 +45,63 @@ const sampleEvents: WorldEvent[] = [
     createdAt: null,
   },
 ];
+
+describe('Company Profit Vault', () => {
+  const hour = 3_600_000;
+
+  it('uses independent configured capacities for all five levels', () => {
+    expect([1, 2, 3, 4, 5].map(getCompanyVaultCapacity)).toEqual([3500, 7000, 14000, 25000, 40000]);
+  });
+
+  it('defaults legacy companies to vault level 1', () => {
+    expect(getCompanyVaultLevel({})).toBe(1);
+    expect(getCompanyVaultCapacity(getCompanyVaultLevel({}))).toBe(3500);
+  });
+
+  it('adds elapsed net revenue to the stored vault balance', () => {
+    expect(calculateCompanyVaultBalance(
+      { vaultLevel: 2, vaultBalance: 1200, lastCollectedAt: 10_000 },
+      200,
+      10_000 + hour * 3
+    )).toBe(1800);
+  });
+
+  it('stops accrual at capacity without exceeding the vault limit', () => {
+    expect(calculateCompanyVaultBalance(
+      { vaultLevel: 1, vaultBalance: 3400, lastCollectedAt: 0 },
+      500,
+      hour * 24
+    )).toBe(3500);
+  });
+
+  it('preserves the stored balance when no additional time has elapsed', () => {
+    expect(calculateCompanyVaultBalance(
+      { vaultLevel: 3, vaultBalance: 8250, lastCollectedAt: hour * 5 },
+      250,
+      hour * 5
+    )).toBe(8250);
+  });
+
+  it('does not accrue for negative or non-finite revenue and sanitizes invalid stored balances', () => {
+    expect(calculateCompanyVaultBalance(
+      { vaultLevel: 1, vaultBalance: Number.NaN, lastCollectedAt: 0 },
+      Number.NaN,
+      hour * 4
+    )).toBe(0);
+    expect(calculateCompanyVaultBalance(
+      { vaultLevel: 1, vaultBalance: 500, lastCollectedAt: 0 },
+      -100,
+      hour * 4
+    )).toBe(500);
+  });
+
+  it('clamps invalid and out-of-range vault levels safely', () => {
+    expect(getCompanyVaultLevel({ vaultLevel: Number.NaN })).toBe(1);
+    expect(getCompanyVaultLevel({ vaultLevel: 99 })).toBe(5);
+    expect(getCompanyVaultCapacity(-3)).toBe(3500);
+    expect(getCompanyVaultCapacity(Number.NaN)).toBe(3500);
+  });
+});
 
 describe('NEXORA Core Economy & Security Invariants', () => {
   it('validates usernames strictly (3-24 chars, alphanumeric + underscore)', () => {
@@ -102,11 +162,11 @@ describe('NEXORA Core Economy & Security Invariants', () => {
 
   it('calculates company hourly net profit with Management and Finance skills', () => {
     const base = calculateCompanyHourlyNet(
-      { baseRevenuePerHour: 200, expensePerHour: 60, level: 1, employeesCount: 3 },
+      { baseRevenuePerHour: 200, expensePerHour: 60, level: 1 },
       { management: 0, finance: 0 }
     );
     const skilled = calculateCompanyHourlyNet(
-      { baseRevenuePerHour: 200, expensePerHour: 60, level: 2, employeesCount: 5 },
+      { baseRevenuePerHour: 200, expensePerHour: 60, level: 2 },
       { management: 3, finance: 4 }
     );
     expect(skilled.netHourly).toBeGreaterThan(base.netHourly);
@@ -150,4 +210,51 @@ describe('NEXORA Core Economy & Security Invariants', () => {
     expect(calculateAccruedPayout(120, 0, oneHour * 30)).toBe(1440); // capped at 12h
     expect(calculateDailyStipend(5, 3)).toBeGreaterThan(calculateDailyStipend(1, 0));
   });
+  it('keeps market prices within the configured event multiplier bounds', () => {
+    const extremeHigh: WorldEvent[] = Array.from({ length: 5 }, (_, index) => ({
+      ...sampleEvents[0],
+      id: `evt_high_${index}`,
+      stackGroup: `high_${index}`,
+      priceMultiplier: 2,
+    }));
+    const extremeLow: WorldEvent[] = Array.from({ length: 5 }, (_, index) => ({
+      ...sampleEvents[0],
+      id: `evt_low_${index}`,
+      stackGroup: `low_${index}`,
+      priceMultiplier: 0.1,
+    }));
+
+    // Compare against the unrounded supply-adjusted reference so the event
+    // multiplier is bounded before the final integer rounding in production.
+    const supplyAdjustedPrice = ITEM_MAP.microchips.basePrice * 1.05;
+    const high = calculateDynamicItemPrice('microchips', 100, extremeHigh, 1_000);
+    const low = calculateDynamicItemPrice('microchips', 100, extremeLow, 1_000);
+
+    expect(high).toBeLessThanOrEqual(Math.round(supplyAdjustedPrice * 1.45));
+    expect(low).toBeGreaterThanOrEqual(Math.round(supplyAdjustedPrice * 0.7));
+  });
+
+  it('clamps market tax even when world events apply extreme modifiers', () => {
+    const extremeEvents: WorldEvent[] = [
+      { ...sampleEvents[0], id: 'evt_tax_extreme_low', taxDelta: -1 },
+      { ...sampleEvents[1], id: 'evt_tax_extreme_high', taxDelta: 1, stackGroup: 'tax_high' },
+    ];
+
+    expect(calculateMarketTaxRate(0, extremeEvents, 1_000)).toBeGreaterThanOrEqual(0.01);
+    expect(calculateMarketTaxRate(0, extremeEvents, 1_000)).toBeLessThanOrEqual(0.12);
+  });
+
+  it('limits active world events to three unique effect groups', async () => {
+    const { getActiveWorldEvents } = await import('../lib/economy');
+    const events: WorldEvent[] = Array.from({ length: 5 }, (_, index) => ({
+      ...sampleEvents[0],
+      id: `evt_group_${index}`,
+      stackGroup: `group_${index}`,
+    }));
+
+    const active = getActiveWorldEvents(events, 1_000);
+    expect(active).toHaveLength(3);
+    expect(new Set(active.map((event) => event.stackGroup)).size).toBe(3);
+  });
+
 });

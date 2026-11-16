@@ -8,9 +8,7 @@ import {
 } from '../i18n/translations';
 import {
   calculateAccruedPayout,
-  COMPANY_HIRE_COST,
   COMPANY_MAX_LEVEL,
-  COMPANY_MAX_STAFF,
   getAchievementProgress,
   getMissionProgress,
   LISTING_MAX_PRICE,
@@ -64,9 +62,7 @@ describe('NEXORA Audit Regression & Security Invariants', () => {
   });
 
   it('exposes consistent progression and listing ceiling constants', () => {
-    expect(COMPANY_MAX_LEVEL).toBe(20);
-    expect(COMPANY_MAX_STAFF).toBe(500);
-    expect(COMPANY_HIRE_COST).toBe(250);
+    expect(COMPANY_MAX_LEVEL).toBe(100);
     expect(PROPERTY_MAX_LEVEL).toBe(15);
     expect(LISTING_MAX_QTY).toBe(10_000);
     expect(LISTING_MAX_PRICE).toBe(1_000_000);
@@ -88,9 +84,12 @@ describe('NEXORA Audit Regression & Security Invariants', () => {
     // No open allow list for any signed-in user
     expect(rules).not.toMatch(/allow\s+list\s*:\s*if\s+isSignedIn\(\)\s*;/);
 
-    // Company staff hire has dedicated transaction type & exact cost check
-    expect(rules).toContain("'company_hire'");
-    expect(rules).toContain("tx.type == 'company_hire'");
+    // Employee hiring has been removed; timed company and vault upgrades remain supported.
+    expect(rules).not.toContain("'company_hire'");
+    expect(rules).toContain("'levelUpgradeStartedAt'");
+    expect(rules).toContain("'levelUpgradeEndsAt'");
+    expect(rules).toContain("'vaultUpgradeStartedAt'");
+    expect(rules).toContain("'vaultUpgradeEndsAt'");
 
     // Market buy fee cap and order receipt verification
     expect(rules).toContain('tx.fee <= (tx.amount * 0.12) + 0.5');

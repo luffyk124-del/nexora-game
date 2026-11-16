@@ -207,8 +207,8 @@ export function MarketHubView({
       const payout = await fulfillTradeContract(profile.uid, contractId);
       showToast(
         language === 'ar'
-          ? `تم تنفيذ العقد واستلام +${payout} N-Credits.`
-          : `Contract fulfilled: +${payout} N-Credits.`,
+          ? `تم تنفيذ العقد واستلام +${payout} $.`
+          : `Contract fulfilled: +${payout} $.`,
         'success'
       );
     } catch (err) {
@@ -576,9 +576,9 @@ export function MarketHubView({
                         <div className="flex items-center gap-2.5 shrink-0">
                           <div className="text-end me-1">
                             <p className="text-sm font-mono-num font-bold text-[#F4F5F7]">
-                              {listing.unitPrice.toLocaleString()}
+                              {'$'}{listing.unitPrice.toLocaleString()}
                             </p>
-                            <p className="text-[11px] text-[#9299A6]">/ {t.currency}</p>
+                            <p className="text-[11px] text-[#9299A6]">{language === 'ar' ? 'لكل وحدة' : 'per unit'}</p>
                           </div>
 
                           {isMine ? (
@@ -684,7 +684,7 @@ export function MarketHubView({
                   <div className="flex items-center justify-between">
                     <span className="text-[#9299A6]">{language === 'ar' ? 'العائد' : 'Payout'}</span>
                     <span className="font-mono-num font-bold text-emerald-400">
-                      +{payout.toLocaleString()} {t.currency}
+                      +{'$'}{payout.toLocaleString()}
                     </span>
                   </div>
                 </div>
@@ -783,12 +783,12 @@ export function MarketHubView({
                           <span className="font-mono-num">{ord.quantity}</span>
                         </p>
                         <p className="text-[11px] text-[#9299A6] mt-0.5 font-mono-num">
-                          {ord.unitPrice.toLocaleString()} / {t.currency} · {ord.id}
+                          {'$'}{ord.unitPrice.toLocaleString()} / {language === 'ar' ? 'وحدة' : 'unit'} · {ord.id}
                         </p>
                       </div>
                       <div className="text-end shrink-0">
                         <p className="text-sm font-mono-num font-bold text-[#F4F5F7]">
-                          -{ord.totalPrice.toLocaleString()}
+                          -{'$'}{ord.totalPrice.toLocaleString()}
                         </p>
                         <p className="text-[10px] font-mono-num text-[#9299A6]">
                           Tax: {ord.taxAmount}
@@ -838,8 +838,8 @@ export function MarketHubView({
                           }`}
                         >
                           {isCredit
-                            ? `+${tx.netAmount.toLocaleString()}`
-                            : `-${tx.amount.toLocaleString()}`}
+                            ? `+$${tx.netAmount.toLocaleString()}`
+                            : `-$${tx.amount.toLocaleString()}`}
                         </p>
                         {tx.fee > 0 && (
                           <p className="text-[10px] font-mono-num text-[#9299A6]">
@@ -861,8 +861,8 @@ export function MarketHubView({
         title={t.confirmTitle}
         description={
           language === 'ar'
-            ? `سيتم تحويل ${transferAmount.toLocaleString()} N-Credits بشكل فوري وغير قابل للاسترجاع إلى ${recipientName}.`
-            : `Transfer ${transferAmount.toLocaleString()} N-Credits immediately to ${recipientName}?`
+            ? `سيتم تحويل ${transferAmount.toLocaleString()} $ بشكل فوري وغير قابل للاسترجاع إلى ${recipientName}.`
+            : `Transfer ${transferAmount.toLocaleString()} $ immediately to ${recipientName}?`
         }
         confirmLabel={t.confirmBtn}
         cancelLabel={t.cancelBtn}

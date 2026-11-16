@@ -8,6 +8,7 @@ import {
 import type {
   Company,
   MarketListing,
+  ManufacturingRecipe,
   OrganizationMember,
   OrgPermission,
   OrgRole,
@@ -241,7 +242,7 @@ export function calculateMarketItemAnalytics(
  * Computes net hourly company profit factoring in Management, Finance, and active sector World Events.
  */
 export function calculateCompanyHourlyNet(
-  company: Pick<Company, 'baseRevenuePerHour' | 'expensePerHour' | 'level' | 'employeesCount'> &
+  company: Pick<Company, 'baseRevenuePerHour' | 'expensePerHour' | 'level'> &
     Partial<Pick<Company, 'sector'>>,
   skills: Pick<SkillsMap, 'management' | 'finance'>,
   worldEvents: WorldEvent[] = [],
@@ -252,14 +253,12 @@ export function calculateCompanyHourlyNet(
   expenseHourly: number;
   netHourly: number;
   levelMultiplier: number;
-  staffBonus: number;
   mgmtBonus: number;
   financeReduction: number;
   sectorEventMultiplier: number;
   reputationBonus: number;
 } {
   const levelMultiplier = 1 + (company.level - 1) * 0.32;
-  const staffBonus = 1 + Math.max(0, company.employeesCount - 1) * 0.05;
   const mgmtBonus = 1 + Math.max(0, skills.management) * 0.08;
   const repTier = getReputationTier(reputation);
   const reputationBonus = 1 + repTier.companyYieldBonusRate;
@@ -277,15 +276,13 @@ export function calculateCompanyHourlyNet(
   const grossHourly = Math.round(
     company.baseRevenuePerHour *
       levelMultiplier *
-      staffBonus *
       mgmtBonus *
       sectorEventMultiplier *
       reputationBonus
   );
 
   const rawExpense =
-    company.expensePerHour * (1 + (company.level - 1) * 0.2) +
-    Math.max(0, company.employeesCount - 3) * 8;
+    company.expensePerHour * (1 + (company.level - 1) * 0.2);
   const financeReduction = Math.min(0.45, Math.max(0, skills.finance) * 0.05);
   const expenseHourly = Math.round(rawExpense * (1 - financeReduction));
 
@@ -294,7 +291,6 @@ export function calculateCompanyHourlyNet(
     expenseHourly,
     netHourly: Math.max(15, grossHourly - expenseHourly),
     levelMultiplier,
-    staffBonus,
     mgmtBonus,
     financeReduction,
     sectorEventMultiplier,
@@ -432,9 +428,46 @@ export function calculateAccruedPayout(
   return Math.max(0, Math.floor(netPerHour * cappedHours));
 }
 
-export const COMPANY_MAX_LEVEL = 20;
-export const COMPANY_MAX_STAFF = 500;
-export const COMPANY_HIRE_COST = 250;
+export const COMPANY_VAULT_CAPACITIES = [3500, 7000, 14000, 25000, 40000] as const;
+export const COMPANY_VAULT_MAX_LEVEL = COMPANY_VAULT_CAPACITIES.length;
+export const COMPANY_VAULT_UPGRADES = [
+  { fromLevel: 1, cost: 1500, materials: { copper_wire: 20, crude_alloy: 10 } },
+  { fromLevel: 2, cost: 4000, materials: { silicon_ore: 20, energy_cells: 15 } },
+  { fromLevel: 3, cost: 10000, materials: { carbon_fiber: 15, precision_frame: 10 } },
+  { fromLevel: 4, cost: 25000, materials: { rare_minerals: 20, quantum_server: 5 } },
+] as const;
+
+export function getCompanyVaultLevel(company: { vaultLevel?: number }): number {
+  const rawLevel = company.vaultLevel;
+  if (typeof rawLevel !== 'number' || !Number.isFinite(rawLevel)) return 1;
+  return Math.max(1, Math.min(COMPANY_VAULT_MAX_LEVEL, Math.floor(rawLevel)));
+}
+
+export function getCompanyVaultCapacity(level: number): number {
+  const safeLevel = Number.isFinite(level) ? Math.floor(level) : 1;
+  const index = Math.max(0, Math.min(COMPANY_VAULT_MAX_LEVEL - 1, safeLevel - 1));
+  return COMPANY_VAULT_CAPACITIES[index];
+}
+
+export function calculateCompanyVaultBalance(
+  company: { vaultLevel?: number; vaultBalance?: number; lastCollectedAt: unknown },
+  netPerHour: number,
+  nowMs: number
+): number {
+  const level = getCompanyVaultLevel(company);
+  const capacity = getCompanyVaultCapacity(level);
+  const safeNowMs = Number.isFinite(nowMs) ? nowMs : 0;
+  const stored = typeof company.vaultBalance === 'number' && Number.isFinite(company.vaultBalance)
+    ? Math.max(0, company.vaultBalance)
+    : 0;
+  const lastMs = timestampToMs(company.lastCollectedAt, safeNowMs);
+  const elapsedMs = Math.max(0, safeNowMs - lastMs);
+  const safeNetPerHour = Number.isFinite(netPerHour) ? Math.max(0, netPerHour) : 0;
+  const accrued = Math.floor((safeNetPerHour * elapsedMs) / 3_600_000);
+  return Math.min(capacity, stored + Math.max(0, accrued));
+}
+
+export const COMPANY_MAX_LEVEL = 100;
 export const PROPERTY_MAX_LEVEL = 15;
 export const LISTING_MAX_QTY = 10_000;
 export const LISTING_MAX_PRICE = 1_000_000;

@@ -1,3 +1,45 @@
+## [Unreleased] - 2026-11-16
+### Google Sign-In Reliability
+- Changed Google authentication to prefer signInWithPopup on mobile and desktop, retaining redirect only as a fallback when the browser blocks pop-ups. This targets mobile redirect-session restoration failures; live sign-in verification is still pending.
+
+### Deployment Workflow Cleanup
+- Removed the obsolete manual Cloud Functions company-vault deployment workflow. The client now calls the authenticated Vercel /api/company-vault endpoint, so the old workflow could redeploy superseded callables and depended on a legacy service-account JSON secret.
+### Vercel Workload Identity Backend
+- Added an authenticated Vercel API route for company vault upgrades and revenue collection, using Vercel OIDC with Google Workload Identity Federation and short-lived service-account impersonation tokens.
+- Added Firebase ID-token signature/issuer/audience verification and Firestore REST transactions against the dedicated named database; no service-account JSON key or new Firebase billing plan is used.
+- Routed the client vault actions away from the Firebase callable functions. Vercel deployment/build and live transaction verification are pending.
+
+### Company Profit Vaults
+- Added an independent, five-level profit vault to each company, with per-company capacity and upgrades paid in both credits and required materials.
+- Preserved already accumulated profit when upgrading a vault; collection empties the vault and restarts accumulation. Revenue does not accrue retroactively while a vault is full.
+- Added UI capacity/progress details, upgrade requirements, and Firestore validation for vault-related updates.
+
+### Verification & Deployment
+- Fixed the market event multiplier boundary test to compare against the supply-adjusted, pre-final-rounding reference; production pricing logic was not changed.
+- CI passed after the test correction. Vercel preview for commit `ad299d3ffac3e8ee276e6ab122917a74309cd9db` reached `READY`, and Firestore Rules deployment was confirmed successful by the project owner.
+- Cloud Functions Gen 2 deployment remains unverified; the vault operations have since been moved to the Vercel WIF backend, whose live verification is pending.
+
+## [Unreleased] - 2026-11-15
+### Currency & Audio Experience
+- Added a shared Web Audio engine: the soundtrack and UI feedback reuse one lazily-created `AudioContext`; button tones are synthesized live with oscillators and gain envelopes, with no MP3/WAV assets or audio network requests.
+- Added global short confirmation tones for buttons, navigation links, and role-button controls after the first user gesture. The first pointer/keyboard interaction attempts `AudioContext.resume()` synchronously within the gesture path and safely handles unsupported/blocked audio.
+- Added responsive pressed states (`scale(0.975)`, brightness feedback), keyboard focus visibility, and reduced-motion support for interactive controls.
+- Replaced the visible N-Credits label with the `$` symbol across onboarding, wallet, market, business, organization, mission rewards, and transaction history; wallet values and economy calculations remain unchanged.
+- Added an original low-volume ambient electronic soundtrack using Web Audio, with smooth chord transitions and an explicit play/pause control in the app header.
+
+### Organization Directory
+- Added live organization search across name, tag, leader, and description.
+- Added reputation, member-count, level, and treasury sorting with deterministic name tie-breaks.
+- Added a localized empty-search state and four unit tests for the directory helper.
+
+## [Unreleased] - 2026-11-15
+### Build Compatibility
+- Updated the root `esbuild` dev dependency to `^0.28.2` to satisfy Vite 8's declared optional peer dependency (`^0.27.0 || ^0.28.0`) and remove the observed npm `ERESOLVE` blocker.
+
+### Test Coverage
+- Added 7 focused regression tests for the server-side world event rotation engine, covering activation caps, expiry boundaries, active-event preservation, duplicate stack-group removal, and configured event durations.
+- Validation is pending GitHub Actions; these tests are not yet counted as passing.
+
 # Changelog
 
 ## [1.1.1] - 2026-11-15
@@ -42,3 +84,12 @@
 - Complete game systems: Wallets & Transfers, Open Market & Contracts, 3-Tier Manufacturing Chains, Companies (5 sectors), Real Estate Properties, 6-Skill Tree, Organizations with RBAC & Shared Treasury, Missions, Achievements, Leaderboards, and World Events.
 - Automated Vitest test suite (`src/tests/economy.test.ts`).
 
+
+
+## [Unreleased] - 2026-11-16
+### Company Vault Security
+- Moved company profit-vault upgrades and revenue collection to authenticated Firebase callable Cloud Functions Gen 2 using Admin SDK transactions.
+- Server-side validation now derives the player UID from the verified auth context, checks company ownership, wallet funds, required inventory materials, vault level and capacity, and atomically updates the ledger, wallet, inventory, company, and progression.
+- Routed the client service through `httpsCallable` and blocked direct client-side company vault mutations in Firestore rules.
+- Added a manual-only GitHub Actions workflow to deploy only the two company-vault callables.
+- CI passed on `d1f18e83d5f75c086863a9980ad3246f7425be0c`; live Cloud Functions and Firestore Rules deployment plus in-game verification remain pending.
