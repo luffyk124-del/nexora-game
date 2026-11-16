@@ -1602,14 +1602,14 @@ export async function kickOrgMember(
   }
 }
 
-async function callOrganizationUpgrade(orgId: string, action: 'start' | 'complete') {
+async function callOrganizationUpgrade(orgId: string, action: 'start' | 'complete' | 'research', researchId?: string) {
   const user = auth.currentUser;
   if (!user) throw new Error('UNAUTHENTICATED');
   const token = await user.getIdToken();
   const response = await fetch('/api/organization-upgrade', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ orgId, action }),
+    body: JSON.stringify({ orgId, action, researchId }),
   });
   const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
   if (!response.ok) throw new Error(typeof payload.error === 'string' ? payload.error : 'ORGANIZATION_UPGRADE_FAILED');
@@ -1631,6 +1631,11 @@ export async function upgradeOrganization(
 
 export async function completeOrganizationUpgrade(orgId: string): Promise<void> {
   await callOrganizationUpgrade(orgId, 'complete');
+}
+
+export async function researchOrganization(orgId: string, researchId: 'commerce' | 'engineering' | 'expansion' | 'finance' | 'diplomacy'): Promise<{ level: number; cost: number }> {
+  const result = await callOrganizationUpgrade(orgId, 'research', researchId);
+  return { level: Number(result.level), cost: Number(result.cost) };
 }
 
 export async function depositToOrgTreasury(
