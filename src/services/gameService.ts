@@ -40,6 +40,10 @@ import {
   canManageOrgMember,
   COMPANY_HIRE_COST,
   COMPANY_MAX_LEVEL,
+  COMPANY_VAULT_MAX_LEVEL,
+  COMPANY_VAULT_UPGRADES,
+  calculateCompanyVaultBalance,
+  getCompanyVaultLevel,
   COMPANY_MAX_STAFF,
   getAchievementProgress,
   getMissionProgress,
@@ -962,6 +966,8 @@ export async function foundCompany(
         baseRevenuePerHour: spec.baseRevenuePerHour,
         expensePerHour: spec.baseExpensePerHour,
         totalRevenue: 0,
+        vaultLevel: 1,
+        vaultBalance: 0,
         lastCollectedAt: serverTimestamp(),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -1092,6 +1098,97 @@ export async function upgradeCompany(uid: string, companyId: string): Promise<vo
   }
 }
 
+export async function upgradeCompanyVault(uid: string, companyId: string): Promise<void> {
+  const txId = genId('tx');
+  const logId = genId('clog');
+  let worldEvents: WorldEvent[] = [];
+  try {
+    const eventsSnap = await getDocs(query(collection(db, 'world_events'), where('active', '==', true)));
+    worldEvents = eventsSnap.docs.map((d) => d.data() as WorldEvent);
+  } catch {
+    worldEvents = [];
+  }
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const compRef = doc(db, 'companies', companyId);
+      const walletRef = doc(db, 'wallets', uid);
+      const profileRef = doc(db, 'profiles', uid);
+      const [compSnap, walletSnap, profileSnap] = await Promise.all([
+        tx.get(compRef), tx.get(walletRef), tx.get(profileRef),
+      ]);
+      if (!compSnap.exists()) throw new Error('COMPANY_NOT_FOUND');
+      if (!walletSnap.exists() || !profileSnap.exists()) throw new Error('ACCOUNT_NOT_FOUND');
+      const comp = compSnap.data() as Company;
+      const wallet = walletSnap.data() as Wallet;
+      const profile = profileSnap.data() as PlayerProfile;
+      if (comp.ownerUid !== uid) throw new Error('UNAUTHORIZED');
+      const level = getCompanyVaultLevel(comp);
+      if (level >= COMPANY_VAULT_MAX_LEVEL) throw new Error('VAULT_MAX_LEVEL');
+      const upgrade = COMPANY_VAULT_UPGRADES[level - 1];
+      if (!upgrade) throw new Error('VAULT_MAX_LEVEL');
+      if (wallet.balance < upgrade.cost) throw new Error('INSUFFICIENT_FUNDS');
+
+      const itemIds = Object.keys(upgrade.materials);
+      const inventoryRefs = itemIds.map((itemId) => doc(db, 'inventory', `${uid}_${itemId}`));
+      const inventorySnaps = await Promise.all(inventoryRefs.map((ref) => tx.get(ref)));
+      const quantities = new Map<string, number>();
+      itemIds.forEach((itemId, index) => {
+        quantities.set(itemId, inventorySnaps[index].exists() ? Number(inventorySnaps[index].data()?.quantity || 0) : 0);
+      });
+      for (const [itemId, qty] of Object.entries(upgrade.materials)) {
+        if ((quantities.get(itemId) || 0) < qty) throw new Error('MISSING_VAULT_MATERIALS');
+      }
+
+      const nowMs = Date.now();
+      const { netHourly } = calculateCompanyHourlyNet(
+        comp,
+        { management: profile.skills.management || 0, finance: profile.skills.finance || 0 },
+        worldEvents,
+        nowMs,
+        profile.reputation
+      );
+      const preservedBalance = calculateCompanyVaultBalance(comp, netHourly, nowMs);
+
+      tx.set(doc(db, 'transactions', txId), {
+        id: txId, fromUid: uid, toUid: 'SYSTEM', amount: upgrade.cost, fee: 0,
+        netAmount: upgrade.cost, type: 'company_vault_upgrade', referenceId: companyId,
+        description: `Upgraded ${comp.name} profit vault to Lv.${level + 1}`,
+        status: 'completed', createdAt: serverTimestamp(),
+      });
+      tx.update(walletRef, {
+        balance: wallet.balance - upgrade.cost,
+        totalSpent: wallet.totalSpent + upgrade.cost,
+        lastTxId: txId,
+        updatedAt: serverTimestamp(),
+      });
+      itemIds.forEach((itemId, index) => {
+        const qty = upgrade.materials[itemId as keyof typeof upgrade.materials];
+        const current = quantities.get(itemId) || 0;
+        tx.update(inventoryRefs[index], { quantity: current - qty, updatedAt: serverTimestamp() });
+      });
+      tx.update(compRef, {
+        vaultLevel: level + 1,
+        vaultBalance: preservedBalance,
+        lastCollectedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      tx.set(doc(db, 'company_logs', logId), {
+        id: logId, companyId, ownerUid: uid, action: 'vault_upgrade',
+        amount: -upgrade.cost,
+        details: `Profit vault upgraded to Lv.${level + 1}; preserved ${preservedBalance}`,
+        createdAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (error instanceof Error && [
+      'COMPANY_NOT_FOUND', 'ACCOUNT_NOT_FOUND', 'UNAUTHORIZED', 'VAULT_MAX_LEVEL',
+      'INSUFFICIENT_FUNDS', 'MISSING_VAULT_MATERIALS',
+    ].includes(error.message)) throw error;
+    handleFirestoreError(error, OperationType.UPDATE, `companies/${companyId}/vault`);
+  }
+}
+
 export async function hireCompanyStaff(uid: string, companyId: string): Promise<void> {
   const txId = genId('tx');
   const logId = genId('clog');
@@ -1203,8 +1300,7 @@ export async function collectCompanyRevenue(uid: string, companyId: string): Pro
         profile.reputation
       );
 
-      const rawAccrued = calculateAccruedPayout(netHourly, lastCollectedMs, nowMs);
-      payout = Math.min(25000, rawAccrued);
+      payout = calculateCompanyVaultBalance(comp, netHourly, nowMs);
       if (payout < 1) throw new Error('NOTHING_TO_COLLECT');
 
       tx.set(doc(db, 'transactions', txId), {
@@ -1230,6 +1326,7 @@ export async function collectCompanyRevenue(uid: string, companyId: string): Pro
 
       tx.update(compRef, {
         totalRevenue: comp.totalRevenue + payout,
+        vaultBalance: 0,
         lastCollectedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
