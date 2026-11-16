@@ -1,4 +1,4 @@
-import { getRedirectResult, onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut, type User } from 'firebase/auth';
+import { createUserWithEmailAndPassword, getRedirectResult, onAuthStateChanged, sendEmailVerification, signInAnonymously, signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, signOut, type User } from 'firebase/auth';
 import {
   collection,
   doc,
@@ -69,6 +69,9 @@ export interface GameDataState {
   language: Language;
   setLanguageLocal: (lang: Language) => void;
   loginWithGoogle: () => Promise<void>;
+  loginWithEmail: (email: string, password: string) => Promise<void>;
+  registerWithEmail: (email: string, password: string) => Promise<void>;
+  loginAsGuest: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -581,6 +584,25 @@ export function useGameData(): GameDataState {
     }
   }, []);
 
+  const loginWithEmail = useCallback(async (email: string, password: string) => {
+    const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
+    if (!credential.user.emailVerified) {
+      await sendEmailVerification(credential.user).catch(() => undefined);
+      await signOut(auth);
+      throw new Error('EMAIL_NOT_VERIFIED');
+    }
+  }, []);
+
+  const registerWithEmail = useCallback(async (email: string, password: string) => {
+    const credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
+    await sendEmailVerification(credential.user);
+    await signOut(auth);
+  }, []);
+
+  const loginAsGuest = useCallback(async () => {
+    await signInAnonymously(auth);
+  }, []);
+
   const logout = useCallback(async () => {
     await signOut(auth);
   }, []);
@@ -615,6 +637,9 @@ export function useGameData(): GameDataState {
     language,
     setLanguageLocal,
     loginWithGoogle,
+    loginWithEmail,
+    registerWithEmail,
+    loginAsGuest,
     logout,
   };
 }

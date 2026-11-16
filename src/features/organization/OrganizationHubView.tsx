@@ -1,5 +1,5 @@
 import { ArrowUpCircle, Building2, Check, Plus, Shield, UserMinus, Users, Vault, X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useToast } from '../../components/ui/ToastProvider';
 import { ORG_CREATION_COST, ROLE_DEFAULT_PERMISSIONS } from '../../data/catalog';
@@ -7,6 +7,9 @@ import { useTranslations, formatOrgRole } from '../../i18n/translations';
 import { searchAndSortOrganizations, type OrganizationSort } from '../../lib/organizationDirectory';
 import {
   calculateOrgUpgradeCost,
+  calculateOrgResearchCost,
+  getOrgMemberCapacity,
+  ORG_RESEARCH_DEFINITIONS,
   canManageOrgMember,
   hasOrgPermission,
   ORG_MAX_LEVEL,
@@ -21,6 +24,8 @@ import {
   requestJoinOrganization,
   updateOrgMemberRole,
   upgradeOrganization,
+  completeOrganizationUpgrade,
+  researchOrganization,
   withdrawFromOrgTreasury,
 } from '../../services/gameService';
 import type {
@@ -28,6 +33,7 @@ import type {
   Organization,
   OrganizationMember,
   OrganizationRequest,
+  OrganizationResearchId,
   OrganizationTransaction,
   OrgRole,
   PlayerProfile,
@@ -69,6 +75,7 @@ export function OrganizationHubView({
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
   const [kickTarget, setKickTarget] = useState<{ uid: string; username: string } | null>(null);
+  const [clockNow, setClockNow] = useState(Date.now());
 
   const currentOrg = myOrgMember
     ? organizations.find((o) => o.id === myOrgMember.orgId) || null
@@ -77,7 +84,28 @@ export function OrganizationHubView({
   const canManageMembers = hasOrgPermission(myOrgMember, 'manage_members');
   const canManageRoles = hasOrgPermission(myOrgMember, 'manage_roles');
   const canManageTreasury = hasOrgPermission(myOrgMember, 'manage_treasury');
-  const canManageOrg = hasOrgPermission(myOrgMember, 'manage_org');
+  const canManageOrg = myOrgMember?.role === 'leader' || myOrgMember?.role === 'deputy' || hasOrgPermission(myOrgMember, 'manage_org');
+
+  useEffect(() => {
+    const clock = window.setInterval(() => setClockNow(Date.now()), 15_000);
+    return () => window.clearInterval(clock);
+  }, []);
+
+  useEffect(() => {
+    if (!currentOrg?.upgradeEndsAt) return;
+    const finish = async () => {
+      try {
+        await completeOrganizationUpgrade(currentOrg.id);
+      } catch (error) {
+        const code = error instanceof Error ? error.message : '';
+        if (code !== 'UPGRADE_NOT_READY') showToast(language === 'ar' ? 'تعذر إكمال تطوير المنظمة تلقائياً.' : 'Could not finalize organization upgrade.', 'error');
+      }
+    };
+    const delay = currentOrg.upgradeEndsAt - Date.now();
+    if (delay <= 0) { void finish(); return; }
+    const timer = window.setTimeout(() => void finish(), delay + 500);
+    return () => window.clearTimeout(timer);
+  }, [currentOrg?.id, currentOrg?.upgradeEndsAt, language, showToast]);
 
   const contributionsByUid = new Map<string, number>();
   for (const otx of orgTransactions) {
@@ -213,7 +241,7 @@ export function OrganizationHubView({
     try {
       await depositToOrgTreasury(profile.uid, profile.username, currentOrg.id, treasuryAmt);
       showToast(
-        language === 'ar' ? 'تم الإيداع في خزينة المنظمة.' : 'Deposited to organization treasury.',
+        language === 'ar' ? 'تم التبرع لخزينة المنظمة.' : 'Donated to organization treasury.',
         'success'
       );
     } catch {
@@ -278,27 +306,36 @@ export function OrganizationHubView({
     if (!currentOrg) return;
     setBusyKey('upgrade_org');
     try {
-      const nextLv = await upgradeOrganization(profile.uid, profile.username, currentOrg.id);
-      showToast(
-        language === 'ar'
-          ? `تمت ترقية المنظمة إلى المستوى ${nextLv} (+25 سمعة).`
-          : `Organization upgraded to Lv.${nextLv} (+25 Rep).`,
-        'success'
-      );
+      const result = await upgradeOrganization(profile.uid, profile.username, currentOrg.id);
+      const hours = Math.ceil((result.endsAt - Date.now()) / 3_600_000);
+      showToast(language === 'ar' ? `بدأ تطوير المنظمة إلى المستوى ${result.targetLevel}. المدة المتبقية نحو ${hours} ساعة.` : `Organization upgrade to Lv.${result.targetLevel} started. About ${hours} hours remaining.`, 'success');
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
-      showToast(
-        code === 'INSUFFICIENT_TREASURY'
-          ? language === 'ar'
-            ? 'رصيد خزينة المنظمة غير كافٍ للترقية.'
-            : 'Insufficient organization treasury funds.'
-          : code === 'MAX_LEVEL'
-          ? t.maxLevelReached
-          : language === 'ar'
-          ? 'تعذر ترقية المنظمة.'
-          : 'Could not upgrade organization.',
-        'error'
-      );
+      const message = code === 'INSUFFICIENT_TREASURY'
+        ? (language === 'ar' ? 'رصيد خزينة المنظمة غير كافٍ للترقية.' : 'Insufficient organization treasury funds.')
+        : code === 'MAX_LEVEL' ? t.maxLevelReached
+        : code === 'UPGRADE_IN_PROGRESS' ? (language === 'ar' ? 'هناك تطوير جارٍ بالفعل.' : 'An organization upgrade is already in progress.')
+        : code === 'UNAUTHORIZED' ? (language === 'ar' ? 'التطوير متاح للقائد والنائب فقط.' : 'Only the leader and deputy can upgrade.')
+        : (language === 'ar' ? 'تعذر بدء تطوير المنظمة.' : 'Could not start organization upgrade.');
+      showToast(message, 'error');
+    } finally { setBusyKey(null); }
+  }
+
+  async function handleResearchUpgrade(researchId: OrganizationResearchId) {
+    if (!currentOrg) return;
+    setBusyKey(`research_${researchId}`);
+    try {
+      const result = await researchOrganization(currentOrg.id, researchId);
+      const definition = ORG_RESEARCH_DEFINITIONS[researchId];
+      showToast(language === 'ar' ? `تم تطوير ${definition.titleAr} إلى المستوى ${result.level}.` : `${definition.titleEn} upgraded to level ${result.level}.`, 'success');
+    } catch (error) {
+      const code = error instanceof Error ? error.message : '';
+      const message = code === 'INSUFFICIENT_TREASURY'
+        ? (language === 'ar' ? 'رصيد الخزنة غير كافٍ لهذا البحث.' : 'Insufficient organization treasury funds for this research.')
+        : code === 'RESEARCH_MAX_LEVEL' ? (language === 'ar' ? 'وصل البحث إلى المستوى الأقصى.' : 'Research is already at maximum level.')
+        : code === 'UNAUTHORIZED' ? (language === 'ar' ? 'الأبحاث متاحة للقائد والنائب فقط.' : 'Only the leader and deputy can upgrade research.')
+        : (language === 'ar' ? 'تعذر تطوير البحث.' : 'Could not upgrade research.');
+      showToast(message, 'error');
     } finally {
       setBusyKey(null);
     }
@@ -467,8 +504,11 @@ export function OrganizationHubView({
     );
   }
 
-  const orgUpgradeCost = calculateOrgUpgradeCost(currentOrg.level);
+  const orgUpgradeCost = Math.round(calculateOrgUpgradeCost(currentOrg.level) * (1 - Math.min(10, currentOrg.research?.finance ?? 0) * 0.005));
   const isOrgMaxLevel = currentOrg.level >= ORG_MAX_LEVEL;
+  const upgradeInProgress = Boolean(currentOrg.upgradeEndsAt && currentOrg.upgradeEndsAt > clockNow);
+  const memberCapacity = currentOrg.memberCapacity ?? getOrgMemberCapacity(currentOrg.level, currentOrg.research?.expansion ?? 0);
+  const upgradeHoursLeft = upgradeInProgress ? Math.ceil((currentOrg.upgradeEndsAt! - clockNow) / 3_600_000) : 0;
 
   return (
     <div className="space-y-5">
@@ -484,7 +524,7 @@ export function OrganizationHubView({
           <p className="text-xs text-[#9299A6]">
             {t.level} <span className="font-mono-num text-[#F4F5F7]">{currentOrg.level}</span> ·{' '}
             {t.members}{' '}
-            <span className="font-mono-num text-[#F4F5F7]">{currentOrg.memberCount}</span> ·{' '}
+            <span className="font-mono-num text-[#F4F5F7]">{currentOrg.memberCount}/{memberCapacity}</span> ·{' '}
             {t.reputation}{' '}
             <span className="font-mono-num text-[#F4F5F7]">{currentOrg.reputation}</span>
           </p>
@@ -497,11 +537,15 @@ export function OrganizationHubView({
               {'$'}{currentOrg.treasuryBalance.toLocaleString()}
             </p>
           </div>
+          {upgradeInProgress && (
+            <p className="w-full text-xs text-amber-300">{language === 'ar' ? `ينتهي تطوير المنظمة خلال نحو ${upgradeHoursLeft} ساعة.` : `Organization upgrade completes in about ${upgradeHoursLeft} hours.`}</p>
+          )}
           {canManageOrg && (
             <button
               type="button"
               disabled={
                 isOrgMaxLevel ||
+                upgradeInProgress ||
                 busyKey === 'upgrade_org' ||
                 currentOrg.treasuryBalance < orgUpgradeCost
               }
@@ -512,7 +556,9 @@ export function OrganizationHubView({
               <span>
                 {isOrgMaxLevel
                   ? t.maxLevelReached
-                  : `${t.upgradeOrg} ($${orgUpgradeCost.toLocaleString()})`}
+                  : upgradeInProgress
+                  ? (language === 'ar' ? `جارٍ التطوير · المستوى ${currentOrg.upgradeTargetLevel}` : `Upgrading · Lv.${currentOrg.upgradeTargetLevel}`)
+                  : `${t.upgradeOrg} (${orgUpgradeCost.toLocaleString()})`}
               </span>
             </button>
           )}
@@ -528,12 +574,55 @@ export function OrganizationHubView({
         </div>
       </div>
 
+      <section className="rounded-2xl border border-white/8 bg-[#141821] p-5 space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-bold text-[#F4F5F7]">{language === 'ar' ? 'أبحاث المنظمة' : 'Organization Research'}</h2>
+            <p className="mt-1 text-xs text-[#9299A6]">{language === 'ar' ? 'خمسة مسارات بحثية، لكل مسار 10 مستويات وتأثير محدود.' : 'Five research paths, each with 10 levels and balanced effects.'}</p>
+          </div>
+          <span className="rounded-lg bg-[#0B0D12] px-3 py-1.5 text-xs text-[#E5A0A8]">{language === 'ar' ? '10 مستويات' : '10 levels'}</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {(Object.keys(ORG_RESEARCH_DEFINITIONS) as OrganizationResearchId[]).map((researchId) => {
+            const definition = ORG_RESEARCH_DEFINITIONS[researchId];
+            const level = currentOrg.research?.[researchId] ?? 0;
+            const cost = calculateOrgResearchCost(researchId, level);
+            const isMax = level >= 10;
+            return (
+              <div key={researchId} className="rounded-xl border border-white/8 bg-[#0B0D12] p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-sm font-bold text-[#F4F5F7]">{language === 'ar' ? definition.titleAr : definition.titleEn}</h3>
+                  <span className="font-mono-num text-xs text-[#E5A0A8]">{level}/10</span>
+                </div>
+                <p className="min-h-[38px] text-xs leading-relaxed text-[#9299A6]">{language === 'ar' ? definition.effectAr : definition.effectEn}</p>
+                <div className="h-1.5 overflow-hidden rounded-full bg-white/8">
+                  <div className="h-full rounded-full bg-[#B91C32]" style={{ width: `${level * 10}%` }} />
+                </div>
+                <button
+                  type="button"
+                  disabled={!canManageOrg || isMax || busyKey === `research_${researchId}` || currentOrg.treasuryBalance < cost}
+                  onClick={() => handleResearchUpgrade(researchId)}
+                  className="min-h-[40px] w-full rounded-lg bg-[#1B2230] px-3 text-xs font-semibold text-[#F4F5F7] hover:bg-[#B91C32] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {isMax
+                    ? (language === 'ar' ? 'اكتمل البحث' : 'Research maxed')
+                    : busyKey === `research_${researchId}`
+                    ? '...'
+                    : (language === 'ar' ? `تطوير · $${cost.toLocaleString()}` : `Research · $${cost.toLocaleString()}`)}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        {!canManageOrg && <p className="text-xs text-[#9299A6]">{language === 'ar' ? 'تطوير الأبحاث متاح للقائد والنائب.' : 'Research upgrades are available to the leader and deputy.'}</p>}
+      </section>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Shared Treasury Operations & RBAC Matrix */}
         <div className="space-y-5">
           <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold text-[#F4F5F7]">{t.orgTreasury}</h2>
+              <h2 className="text-base font-semibold text-[#F4F5F7]">{language === 'ar' ? 'خزينة المنظمة والتبرعات' : 'Organization treasury & donations'}</h2>
               <Vault className="w-4 h-4 text-[#E04455]" />
             </div>
 
@@ -555,7 +644,7 @@ export function OrganizationHubView({
                 onClick={handleDeposit}
                 className="min-h-[44px] px-4 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white text-xs font-semibold whitespace-nowrap disabled:bg-[#1B2230] disabled:text-[#9299A6]"
               >
-                {t.deposit}
+                {language === 'ar' ? 'تبرع للخزنة' : 'Donate to treasury'}
               </button>
               {canManageTreasury && (
                 <button

@@ -45,6 +45,7 @@ type VaultProfile = {
   skillPoints: number;
   reputation: number;
   influence: number;
+  orgId?: string | null;
   skills?: { management?: number; finance?: number; leadership?: number };
 };
 type VaultWallet = { balance: number; totalEarned: number; totalSpent: number };
@@ -236,7 +237,7 @@ class FirestoreRest {
   }
 }
 
-function companyNetHourly(company: VaultCompany, profile: VaultProfile, events: Data[], nowMs: number): number {
+function companyNetHourly(company: VaultCompany, profile: VaultProfile, events: Data[], nowMs: number, incomeBonusLevel = 0): number {
   const levelMultiplier = 1 + (numberOrZero(company.level) - 1) * 0.32;
   const management = Math.max(0, numberOrZero(profile.skills?.management));
   const finance = Math.max(0, numberOrZero(profile.skills?.finance));
@@ -273,7 +274,8 @@ function companyNetHourly(company: VaultCompany, profile: VaultProfile, events: 
       levelMultiplier *
       managementBonus *
       eventMultiplier *
-      reputationBonus
+      reputationBonus *
+      (1 + Math.min(10, Math.max(0, incomeBonusLevel)) * 0.005)
   );
   const rawExpense =
     numberOrZero(company.expensePerHour) * (1 + (numberOrZero(company.level) - 1) * 0.2);
@@ -419,6 +421,8 @@ async function upgradeVault(db: FirestoreRest, uid: string, companyId: string) {
     const wallet = walletRaw as unknown as VaultWallet;
     const profile = profileRaw as unknown as VaultProfile;
     if (company.ownerUid !== uid) throw new VaultError('UNAUTHORIZED', 403);
+    const orgRaw = profile.orgId ? (await db.getMany(transaction, [`organizations/${profile.orgId}`]))[0] : null;
+    const incomeBonusLevel = orgRaw && orgRaw.research && typeof orgRaw.research === 'object' ? numberOrZero((orgRaw.research as Data).commerce) : 0;
 
     const oldLevel = vaultLevelOf(company);
     if (numberOrZero(company.vaultUpgradeEndsAt) > Date.now()) throw new VaultError('UPGRADE_IN_PROGRESS',409);
@@ -439,7 +443,7 @@ async function upgradeVault(db: FirestoreRest, uid: string, companyId: string) {
     const now = Date.now();
     const target = oldLevel + 1;
     const endsAt = now + Math.max(1_000, Math.floor(companyUpgradeDurationMs(Math.min(100, Math.max(2,target))) / 2));
-    const netHourly = companyNetHourly(company, profile, events, now);
+    const netHourly = companyNetHourly(company, profile, events, now, incomeBonusLevel);
     const preserved = calculatedVaultBalance(company, netHourly, now);
     const txId = `tx_${randomUUID()}`;
     const logId = `clog_${randomUUID()}`;
@@ -489,11 +493,13 @@ async function collectVault(db: FirestoreRest, uid: string, companyId: string) {
     const wallet = walletRaw as unknown as VaultWallet;
     const profile = profileRaw as unknown as VaultProfile;
     if (company.ownerUid !== uid) throw new VaultError('UNAUTHORIZED', 403);
+    const orgRaw = profile.orgId ? (await db.getMany(transaction, [`organizations/${profile.orgId}`]))[0] : null;
+    const incomeBonusLevel = orgRaw && orgRaw.research && typeof orgRaw.research === 'object' ? numberOrZero((orgRaw.research as Data).commerce) : 0;
 
     const now = Date.now();
     const lastCollected = timestampMillis(company.lastCollectedAt, now);
     if (now - lastCollected < 30_000) throw new VaultError('NOTHING_TO_COLLECT', 409);
-    const netHourly = companyNetHourly(company, profile, events, now);
+    const netHourly = companyNetHourly(company, profile, events, now, incomeBonusLevel);
     const payout = calculatedVaultBalance(company, netHourly, now);
     if (payout < 1) throw new VaultError('NOTHING_TO_COLLECT', 409);
 

@@ -67,6 +67,7 @@ interface BusinessHubViewProps {
   worldEvents: WorldEvent[];
   language: Language;
   onGoToMarket: () => void;
+  organizationIncomeBonusRate?: number;
 }
 
 export function BusinessHubView({
@@ -79,6 +80,7 @@ export function BusinessHubView({
   worldEvents,
   language,
   onGoToMarket,
+  organizationIncomeBonusRate = 0,
 }: BusinessHubViewProps) {
   const t = useTranslations(language);
   const { showToast } = useToast();
@@ -126,7 +128,8 @@ export function BusinessHubView({
       },
       worldEvents,
       nowMs,
-      profile.reputation
+      profile.reputation,
+      organizationIncomeBonusRate
     );
     return sum + netHourly;
   }, 0);
@@ -476,7 +479,8 @@ export function BusinessHubView({
                   },
                   worldEvents,
                   nowMs,
-                  profile.reputation
+                  profile.reputation,
+                  organizationIncomeBonusRate
                 );
                 const { netHourly, grossHourly, expenseHourly, sectorEventMultiplier } = breakdown;
                 const accrued = calculateCompanyVaultBalance(c, netHourly, nowMs);

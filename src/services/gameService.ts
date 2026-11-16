@@ -33,17 +33,14 @@ import {
   calculateDailyStipend,
   calculateLevelProgress,
   calculateManufacturingCost,
-  calculateOrgUpgradeCost,
   calculatePropertyHourlyNet,
   canManageOrgMember,
-  COMPANY_MAX_LEVEL,
   getAchievementProgress,
   getMissionProgress,
   hasOrgPermission,
   isValidUsername,
   LISTING_MAX_PRICE,
   LISTING_MAX_QTY,
-  ORG_MAX_LEVEL,
   PROPERTY_MAX_LEVEL,
   timestampToMs as parseTimestampMs,
   validateTransfer,
@@ -1464,7 +1461,8 @@ export async function handleOrgJoinRequest(
             throw new Error('APPLICANT_IN_OTHER_ORG');
           }
         }
-        if (org.memberCount >= 200) {
+        const memberCapacity = typeof org.memberCapacity === 'number' ? org.memberCapacity : Math.min(70, 20 + (Math.max(1, org.level) - 1) * 5);
+        if (org.memberCount >= memberCapacity) {
           throw new Error('ORG_FULL');
         }
 
@@ -1601,58 +1599,40 @@ export async function kickOrgMember(
   }
 }
 
+async function callOrganizationUpgrade(orgId: string, action: 'start' | 'complete' | 'research', researchId?: string) {
+  const user = auth.currentUser;
+  if (!user) throw new Error('UNAUTHENTICATED');
+  const token = await user.getIdToken();
+  const response = await fetch('/api/organization-upgrade', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ orgId, action, researchId }),
+  });
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok) throw new Error(typeof payload.error === 'string' ? payload.error : 'ORGANIZATION_UPGRADE_FAILED');
+  return payload;
+}
+
 export async function upgradeOrganization(
-  uid: string,
-  username: string,
+  _uid: string,
+  _username: string,
   orgId: string
-): Promise<number> {
-  const orgTxId = genId('otx');
-  try {
-    let nextLevel = 1;
-    await runTransaction(db, async (tx) => {
-      const orgRef = doc(db, 'organizations', orgId);
-      const memberRef = doc(db, 'organization_members', `${orgId}_${uid}`);
-      const [orgSnap, memberSnap] = await Promise.all([tx.get(orgRef), tx.get(memberRef)]);
-      if (!orgSnap.exists() || !memberSnap.exists()) throw new Error('NOT_FOUND');
+): Promise<{ targetLevel: number; endsAt: number; cost: number }> {
+  const result = await callOrganizationUpgrade(orgId, 'start');
+  return {
+    targetLevel: Number(result.targetLevel),
+    endsAt: Number(result.endsAt),
+    cost: Number(result.cost),
+  };
+}
 
-      const member = memberSnap.data() as OrganizationMember;
-      if (!hasOrgPermission(member, 'manage_org')) throw new Error('UNAUTHORIZED');
+export async function completeOrganizationUpgrade(orgId: string): Promise<void> {
+  await callOrganizationUpgrade(orgId, 'complete');
+}
 
-      const org = orgSnap.data() as Organization;
-      if (org.level >= ORG_MAX_LEVEL) throw new Error('MAX_LEVEL');
-
-      const cost = calculateOrgUpgradeCost(org.level);
-      if (org.treasuryBalance < cost) throw new Error('INSUFFICIENT_TREASURY');
-
-      nextLevel = org.level + 1;
-      tx.update(orgRef, {
-        level: nextLevel,
-        treasuryBalance: org.treasuryBalance - cost,
-        reputation: org.reputation + 25,
-        updatedAt: serverTimestamp(),
-      });
-
-      tx.set(doc(db, 'organization_transactions', orgTxId), {
-        id: orgTxId,
-        orgId,
-        uid,
-        username,
-        type: 'upgrade',
-        amount: cost,
-        note: `Upgraded [${org.tag}] to Lv.${nextLevel}`.slice(0, 160),
-        createdAt: serverTimestamp(),
-      });
-    });
-    return nextLevel;
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      ['NOT_FOUND', 'UNAUTHORIZED', 'MAX_LEVEL', 'INSUFFICIENT_TREASURY'].includes(error.message)
-    ) {
-      throw error;
-    }
-    handleFirestoreError(error, OperationType.UPDATE, `organizations/${orgId}`);
-  }
+export async function researchOrganization(orgId: string, researchId: 'commerce' | 'engineering' | 'expansion' | 'finance' | 'diplomacy'): Promise<{ level: number; cost: number }> {
+  const result = await callOrganizationUpgrade(orgId, 'research', researchId);
+  return { level: Number(result.level), cost: Number(result.cost) };
 }
 
 export async function depositToOrgTreasury(
@@ -1702,7 +1682,7 @@ export async function depositToOrgTreasury(
 
       tx.update(orgRef, {
         treasuryBalance: org.treasuryBalance + amount,
-        reputation: org.reputation + Math.max(1, Math.floor(amount / 100)),
+        reputation: org.reputation + Math.max(1, Math.floor((amount / 100) * (1 + Math.min(10, org.research?.diplomacy ?? 0) * 0.01))),
         updatedAt: serverTimestamp(),
       });
 

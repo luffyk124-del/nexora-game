@@ -247,7 +247,8 @@ export function calculateCompanyHourlyNet(
   skills: Pick<SkillsMap, 'management' | 'finance'>,
   worldEvents: WorldEvent[] = [],
   nowMs = Date.now(),
-  reputation = 0
+  reputation = 0,
+  organizationIncomeBonusRate = 0
 ): {
   grossHourly: number;
   expenseHourly: number;
@@ -278,7 +279,7 @@ export function calculateCompanyHourlyNet(
       levelMultiplier *
       mgmtBonus *
       sectorEventMultiplier *
-      reputationBonus
+      reputationBonus * (1 + Math.max(0, Math.min(0.05, organizationIncomeBonusRate)))
   );
 
   const rawExpense =
@@ -368,10 +369,35 @@ export function hasOrgPermission(
   return ROLE_DEFAULT_PERMISSIONS[member.role]?.includes(permission) ?? false;
 }
 
-export const ORG_MAX_LEVEL = 50;
+export const ORG_MAX_LEVEL = 10;
 
 export function calculateOrgUpgradeCost(level: number): number {
-  return Math.max(1, Math.floor(level)) * 1500;
+  const safeLevel = Math.max(1, Math.min(ORG_MAX_LEVEL, Math.floor(level)));
+  return 12_000 * safeLevel * safeLevel;
+}
+
+export function calculateOrgUpgradeDurationMs(targetLevel: number): number {
+  const safeTarget = Math.max(2, Math.min(ORG_MAX_LEVEL, Math.floor(targetLevel)));
+  return Math.round(8 * 60 * 60 * 1000 * Math.pow(1.5, safeTarget - 2));
+}
+
+export const ORG_RESEARCH_DEFINITIONS = {
+  commerce: { baseCost: 25_000, titleAr: 'شبكة التجارة', titleEn: 'Trade Network', effectAr: 'زيادة دخل المشاريع 0.5% لكل مستوى بحث (حتى 5%).', effectEn: 'Project income +0.5% per research level (up to 5%).' },
+  engineering: { baseCost: 30_000, titleAr: 'الهندسة المتقدمة', titleEn: 'Advanced Engineering', effectAr: 'تقليل مدة تطوير المنظمة 0.5% لكل مستوى (حتى 5%).', effectEn: 'Organization upgrade time -0.5% per level (up to 5%).' },
+  expansion: { baseCost: 20_000, titleAr: 'التوسع الإداري', titleEn: 'Administrative Expansion', effectAr: 'إضافة عضو واحد للسعة لكل مستوى بحث (حتى 10 أعضاء).', effectEn: 'Adds one member of capacity per research level (up to 10).' },
+  finance: { baseCost: 35_000, titleAr: 'الهندسة المالية', titleEn: 'Financial Engineering', effectAr: 'تقليل تكلفة تطوير المنظمة 0.5% لكل مستوى (حتى 5%).', effectEn: 'Organization upgrade cost -0.5% per level (up to 5%).' },
+  diplomacy: { baseCost: 18_000, titleAr: 'العلاقات العامة', titleEn: 'Public Relations', effectAr: 'زيادة السمعة المكتسبة من التبرعات 1% لكل مستوى (حتى 10%).', effectEn: 'Donation reputation gain +1% per level (up to 10%).' },
+} as const;
+
+export function calculateOrgResearchCost(researchId: keyof typeof ORG_RESEARCH_DEFINITIONS, currentLevel: number): number {
+  const level = Math.max(0, Math.min(9, Math.floor(currentLevel)));
+  return ORG_RESEARCH_DEFINITIONS[researchId].baseCost * (level + 1) * (level + 1);
+}
+
+export function getOrgMemberCapacity(level: number, expansionResearchLevel = 0): number {
+  const safeLevel = Math.max(1, Math.min(ORG_MAX_LEVEL, Math.floor(level)));
+  const researchBonus = Math.max(0, Math.min(10, Math.floor(expansionResearchLevel)));
+  return Math.min(80, 20 + (safeLevel - 1) * 5 + researchBonus);
 }
 
 const ROLE_WEIGHT: Record<OrgRole, number> = {

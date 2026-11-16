@@ -14,6 +14,10 @@ interface AuthOnboardingViewProps {
   language: Language;
   onLanguageChange: (lang: Language) => void;
   onLogin: () => Promise<void>;
+  onLoginWithEmail: (email: string, password: string) => Promise<void>;
+  onRegisterWithEmail: (email: string, password: string) => Promise<void>;
+  onGuestLogin: () => Promise<void>;
+  isGuest?: boolean;
 }
 
 export function AuthOnboardingView({
@@ -23,6 +27,10 @@ export function AuthOnboardingView({
   language,
   onLanguageChange,
   onLogin,
+  onLoginWithEmail,
+  onRegisterWithEmail,
+  onGuestLogin,
+  isGuest = false,
 }: AuthOnboardingViewProps) {
   const t = useTranslations(language);
   const { showToast } = useToast();
@@ -30,6 +38,9 @@ export function AuthOnboardingView({
   const [busy, setBusy] = useState(false);
   const [username, setUsername] = useState('');
   const [avatarId, setAvatarId] = useState(AVATARS[0].id);
+  const [emailAddress, setEmailAddress] = useState('');
+  const [password, setPassword] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
 
   async function handleGoogleLogin() {
     setBusy(true);
@@ -78,9 +89,46 @@ export function AuthOnboardingView({
     }
   }
 
+  async function handleEmailAuth(e: React.FormEvent) {
+    e.preventDefault();
+    if (password.length < 6 || !emailAddress.trim()) {
+      showToast(language === 'ar' ? 'أدخل بريداً إلكترونياً وكلمة مرور من 6 أحرف على الأقل.' : 'Enter an email and a password with at least 6 characters.', 'error');
+      return;
+    }
+    setBusy(true);
+    try {
+      if (isRegistering) {
+        await onRegisterWithEmail(emailAddress, password);
+        setPassword('');
+        showToast(language === 'ar' ? 'أرسلنا رابط التحقق إلى بريدك. تحقق منه ثم سجّل الدخول.' : 'A verification link was sent. Verify your email, then sign in.', 'success');
+      } else {
+        await onLoginWithEmail(emailAddress, password);
+      }
+    } catch (error) {
+      const code = error instanceof Error ? error.message : '';
+      const message = code === 'EMAIL_NOT_VERIFIED'
+        ? (language === 'ar' ? 'تحقق من بريدك الإلكتروني أولاً. أرسلنا رابط تحقق جديداً.' : 'Verify your email first. A new verification link was sent.')
+        : code.includes('email-already-in-use')
+        ? (language === 'ar' ? 'هذا البريد مسجل بالفعل.' : 'This email is already registered.')
+        : code.includes('invalid-credential') || code.includes('wrong-password') || code.includes('user-not-found')
+        ? (language === 'ar' ? 'البريد أو كلمة المرور غير صحيحة.' : 'Email or password is incorrect.')
+        : (language === 'ar' ? 'تعذر إكمال تسجيل الدخول بالبريد.' : 'Email authentication failed.');
+      showToast(message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleGuestLogin() {
+    setBusy(true);
+    try { await onGuestLogin(); }
+    catch { showToast(language === 'ar' ? 'الدخول كضيف غير متاح حالياً.' : 'Guest access is currently unavailable.', 'error'); }
+    finally { setBusy(false); }
+  }
+
   async function handleCreateCharacter(e: React.FormEvent) {
     e.preventDefault();
-    if (!uid || !email) return;
+    if (!uid || (!email && !isGuest)) return;
 
     const clean = username.trim();
     if (!isValidUsername(clean)) {
@@ -105,7 +153,7 @@ export function AuthOnboardingView({
         return;
       }
 
-      await createPlayerCharacter(uid, email, clean, avatarId, language);
+      await createPlayerCharacter(uid, email || `guest+${uid}@nexora.invalid`, clean, avatarId, language);
       showToast(
         language === 'ar'
           ? 'تم إنشاء شخصيتك وإيداع رأس المال بنجاح.'
@@ -197,6 +245,40 @@ export function AuthOnboardingView({
             >
               <ShieldCheck className="w-4 h-4" />
               <span>{busy ? t.signingIn : t.signInButton}</span>
+            </button>
+
+            <div className="flex items-center gap-3 text-[11px] text-[#9299A6]"><span className="h-px flex-1 bg-white/10" />{language === 'ar' ? 'أو بالبريد الإلكتروني' : 'OR WITH EMAIL'}<span className="h-px flex-1 bg-white/10" /></div>
+
+            <form onSubmit={handleEmailAuth} className="space-y-3">
+              <input
+                type="email"
+                value={emailAddress}
+                onChange={(event) => setEmailAddress(event.target.value)}
+                placeholder={language === 'ar' ? 'البريد الإلكتروني' : 'Email address'}
+                autoComplete="email"
+                required
+                className="w-full min-h-[44px] px-4 rounded-xl bg-[#0B0D12] border border-white/10 text-sm text-[#F4F5F7] placeholder:text-[#9299A6]/60"
+              />
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder={language === 'ar' ? 'كلمة المرور (6 أحرف على الأقل)' : 'Password (at least 6 characters)'}
+                autoComplete={isRegistering ? 'new-password' : 'current-password'}
+                minLength={6}
+                required
+                className="w-full min-h-[44px] px-4 rounded-xl bg-[#0B0D12] border border-white/10 text-sm text-[#F4F5F7] placeholder:text-[#9299A6]/60"
+              />
+              <button type="submit" disabled={busy} className="w-full min-h-[44px] rounded-xl bg-[#1B2230] hover:bg-[#232C3E] text-sm font-semibold text-[#F4F5F7] disabled:opacity-50">
+                {busy ? t.loading : isRegistering ? (language === 'ar' ? 'إنشاء حساب بالبريد' : 'Create email account') : (language === 'ar' ? 'تسجيل الدخول بالبريد' : 'Sign in with email')}
+              </button>
+              <button type="button" onClick={() => setIsRegistering((value) => !value)} className="w-full text-xs text-[#E5A0A8] underline">
+                {isRegistering ? (language === 'ar' ? 'لديك حساب؟ سجّل الدخول' : 'Already registered? Sign in') : (language === 'ar' ? 'إنشاء حساب جديد بالبريد' : 'Create a new email account')}
+              </button>
+            </form>
+
+            <button type="button" onClick={handleGuestLogin} disabled={busy} className="w-full min-h-[44px] rounded-xl border border-white/10 bg-[#0B0D12] text-sm font-semibold text-[#F4F5F7] hover:border-white/20 disabled:opacity-50">
+              {language === 'ar' ? 'الدخول كضيف' : 'Continue as guest'}
             </button>
           </div>
         ) : (

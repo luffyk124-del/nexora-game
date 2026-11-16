@@ -206,6 +206,7 @@ export interface PropertyAsset {
 
 export type OrgRole = 'leader' | 'deputy' | 'officer' | 'member';
 export type OrgPermission = 'manage_members' | 'manage_roles' | 'manage_treasury' | 'manage_org';
+export type OrganizationResearchId = 'commerce' | 'engineering' | 'expansion' | 'finance' | 'diplomacy';
 
 export interface Organization {
   id: string;
@@ -218,6 +219,11 @@ export interface Organization {
   memberCount: number;
   reputation: number;
   level: number;
+  memberCapacity?: number;
+  research?: Partial<Record<OrganizationResearchId, number>>;
+  upgradeStartedAt?: number;
+  upgradeEndsAt?: number;
+  upgradeTargetLevel?: number;
   createdAt: unknown;
   updatedAt: unknown;
 }

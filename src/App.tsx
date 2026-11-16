@@ -6,6 +6,8 @@
 import { useState } from 'react';
 import { AppShell } from './components/ui/AppShell';
 import { GameAudioFeedback } from './components/ui/GameAudioFeedback';
+import { GameMusic } from './components/ui/GameMusic';
+import { VersionUpdateNotice } from './components/ui/VersionUpdateNotice';
 import { ToastProvider } from './components/ui/ToastProvider';
 import { AuthOnboardingView } from './features/auth/AuthOnboardingView';
 import { BusinessHubView } from './features/business/BusinessHubView';
@@ -39,6 +41,9 @@ function NexoraAppContent() {
         language={game.language}
         onLanguageChange={game.setLanguageLocal}
         onLogin={game.loginWithGoogle}
+        onLoginWithEmail={game.loginWithEmail}
+        onRegisterWithEmail={game.registerWithEmail}
+        onGuestLogin={game.loginAsGuest}
       />
     );
   }
@@ -52,6 +57,10 @@ function NexoraAppContent() {
         language={game.language}
         onLanguageChange={game.setLanguageLocal}
         onLogin={game.loginWithGoogle}
+        onLoginWithEmail={game.loginWithEmail}
+        onRegisterWithEmail={game.registerWithEmail}
+        onGuestLogin={game.loginAsGuest}
+        isGuest={game.authUser.isAnonymous}
       />
     );
   }
@@ -65,6 +74,8 @@ function NexoraAppContent() {
       notifications={game.notifications}
       language={game.language}
     >
+      <VersionUpdateNotice />
+
       {!game.isOnline && (
         <div className="mb-4 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200">
           {game.language === 'ar'
@@ -96,6 +107,7 @@ function NexoraAppContent() {
           properties={game.properties}
           inventory={game.inventory}
           worldEvents={game.worldEvents}
+          organizationIncomeBonusRate={Math.min(10, game.organizations.find((org) => org.id === game.profile?.orgId)?.research?.commerce ?? 0) * 0.005}
           language={game.language}
           onGoToMarket={() => setActiveTab('market')}
         />
@@ -159,6 +171,7 @@ export default function App() {
   return (
     <ToastProvider>
       <GameAudioFeedback />
+      <GameMusic />
       <NexoraAppContent />
     </ToastProvider>
   );

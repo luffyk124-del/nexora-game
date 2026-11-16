@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - development/nexora-next
+      - main
     paths:
       - firestore.rules
       - firebase.json
@@ -19,13 +20,11 @@ concurrency:
 jobs:
   deploy:
     name: Deploy NEXORA Firestore rules
-    if: github.ref == 'refs/heads/development/nexora-next'
+    if: github.ref == 'refs/heads/development/nexora-next' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout NEXORA development branch
+      - name: Checkout the branch that triggered this deployment
         uses: actions/checkout@v4
-        with:
-          ref: development/nexora-next
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
