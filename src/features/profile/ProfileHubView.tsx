@@ -70,6 +70,9 @@ export function ProfileHubView({
   }>({ players: [], companies: [], organizations: [] });
   const [lbLoading, setLbLoading] = useState(false);
   const [lbError, setLbError] = useState(false);
+  const [musicVolume, setMusicVolume] = useState(() => {
+    try { const stored = window.localStorage.getItem('nexora-music-volume'); return stored === null ? 22 : Math.round(Math.max(0, Math.min(1, Number(stored))) * 100); } catch { return 22; }
+  });
   const [buttonSoundEnabled, setButtonSoundEnabled] = useState(() => {
     try { return window.localStorage.getItem('nexora-button-sound') !== 'off'; } catch { return true; }
   });
@@ -179,6 +182,13 @@ export function ProfileHubView({
   }
 
 
+
+  function handleMusicVolumeChange(rawValue: string) {
+    const next = Math.max(0, Math.min(100, Number(rawValue) || 0));
+    setMusicVolume(next);
+    try { window.localStorage.setItem('nexora-music-volume', String(next / 100)); } catch { /* Keep the preference for this session. */ }
+    window.dispatchEvent(new CustomEvent('nexora-music-volume-change', { detail: next / 100 }));
+  }
 
   function handleButtonSoundToggle() {
     const next = !buttonSoundEnabled;
@@ -698,6 +708,30 @@ export function ProfileHubView({
             >
               {buttonSoundEnabled ? (language === 'ar' ? 'مفعل' : 'On') : (language === 'ar' ? 'معطل' : 'Off')}
             </button>
+          </div>
+
+          <div className="space-y-3 py-2 border-b border-white/8">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <Volume2 className="w-4 h-4 text-[#E04455]" />
+                <span className="text-sm text-[#F4F5F7]">{language === 'ar' ? 'مستوى الموسيقى' : 'Music volume'}</span>
+              </div>
+              <span className="text-xs font-mono-num text-[#9299A6]">{musicVolume}%</span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value={musicVolume}
+              onChange={(event) => handleMusicVolumeChange(event.target.value)}
+              aria-label={language === 'ar' ? 'مستوى صوت الموسيقى' : 'Music volume'}
+              className="w-full accent-[#E04455]"
+            />
+            <p className="text-[11px] text-[#9299A6]">
+              {language === 'ar' ? 'الموسيقى: Purrple Cat · مرخصة وفق CC BY 4.0.' : 'Music: Purrple Cat · Licensed under CC BY 4.0.'}
+              {' '}<a href="https://creativecommons.org/licenses/by/4.0/" rel="noreferrer" target="_blank" className="text-[#E5A0A8] underline">CC BY 4.0</a>
+            </p>
           </div>
 
           {isOwnerAuthorized && (
