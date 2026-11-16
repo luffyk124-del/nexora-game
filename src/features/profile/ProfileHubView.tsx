@@ -1,4 +1,4 @@
-import { Activity, Award, Globe, LogOut, ShieldCheck, Sliders, Trophy, Zap } from 'lucide-react';
+import { Activity, Award, Globe, LogOut, ShieldCheck, Sliders, Trophy, Volume2, Zap } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { useToast } from '../../components/ui/ToastProvider';
 import { ACHIEVEMENTS, AVATARS, MISSIONS, SKILL_DEFINITIONS } from '../../data/catalog';
@@ -70,6 +70,9 @@ export function ProfileHubView({
   }>({ players: [], companies: [], organizations: [] });
   const [lbLoading, setLbLoading] = useState(false);
   const [lbError, setLbError] = useState(false);
+  const [buttonSoundEnabled, setButtonSoundEnabled] = useState(() => {
+    try { return window.localStorage.getItem('nexora-button-sound') !== 'off'; } catch { return true; }
+  });
 
   const claimedSet = new Set(claimedMissions.map((m) => m.missionId));
   const avatar = AVATARS.find((a) => a.id === profile.avatarId) || AVATARS[0];
@@ -173,6 +176,14 @@ export function ProfileHubView({
     } catch {
       // Persisted locally as fallback
     }
+  }
+
+
+
+  function handleButtonSoundToggle() {
+    const next = !buttonSoundEnabled;
+    setButtonSoundEnabled(next);
+    try { window.localStorage.setItem('nexora-button-sound', next ? 'on' : 'off'); } catch { /* Keep the preference for this session. */ }
   }
 
   async function handleNotifToggle() {
@@ -669,6 +680,23 @@ export function ProfileHubView({
                 : language === 'ar'
                 ? 'معطل'
                 : 'Muted'}
+            </button>
+          </div>
+
+
+
+          <div className="flex items-center justify-between py-2 border-b border-white/8">
+            <div className="flex items-center gap-2.5">
+              <Volume2 className="w-4 h-4 text-[#E04455]" />
+              <span className="text-sm text-[#F4F5F7]">{language === 'ar' ? 'صوت النقر' : 'Button click sound'}</span>
+            </div>
+            <button
+              type="button"
+              onClick={handleButtonSoundToggle}
+              aria-pressed={buttonSoundEnabled}
+              className={`min-h-[36px] px-4 rounded-lg text-xs font-semibold ${buttonSoundEnabled ? 'bg-[#B91C32] text-white' : 'bg-[#0B0D12] text-[#9299A6]'}`}
+            >
+              {buttonSoundEnabled ? (language === 'ar' ? 'مفعل' : 'On') : (language === 'ar' ? 'معطل' : 'Off')}
             </button>
           </div>
 
