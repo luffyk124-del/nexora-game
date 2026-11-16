@@ -12,7 +12,7 @@ const MAX_MESSAGE_LENGTH = 3_000;
 
 async function verifyPlayer(req: Req): Promise<string> {
   const header = req.headers.authorization;
-  const match = typeof header === 'string' ? /^Bearer\\s+(.+)$/i.exec(header) : null;
+  const match = typeof header === 'string' ? /^Bearer\s+(.+)$/i.exec(header) : null;
   if (!match) throw new Error('UNAUTHENTICATED');
   const { payload } = await jwtVerify(match[1], FIREBASE_KEYS, { issuer: FIREBASE_ISSUER, audience: PROJECT_ID, algorithms: ['RS256'] });
   const firebaseClaim = payload.firebase && typeof payload.firebase === 'object' ? payload.firebase as Record<string, unknown> : {};
