@@ -247,7 +247,8 @@ export function calculateCompanyHourlyNet(
   skills: Pick<SkillsMap, 'management' | 'finance'>,
   worldEvents: WorldEvent[] = [],
   nowMs = Date.now(),
-  reputation = 0
+  reputation = 0,
+  organizationIncomeBonusRate = 0
 ): {
   grossHourly: number;
   expenseHourly: number;
@@ -278,7 +279,7 @@ export function calculateCompanyHourlyNet(
       levelMultiplier *
       mgmtBonus *
       sectorEventMultiplier *
-      reputationBonus
+      reputationBonus * (1 + Math.max(0, Math.min(0.05, organizationIncomeBonusRate)))
   );
 
   const rawExpense =
