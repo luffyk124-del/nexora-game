@@ -116,6 +116,10 @@ export function OrganizationHubView({
         AUTH_SESSION_MISMATCH: language === 'ar' ? 'جلسة تسجيل الدخول لا تطابق الحساب الحالي. سجّل الخروج ثم ادخل مجدداً.' : 'The signed-in session does not match this account. Sign out and sign in again.',
         EMAIL_NOT_VERIFIED: language === 'ar' ? 'حساب Google غير موثق لدى Firebase، لذلك لا تسمح قواعد الأمان بإنشاء المنظمة.' : 'Firebase does not consider this Google account verified, so security rules block organization creation.',
         'permission-denied': language === 'ar' ? 'رفضت قواعد Firestore حفظ المنظمة (permission-denied).' : 'Firestore rules rejected organization creation (permission-denied).',
+        BACKEND_IDENTITY_NOT_READY: language === 'ar' ? 'خدمة إنشاء المنظمة غير جاهزة حالياً. لم يتم خصم أي مبلغ؛ حاول لاحقاً.' : 'Organization service is not ready. No funds were charged; try again later.',
+        BACKEND_FIRESTORE_WRITE_DENIED: language === 'ar' ? 'الخادم لا يملك صلاحية إتمام العملية. لم يتم خصم أي مبلغ.' : 'The server is not authorized to complete this operation. No funds were charged.',
+        RETRY_OPERATION: language === 'ar' ? 'تعارضت العملية مع تحديث آخر. لم يتم خصم أي مبلغ؛ أعد المحاولة.' : 'The operation conflicted with another update. No funds were charged; retry.',
+        ORGANIZATION_CREATE_FAILED: language === 'ar' ? 'تعذر إتمام تأسيس المنظمة على الخادم. لم يتم خصم أي مبلغ.' : 'The server could not complete organization creation. No funds were charged.',
         unavailable: language === 'ar' ? 'خدمة قاعدة البيانات غير متاحة حالياً (unavailable).' : 'Database service is currently unavailable (unavailable).',
       };
       const message = knownMessages[code] || (code && code !== rawMessage
