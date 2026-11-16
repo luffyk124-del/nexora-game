@@ -164,6 +164,8 @@ export interface Company {
   baseRevenuePerHour: number;
   expensePerHour: number;
   totalRevenue: number;
+  vaultLevel?: number;
+  vaultBalance?: number;
   lastCollectedAt: unknown;
   createdAt: unknown;
   updatedAt: unknown;
