@@ -321,7 +321,6 @@ export interface CompanySectorSpec {
   foundingCost: number;
   baseRevenuePerHour: number;
   baseExpensePerHour: number;
-  initialEmployees: number;
 }
 
 export const COMPANY_SECTORS: CompanySectorSpec[] = [
@@ -332,7 +331,6 @@ export const COMPANY_SECTORS: CompanySectorSpec[] = [
     foundingCost: 900,
     baseRevenuePerHour: 140,
     baseExpensePerHour: 35,
-    initialEmployees: 3,
   },
   {
     sector: 'services',
@@ -341,7 +339,6 @@ export const COMPANY_SECTORS: CompanySectorSpec[] = [
     foundingCost: 1100,
     baseRevenuePerHour: 175,
     baseExpensePerHour: 45,
-    initialEmployees: 4,
   },
   {
     sector: 'logistics',
@@ -350,7 +347,6 @@ export const COMPANY_SECTORS: CompanySectorSpec[] = [
     foundingCost: 1400,
     baseRevenuePerHour: 225,
     baseExpensePerHour: 60,
-    initialEmployees: 5,
   },
   {
     sector: 'manufacturing',
@@ -359,7 +355,6 @@ export const COMPANY_SECTORS: CompanySectorSpec[] = [
     foundingCost: 1800,
     baseRevenuePerHour: 290,
     baseExpensePerHour: 80,
-    initialEmployees: 6,
   },
   {
     sector: 'tech',
@@ -368,7 +363,6 @@ export const COMPANY_SECTORS: CompanySectorSpec[] = [
     foundingCost: 2200,
     baseRevenuePerHour: 365,
     baseExpensePerHour: 95,
-    initialEmployees: 7,
   },
 ];
 
