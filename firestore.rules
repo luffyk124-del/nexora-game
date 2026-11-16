@@ -1177,3 +1177,5 @@ service cloud.firestore {
     }
   }
 }
+
+// NEXORA rules deployment trigger: 2026-11-16
