@@ -433,6 +433,36 @@ export function calculateAccruedPayout(
   return Math.max(0, Math.floor(netPerHour * cappedHours));
 }
 
+export const COMPANY_VAULT_CAPACITIES = [3500, 7000, 14000, 25000, 40000] as const;
+export const COMPANY_VAULT_MAX_LEVEL = COMPANY_VAULT_CAPACITIES.length;
+export const COMPANY_VAULT_UPGRADES = [
+  { fromLevel: 1, cost: 1500, materials: { copper_wire: 20, crude_alloy: 10 } },
+  { fromLevel: 2, cost: 4000, materials: { silicon_ore: 20, energy_cells: 15 } },
+  { fromLevel: 3, cost: 10000, materials: { carbon_fiber: 15, precision_frame: 10 } },
+  { fromLevel: 4, cost: 25000, materials: { rare_minerals: 20, quantum_server: 5 } },
+] as const;
+
+export function getCompanyVaultLevel(company: { vaultLevel?: number }): number {
+  return Math.max(1, Math.min(COMPANY_VAULT_MAX_LEVEL, Math.floor(company.vaultLevel || 1)));
+}
+
+export function getCompanyVaultCapacity(level: number): number {
+  return COMPANY_VAULT_CAPACITIES[Math.max(0, Math.min(COMPANY_VAULT_MAX_LEVEL - 1, level - 1))];
+}
+
+export function calculateCompanyVaultBalance(
+  company: { vaultLevel?: number; vaultBalance?: number; lastCollectedAt: unknown },
+  netPerHour: number,
+  nowMs: number
+): number {
+  const level = getCompanyVaultLevel(company);
+  const stored = Math.max(0, Number(company.vaultBalance || 0));
+  const lastMs = timestampToMs(company.lastCollectedAt, nowMs);
+  const elapsedMs = Math.max(0, nowMs - lastMs);
+  const accrued = netPerHour > 0 ? Math.floor((netPerHour * elapsedMs) / 3_600_000) : 0;
+  return Math.min(getCompanyVaultCapacity(level), stored + Math.max(0, accrued));
+}
+
 export const COMPANY_MAX_LEVEL = 20;
 export const COMPANY_MAX_STAFF = 500;
 export const COMPANY_HIRE_COST = 250;
