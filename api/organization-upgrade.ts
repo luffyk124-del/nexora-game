@@ -75,35 +75,59 @@ function getDb(req: Req) {
   return new FirestoreRest(client);
 }
 function number(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? value : 0; }
-function durationMs(targetLevel: number) { return Math.round(8 * 60 * 60 * 1000 * Math.pow(1.5, Math.max(0, targetLevel - 2))); }
-function upgradeCost(currentLevel: number) { return 12000 * currentLevel * currentLevel; }
+function durationMs(targetLevel: number, engineeringLevel: number) { return Math.round(8 * 60 * 60 * 1000 * Math.pow(1.5, Math.max(0, targetLevel - 2)) * (1 - Math.min(10, engineeringLevel) * 0.005)); }
+function upgradeCost(currentLevel: number, financeLevel: number) { return Math.round(12000 * currentLevel * currentLevel * (1 - Math.min(10, financeLevel) * 0.005)); }
+const RESEARCH_BASE_COSTS: Record<string, number> = { commerce: 25_000, engineering: 30_000, expansion: 20_000, finance: 35_000, diplomacy: 18_000 };
+function researchLevel(research: unknown, key: string) { return research && typeof research === 'object' ? number((research as Data)[key]) : 0; }
 
 export default async function handler(req: Req, res: Res): Promise<void> {
   res.setHeader('Cache-Control', 'no-store, max-age=0');
   if (req.method !== 'POST') { res.status(405).json({ error: 'METHOD_NOT_ALLOWED' }); return; }
   const body = req.body && typeof req.body === 'object' ? req.body as Data : {};
   const orgId = typeof body.orgId === 'string' ? body.orgId : '';
-  const action = body.action === 'complete' ? 'complete' : 'start';
+  const action = body.action === 'complete' || body.action === 'research' ? body.action : 'start';
+  const researchId = typeof body.researchId === 'string' ? body.researchId : '';
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(orgId)) { res.status(400).json({ error: 'INVALID_ORG' }); return; }
   try {
     const uid = await verifyUid(req); const db = getDb(req); const transaction = await db.begin();
     try {
       const [org, member] = await db.get(transaction, [`organizations/${orgId}`, `organization_members/${orgId}_${uid}`]);
       if (!org || !member) throw new ApiError('NOT_FOUND', 404);
-      if (action === 'start' && member.role !== 'leader' && member.role !== 'deputy') throw new ApiError('UNAUTHORIZED', 403);
+      if (action !== 'complete' && member.role !== 'leader' && member.role !== 'deputy') throw new ApiError('UNAUTHORIZED', 403);
       const now = Date.now(); const endsAt = number(org.upgradeEndsAt); const target = number(org.upgradeTargetLevel);
       if (action === 'complete') {
         if (!endsAt || !target || now < endsAt) throw new ApiError('UPGRADE_NOT_READY', 409);
-        const capacity = Math.min(70, 20 + (target - 1) * 5);
+        const capacity = Math.min(80, 20 + (target - 1) * 5 + researchLevel(org.research, 'expansion'));
         await db.commit(transaction, [write(`organizations/${orgId}`, { level: target, memberCapacity: capacity, upgradeEndsAt: null, upgradeTargetLevel: null }, ['updatedAt'])]);
         res.status(200).json({ ok: true, level: target, memberCapacity: capacity }); return;
+      }
+      if (action === 'research') {
+        if (!(researchId in RESEARCH_BASE_COSTS)) throw new ApiError('INVALID_RESEARCH', 400);
+        const currentResearch = researchLevel(org.research, researchId);
+        if (currentResearch >= 10) throw new ApiError('RESEARCH_MAX_LEVEL', 409);
+        const cost = RESEARCH_BASE_COSTS[researchId] * (currentResearch + 1) * (currentResearch + 1);
+        if (number(org.treasuryBalance) < cost) throw new ApiError('INSUFFICIENT_TREASURY', 409);
+        const research = org.research && typeof org.research === 'object' ? { ...(org.research as Data) } : {};
+        research[researchId] = currentResearch + 1;
+        const capacity = researchId === 'expansion'
+          ? Math.min(80, 20 + (Math.max(1, number(org.level)) - 1) * 5 + currentResearch + 1)
+          : number(org.memberCapacity) || Math.min(70, 20 + (Math.max(1, number(org.level)) - 1) * 5);
+        const researchTxId = `org_research_${randomUUID()}`;
+        await db.commit(transaction, [
+          write(`organizations/${orgId}`, { treasuryBalance: number(org.treasuryBalance) - cost, research, memberCapacity: capacity }, ['updatedAt']),
+          write(`organization_transactions/${researchTxId}`, { id: researchTxId, orgId, uid, username: typeof member.username === 'string' ? member.username : 'Member', type: 'upgrade', amount: cost, note: `Research ${researchId} advanced to Lv.${currentResearch + 1}` }, ['createdAt']),
+        ]);
+        res.status(200).json({ ok: true, researchId, level: currentResearch + 1, cost, memberCapacity: capacity });
+        return;
       }
       if (endsAt > now) throw new ApiError('UPGRADE_IN_PROGRESS', 409);
       const currentLevel = Math.max(1, Math.floor(number(org.level) || 1));
       if (currentLevel >= 10) throw new ApiError('MAX_LEVEL', 409);
-      const cost = upgradeCost(currentLevel);
+      const financeLevel = researchLevel(org.research, 'finance');
+      const engineeringLevel = researchLevel(org.research, 'engineering');
+      const cost = upgradeCost(currentLevel, financeLevel);
       if (number(org.treasuryBalance) < cost) throw new ApiError('INSUFFICIENT_TREASURY', 409);
-      const nextLevel = currentLevel + 1; const finish = now + durationMs(nextLevel);
+      const nextLevel = currentLevel + 1; const finish = now + durationMs(nextLevel, engineeringLevel);
       const upgradeTxId = `org_upgrade_${randomUUID()}`;
       await db.commit(transaction, [
         write(`organizations/${orgId}`, { treasuryBalance: number(org.treasuryBalance) - cost, upgradeStartedAt: now, upgradeEndsAt: finish, upgradeTargetLevel: nextLevel }, ['updatedAt']),
