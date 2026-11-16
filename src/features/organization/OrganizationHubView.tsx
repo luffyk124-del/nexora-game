@@ -8,6 +8,7 @@ import { searchAndSortOrganizations, type OrganizationSort } from '../../lib/org
 import {
   calculateOrgUpgradeCost,
   calculateOrgResearchCost,
+  getOrgMemberCapacity,
   ORG_RESEARCH_DEFINITIONS,
   canManageOrgMember,
   hasOrgPermission,
@@ -503,10 +504,10 @@ export function OrganizationHubView({
     );
   }
 
-  const orgUpgradeCost = calculateOrgUpgradeCost(currentOrg.level);
+  const orgUpgradeCost = Math.round(calculateOrgUpgradeCost(currentOrg.level) * (1 - Math.min(10, currentOrg.research?.finance ?? 0) * 0.005));
   const isOrgMaxLevel = currentOrg.level >= ORG_MAX_LEVEL;
   const upgradeInProgress = Boolean(currentOrg.upgradeEndsAt && currentOrg.upgradeEndsAt > clockNow);
-  const memberCapacity = currentOrg.memberCapacity ?? Math.min(70, 20 + (currentOrg.level - 1) * 5);
+  const memberCapacity = currentOrg.memberCapacity ?? getOrgMemberCapacity(currentOrg.level, currentOrg.research?.expansion ?? 0);
   const upgradeHoursLeft = upgradeInProgress ? Math.ceil((currentOrg.upgradeEndsAt! - clockNow) / 3_600_000) : 0;
 
   return (
