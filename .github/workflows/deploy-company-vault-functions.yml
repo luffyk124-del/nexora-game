@@ -1,0 +1,46 @@
+name: Deploy NEXORA Company Vault Functions
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nexora-company-vault-functions-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy secure company vault callables
+    if: github.ref == 'refs/heads/development/nexora-next'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout NEXORA development branch
+        uses: actions/checkout@v4
+        with:
+          ref: development/nexora-next
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: gen-lang-client-0074900177
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_NEXORA }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Cloud Functions dependencies
+        run: npm ci --prefix functions --no-audit --no-fund
+
+      - name: Build Cloud Functions
+        run: npm run build --prefix functions
+
+      - name: Install Firebase CLI
+        run: npm install --global firebase-tools
+
+      - name: Deploy only company vault callable functions
+        run: firebase deploy --only functions:upgradeCompanyProfitVault,functions:collectCompanyRevenueSecure --project gen-lang-client-0074900177 --non-interactive
