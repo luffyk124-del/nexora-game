@@ -74,3 +74,12 @@
 - Complete game systems: Wallets & Transfers, Open Market & Contracts, 3-Tier Manufacturing Chains, Companies (5 sectors), Real Estate Properties, 6-Skill Tree, Organizations with RBAC & Shared Treasury, Missions, Achievements, Leaderboards, and World Events.
 - Automated Vitest test suite (`src/tests/economy.test.ts`).
 
+
+
+## [Unreleased] - 2026-11-16
+### Company Vault Security
+- Moved company profit-vault upgrades and revenue collection to authenticated Firebase callable Cloud Functions Gen 2 using Admin SDK transactions.
+- Server-side validation now derives the player UID from the verified auth context, checks company ownership, wallet funds, required inventory materials, vault level and capacity, and atomically updates the ledger, wallet, inventory, company, and progression.
+- Routed the client service through `httpsCallable` and blocked direct client-side company vault mutations in Firestore rules.
+- Added a manual-only GitHub Actions workflow to deploy only the two company-vault callables.
+- CI passed on `d1f18e83d5f75c086863a9980ad3246f7425be0c`; live Cloud Functions and Firestore Rules deployment plus in-game verification remain pending.
