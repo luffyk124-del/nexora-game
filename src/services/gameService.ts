@@ -716,9 +716,10 @@ export async function cancelMarketListing(uid: string, listingId: string): Promi
   }
 }
 
-export async function manufactureRecipe(uid: string, recipeId: string): Promise<void> {
+export async function manufactureRecipe(uid: string, recipeId: string, batchQuantity = 1): Promise<void> {
   const recipe = MANUFACTURING_RECIPES.find((r) => r.id === recipeId);
   if (!recipe) throw new Error('INVALID_RECIPE');
+  if (!Number.isInteger(batchQuantity) || batchQuantity < 1 || batchQuantity > 999) throw new Error('INVALID_QUANTITY');
   const txId = genId('tx');
 
   try {
@@ -743,13 +744,13 @@ export async function manufactureRecipe(uid: string, recipeId: string): Promise<
         throw new Error('INDUSTRY_SKILL_TOO_LOW');
       }
 
-      const cost = calculateManufacturingCost(recipe, profile.skills.industry || 0);
+      const cost = calculateManufacturingCost(recipe, profile.skills.industry || 0) * batchQuantity;
       if (wallet.balance < cost) throw new Error('INSUFFICIENT_FUNDS');
 
       for (let i = 0; i < recipe.inputs.length; i++) {
         const inp = recipe.inputs[i];
         const snap = inputSnaps[i];
-        if (!snap.exists() || (snap.data() as InventoryItem).quantity < inp.qty) {
+        if (!snap.exists() || (snap.data() as InventoryItem).quantity < inp.qty * batchQuantity) {
           throw new Error('MISSING_INPUTS');
         }
       }
@@ -763,7 +764,7 @@ export async function manufactureRecipe(uid: string, recipeId: string): Promise<
         netAmount: cost,
         type: 'manufacturing',
         referenceId: recipeId,
-        description: `Manufactured ${recipe.outputQty}x ${recipe.outputItemId}`,
+        description: `Manufactured ${recipe.outputQty * batchQuantity}x ${recipe.outputItemId} (${batchQuantity} batches)`,
         status: 'completed',
         createdAt: serverTimestamp(),
       });
@@ -779,7 +780,7 @@ export async function manufactureRecipe(uid: string, recipeId: string): Promise<
         const inp = recipe.inputs[i];
         const prev = (inputSnaps[i].data() as InventoryItem).quantity;
         tx.update(inputRefs[i], {
-          quantity: prev - inp.qty,
+          quantity: prev - inp.qty * batchQuantity,
           updatedAt: serverTimestamp(),
         });
       }
@@ -787,24 +788,24 @@ export async function manufactureRecipe(uid: string, recipeId: string): Promise<
       if (outInvSnap.exists()) {
         const prevOut = (outInvSnap.data() as InventoryItem).quantity;
         tx.update(outInvRef, {
-          quantity: prevOut + recipe.outputQty,
+          quantity: prevOut + recipe.outputQty * batchQuantity,
           updatedAt: serverTimestamp(),
         });
       } else {
         tx.set(outInvRef, {
           uid,
           itemId: recipe.outputItemId,
-          quantity: recipe.outputQty,
+          quantity: recipe.outputQty * batchQuantity,
           updatedAt: serverTimestamp(),
         });
       }
 
-      const xpUpdate = applyXpAndLevel(profile, recipe.xpReward, 3, 2);
+      const xpUpdate = applyXpAndLevel(profile, recipe.xpReward * batchQuantity, 3, 2);
       tx.update(profileRef, {
         ...xpUpdate,
         stats: {
           ...profile.stats,
-          totalProduced: profile.stats.totalProduced + recipe.outputQty,
+          totalProduced: profile.stats.totalProduced + recipe.outputQty * batchQuantity,
         },
         updatedAt: serverTimestamp(),
       });
