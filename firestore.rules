@@ -1180,3 +1180,4 @@ service cloud.firestore {
 
 // NEXORA rules deployment trigger: 2026-11-16
 // NEXORA rules deployment retry: 2026-11-16
+// NEXORA Firestore rules deployment retry after Service Usage Viewer grant: 2026-11-16
