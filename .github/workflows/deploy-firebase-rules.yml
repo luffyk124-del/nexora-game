@@ -1,6 +1,12 @@
 name: Deploy NEXORA Firestore Rules
 
 on:
+  push:
+    branches:
+      - development/nexora-next
+    paths:
+      - firestore.rules
+      - firebase.json
   workflow_dispatch:
 
 permissions:
@@ -35,5 +41,5 @@ jobs:
       - name: Install Firebase CLI
         run: npm install --global firebase-tools
 
-      - name: Deploy only configured Firestore rules
-        run: firebase deploy --only firestore --project gen-lang-client-0074900177 --non-interactive
+      - name: Deploy only NEXORA Firestore rules
+        run: firebase deploy --only firestore:rules --project gen-lang-client-0074900177 --non-interactive
