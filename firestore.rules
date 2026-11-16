@@ -100,7 +100,7 @@ service cloud.firestore {
         && data.usernameLower is string && data.usernameLower.size() >= 3 && data.usernameLower.size() <= 24
         && data.avatarId is string && data.avatarId.size() >= 1 && data.avatarId.size() <= 64
         && data.title is string && data.title.size() >= 1 && data.title.size() <= 64
-        && data.level is int && data.level >= 1 && data.level <= 200
+        && data.level is int && data.level >= 1 && data.level <= 1000
         && data.xp is int && data.xp >= 0
         && data.reputation is int && data.reputation >= 0
         && data.influence is int && data.influence >= 0
@@ -147,7 +147,7 @@ service cloud.firestore {
         && data.netAmount is number && data.netAmount >= 0 && data.netAmount == data.amount - data.fee
         && data.type in [
           'transfer', 'market_buy', 'mission_reward', 'daily_stipend',
-          'company_create', 'company_upgrade', 'company_collect', 'company_hire', 'company_vault_upgrade',
+          'company_create', 'company_upgrade', 'company_collect', 'company_vault_upgrade',
           'property_buy', 'property_upgrade', 'property_collect',
           'manufacturing', 'org_create', 'org_deposit', 'org_withdraw', 'contract_deal'
         ]
@@ -301,7 +301,7 @@ service cloud.firestore {
     }
 
     function isValidCompany(data) {
-      return data.keys().hasAll(['id', 'ownerUid', 'ownerName', 'name', 'sector', 'level', 'capital', 'employeesCount', 'baseRevenuePerHour', 'expensePerHour', 'totalRevenue', 'lastCollectedAt', 'createdAt', 'updatedAt'])
+      return data.keys().hasAll(['id', 'ownerUid', 'ownerName', 'name', 'sector', 'level', 'capital', 'baseRevenuePerHour', 'expensePerHour', 'totalRevenue', 'lastCollectedAt', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly(['id', 'ownerUid', 'ownerName', 'name', 'sector', 'level', 'capital', 'employeesCount', 'baseRevenuePerHour', 'expensePerHour', 'totalRevenue', 'vaultLevel', 'vaultBalance', 'lastCollectedAt', 'createdAt', 'updatedAt'])
         && isValidId(data.id)
         && isValidId(data.ownerUid)
@@ -310,7 +310,6 @@ service cloud.firestore {
         && data.sector in ['trade', 'manufacturing', 'services', 'tech', 'logistics']
         && data.level is int && data.level >= 1 && data.level <= 20
         && data.capital is number && data.capital >= 0
-        && data.employeesCount is int && data.employeesCount >= 1 && data.employeesCount <= 500
         && data.baseRevenuePerHour is number && data.baseRevenuePerHour >= 10 && data.baseRevenuePerHour <= 50000
         && data.expensePerHour is number && data.expensePerHour >= 0
         && data.totalRevenue is number && data.totalRevenue >= 0
@@ -807,15 +806,6 @@ service cloud.firestore {
             newWalletTx(request.auth.uid).type == 'company_upgrade' &&
             newWalletTx(request.auth.uid).referenceId == companyId &&
             newWalletTx(request.auth.uid).amount == existing().level * 550
-          ) ||
-          // Action 2: Hire specialist
-          (
-            incoming().diff(existing()).affectedKeys().hasOnly(['employeesCount', 'updatedAt']) &&
-            incoming().employeesCount == existing().employeesCount + 1 &&
-            hasNewWalletTx(request.auth.uid) &&
-            newWalletTx(request.auth.uid).type == 'company_hire' &&
-            newWalletTx(request.auth.uid).referenceId == companyId &&
-            newWalletTx(request.auth.uid).amount == 250
           ) ||
 false
         );
