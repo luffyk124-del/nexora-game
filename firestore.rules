@@ -817,35 +817,7 @@ service cloud.firestore {
             newWalletTx(request.auth.uid).referenceId == companyId &&
             newWalletTx(request.auth.uid).amount == 250
           ) ||
-          // Action 3: Collect accrued revenue
-          (
-            incoming().diff(existing()).affectedKeys().hasOnly(['totalRevenue', 'lastCollectedAt', 'updatedAt', 'vaultBalance']) &&
-            incoming().lastCollectedAt == request.time &&
-            incoming().vaultBalance == 0 &&
-            hasNewWalletTx(request.auth.uid) &&
-            newWalletTx(request.auth.uid).type == 'company_collect' &&
-            newWalletTx(request.auth.uid).referenceId == companyId &&
-            incoming().totalRevenue == existing().totalRevenue + newWalletTx(request.auth.uid).amount &&
-            newWalletTx(request.auth.uid).amount <= (companyVaultLevel(existing()) == 1 ? 3500 : companyVaultLevel(existing()) == 2 ? 7000 : companyVaultLevel(existing()) == 3 ? 14000 : companyVaultLevel(existing()) == 4 ? 25000 : 40000)
-          ) ||
-          (
-            incoming().diff(existing()).affectedKeys().hasOnly(['vaultLevel', 'vaultBalance', 'lastCollectedAt', 'updatedAt']) &&
-            incoming().lastCollectedAt == request.time &&
-            incoming().vaultLevel == companyVaultLevel(existing()) + 1 &&
-            incoming().vaultBalance is number &&
-            incoming().vaultBalance >= 0 &&
-            incoming().vaultBalance <= (companyVaultLevel(existing()) == 1 ? 3500 : companyVaultLevel(existing()) == 2 ? 7000 : companyVaultLevel(existing()) == 3 ? 14000 : 25000) &&
-            hasNewWalletTx(request.auth.uid) &&
-            newWalletTx(request.auth.uid).type == 'company_vault_upgrade' &&
-            newWalletTx(request.auth.uid).referenceId == companyId &&
-            newWalletTx(request.auth.uid).amount == (companyVaultLevel(existing()) == 1 ? 1500 : companyVaultLevel(existing()) == 2 ? 4000 : companyVaultLevel(existing()) == 3 ? 10000 : 25000) &&
-            (
-              (companyVaultLevel(existing()) == 1 && hasVaultMaterialSpend(request.auth.uid, 'copper_wire', 20) && hasVaultMaterialSpend(request.auth.uid, 'crude_alloy', 10)) ||
-              (companyVaultLevel(existing()) == 2 && hasVaultMaterialSpend(request.auth.uid, 'silicon_ore', 20) && hasVaultMaterialSpend(request.auth.uid, 'energy_cells', 15)) ||
-              (companyVaultLevel(existing()) == 3 && hasVaultMaterialSpend(request.auth.uid, 'carbon_fiber', 15) && hasVaultMaterialSpend(request.auth.uid, 'precision_frame', 10)) ||
-              (companyVaultLevel(existing()) == 4 && hasVaultMaterialSpend(request.auth.uid, 'rare_minerals', 20) && hasVaultMaterialSpend(request.auth.uid, 'quantum_server', 5))
-            )
-          )
+false
         );
       allow delete: if false;
     }
