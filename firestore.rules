@@ -195,7 +195,6 @@ service cloud.firestore {
         (tx.type == 'company_create' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount >= 900 && tx.fee == 0 && !exists(/databases/$(database)/documents/companies/$(tx.referenceId)) && getAfter(/databases/$(database)/documents/companies/$(tx.referenceId)).data.ownerUid == request.auth.uid) ||
         (tx.type == 'company_upgrade' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount >= 550 && tx.fee == 0 && get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.ownerUid == request.auth.uid && getAfter(/databases/$(database)/documents/companies/$(tx.referenceId)).data.level == get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.level + 1) ||
         (tx.type == 'company_vault_upgrade' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.fee == 0 && exists(/databases/$(database)/documents/companies/$(tx.referenceId)) && get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.ownerUid == request.auth.uid && getAfter(/databases/$(database)/documents/companies/$(tx.referenceId)).data.vaultLevel == companyVaultLevel(get(/databases/$(database)/documents/companies/$(tx.referenceId)).data) + 1 && tx.amount == (companyVaultLevel(get(/databases/$(database)/documents/companies/$(tx.referenceId)).data) == 1 ? 1500 : companyVaultLevel(get(/databases/$(database)/documents/companies/$(tx.referenceId)).data) == 2 ? 4000 : companyVaultLevel(get(/databases/$(database)/documents/companies/$(tx.referenceId)).data) == 3 ? 10000 : 25000)) ||
-        (tx.type == 'company_hire' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount == 250 && tx.fee == 0 && get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.ownerUid == request.auth.uid && getAfter(/databases/$(database)/documents/companies/$(tx.referenceId)).data.employeesCount == get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.employeesCount + 1) ||
         (tx.type == 'company_collect' && tx.fromUid == 'SYSTEM' && tx.toUid == request.auth.uid && tx.amount <= (companyVaultLevel(get(/databases/$(database)/documents/companies/$(tx.referenceId)).data) == 1 ? 3500 : companyVaultLevel(get(/databases/$(database)/documents/companies/$(tx.referenceId)).data) == 2 ? 7000 : companyVaultLevel(get(/databases/$(database)/documents/companies/$(tx.referenceId)).data) == 3 ? 14000 : companyVaultLevel(get(/databases/$(database)/documents/companies/$(tx.referenceId)).data) == 4 ? 25000 : 40000) && tx.fee == 0 && get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.ownerUid == request.auth.uid && getAfter(/databases/$(database)/documents/companies/$(tx.referenceId)).data.lastCollectedAt == request.time && (request.time - get(/databases/$(database)/documents/companies/$(tx.referenceId)).data.lastCollectedAt).seconds() >= 30) ||
         (tx.type == 'property_buy' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount >= 950 && tx.fee == 0 && !exists(/databases/$(database)/documents/properties/$(tx.referenceId)) && getAfter(/databases/$(database)/documents/properties/$(tx.referenceId)).data.ownerUid == request.auth.uid) ||
         (tx.type == 'property_upgrade' && tx.fromUid == request.auth.uid && tx.toUid == 'SYSTEM' && tx.amount >= 480 && tx.fee == 0 && get(/databases/$(database)/documents/properties/$(tx.referenceId)).data.ownerUid == request.auth.uid && getAfter(/databases/$(database)/documents/properties/$(tx.referenceId)).data.level == get(/databases/$(database)/documents/properties/$(tx.referenceId)).data.level + 1) ||
@@ -302,7 +301,7 @@ service cloud.firestore {
 
     function isValidCompany(data) {
       return data.keys().hasAll(['id', 'ownerUid', 'ownerName', 'name', 'sector', 'level', 'capital', 'baseRevenuePerHour', 'expensePerHour', 'totalRevenue', 'lastCollectedAt', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'ownerUid', 'ownerName', 'name', 'sector', 'level', 'capital', 'employeesCount', 'baseRevenuePerHour', 'expensePerHour', 'totalRevenue', 'vaultLevel', 'vaultBalance', 'lastCollectedAt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerUid', 'ownerName', 'name', 'sector', 'level', 'capital', 'employeesCount', 'baseRevenuePerHour', 'expensePerHour', 'totalRevenue', 'vaultLevel', 'vaultBalance', 'levelUpgradeStartedAt', 'levelUpgradeEndsAt', 'levelUpgradeTargetLevel', 'levelUpgradeCost', 'vaultUpgradeStartedAt', 'vaultUpgradeEndsAt', 'vaultUpgradeTargetLevel', 'lastCollectedAt', 'createdAt', 'updatedAt'])
         && isValidId(data.id)
         && isValidId(data.ownerUid)
         && data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 64
@@ -314,15 +313,17 @@ service cloud.firestore {
         && data.expensePerHour is number && data.expensePerHour >= 0
         && data.totalRevenue is number && data.totalRevenue >= 0
         && (!('vaultLevel' in data) || (data.vaultLevel is int && data.vaultLevel >= 1 && data.vaultLevel <= 5 && 'vaultBalance' in data && data.vaultBalance is number && data.vaultBalance >= 0 && data.vaultBalance <= (data.vaultLevel == 1 ? 3500 : data.vaultLevel == 2 ? 7000 : data.vaultLevel == 3 ? 14000 : data.vaultLevel == 4 ? 25000 : 40000)))
-        && (!('vaultBalance' in data) || 'vaultLevel' in data);
+        && (!('vaultBalance' in data) || 'vaultLevel' in data)
+        && (!('levelUpgradeEndsAt' in data) || (data.levelUpgradeEndsAt is number && data.levelUpgradeTargetLevel is int && data.levelUpgradeTargetLevel >= 2 && data.levelUpgradeTargetLevel <= 100 && data.levelUpgradeCost is number))
+        && (!('vaultUpgradeEndsAt' in data) || (data.vaultUpgradeEndsAt is number && data.vaultUpgradeTargetLevel is int && data.vaultUpgradeTargetLevel >= 2 && data.vaultUpgradeTargetLevel <= 5));
     }
 
     function isCanonicalCompanyCreate(data, txAmount) {
-      return (data.sector == 'trade' && txAmount == 900 && data.capital == 900 && data.employeesCount == 3 && data.baseRevenuePerHour == 140 && data.expensePerHour == 35)
-        || (data.sector == 'services' && txAmount == 1100 && data.capital == 1100 && data.employeesCount == 4 && data.baseRevenuePerHour == 175 && data.expensePerHour == 45)
-        || (data.sector == 'logistics' && txAmount == 1400 && data.capital == 1400 && data.employeesCount == 5 && data.baseRevenuePerHour == 225 && data.expensePerHour == 60)
-        || (data.sector == 'manufacturing' && txAmount == 1800 && data.capital == 1800 && data.employeesCount == 6 && data.baseRevenuePerHour == 290 && data.expensePerHour == 80)
-        || (data.sector == 'tech' && txAmount == 2200 && data.capital == 2200 && data.employeesCount == 7 && data.baseRevenuePerHour == 365 && data.expensePerHour == 95);
+      return (data.sector == 'trade' && txAmount == 900 && data.capital == 900 && data.baseRevenuePerHour == 140 && data.expensePerHour == 35)
+        || (data.sector == 'services' && txAmount == 1100 && data.capital == 1100 && data.baseRevenuePerHour == 175 && data.expensePerHour == 45)
+        || (data.sector == 'logistics' && txAmount == 1400 && data.capital == 1400 && data.baseRevenuePerHour == 225 && data.expensePerHour == 60)
+        || (data.sector == 'manufacturing' && txAmount == 1800 && data.capital == 1800 && data.baseRevenuePerHour == 290 && data.expensePerHour == 80)
+        || (data.sector == 'tech' && txAmount == 2200 && data.capital == 2200 && data.baseRevenuePerHour == 365 && data.expensePerHour == 95);
     }
 
     function isValidCompanyLog(data) {
