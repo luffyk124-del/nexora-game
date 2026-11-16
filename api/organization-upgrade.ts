@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { IdentityPoolClient } from 'google-auth-library';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
@@ -103,7 +104,11 @@ export default async function handler(req: Req, res: Res): Promise<void> {
       const cost = upgradeCost(currentLevel);
       if (number(org.treasuryBalance) < cost) throw new ApiError('INSUFFICIENT_TREASURY', 409);
       const nextLevel = currentLevel + 1; const finish = now + durationMs(nextLevel);
-      await db.commit(transaction, [write(`organizations/${orgId}`, { treasuryBalance: number(org.treasuryBalance) - cost, upgradeStartedAt: now, upgradeEndsAt: finish, upgradeTargetLevel: nextLevel }, ['updatedAt'])]);
+      const upgradeTxId = `org_upgrade_${randomUUID()}`;
+      await db.commit(transaction, [
+        write(`organizations/${orgId}`, { treasuryBalance: number(org.treasuryBalance) - cost, upgradeStartedAt: now, upgradeEndsAt: finish, upgradeTargetLevel: nextLevel }, ['updatedAt']),
+        write(`organization_transactions/${upgradeTxId}`, { id: upgradeTxId, orgId, uid, username: typeof member.username === 'string' ? member.username : 'Member', type: 'upgrade', amount: cost, note: `Started organization upgrade to Lv.${nextLevel}` }, ['createdAt']),
+      ]);
       res.status(200).json({ ok: true, targetLevel: nextLevel, endsAt: finish, cost, durationMs: finish - now });
     } catch (error) {
       await db.rollback(transaction).catch(() => undefined);
