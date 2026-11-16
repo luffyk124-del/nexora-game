@@ -100,7 +100,7 @@ function writeDocument(
   );
   return {
     update: { name: documentName(path), fields: encoded },
-    updateMask: { fieldPaths: [...Object.keys(encoded), ...serverTimestampFields] },
+    updateMask: { fieldPaths: Object.keys(encoded) },
     ...(serverTimestampFields.length
       ? { updateTransforms: serverTimestampFields.map((fieldPath) => ({
           fieldPath,
