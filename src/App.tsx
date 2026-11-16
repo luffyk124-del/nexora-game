@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import { AppShell } from './components/ui/AppShell';
 import { GameAudioFeedback } from './components/ui/GameAudioFeedback';
+import { GameMusic } from './components/ui/GameMusic';
 import { VersionUpdateNotice } from './components/ui/VersionUpdateNotice';
 import { ToastProvider } from './components/ui/ToastProvider';
 import { AuthOnboardingView } from './features/auth/AuthOnboardingView';
@@ -162,6 +163,7 @@ export default function App() {
   return (
     <ToastProvider>
       <GameAudioFeedback />
+      <GameMusic />
       <NexoraAppContent />
     </ToastProvider>
   );
