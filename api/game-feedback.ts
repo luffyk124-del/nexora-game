@@ -28,7 +28,7 @@ export default async function handler(req: Req, res: Res): Promise<void> {
     `Received at: ${new Date().toISOString()}`,
     '',
     message,
-  ].join('\\n');
+  ].join('\n');
 
   try {
     const response = await fetch('https://api.resend.com/emails', {
