@@ -1014,84 +1014,12 @@ export async function foundCompany(
 }
 
 export async function upgradeCompany(uid: string, companyId: string): Promise<void> {
-  const txId = genId('tx');
-  const logId = genId('clog');
-
-  try {
-    await runTransaction(db, async (tx) => {
-      const compRef = doc(db, 'companies', companyId);
-      const walletRef = doc(db, 'wallets', uid);
-      const profileRef = doc(db, 'profiles', uid);
-      const [compSnap, walletSnap, profileSnap] = await Promise.all([
-        tx.get(compRef),
-        tx.get(walletRef),
-        tx.get(profileRef),
-      ]);
-
-      if (!compSnap.exists()) throw new Error('COMPANY_NOT_FOUND');
-      const comp = compSnap.data() as Company;
-      if (comp.ownerUid !== uid) throw new Error('UNAUTHORIZED');
-      if (comp.level >= COMPANY_MAX_LEVEL) throw new Error('MAX_LEVEL');
-
-      const cost = comp.level * 550;
-      const wallet = walletSnap.data() as Wallet;
-      const profile = profileSnap.data() as PlayerProfile;
-      if (wallet.balance < cost) throw new Error('INSUFFICIENT_FUNDS');
-
-      tx.set(doc(db, 'transactions', txId), {
-        id: txId,
-        fromUid: uid,
-        toUid: 'SYSTEM',
-        amount: cost,
-        fee: 0,
-        netAmount: cost,
-        type: 'company_upgrade',
-        referenceId: companyId,
-        description: `Upgraded ${comp.name} to Lv.${comp.level + 1}`,
-        status: 'completed',
-        createdAt: serverTimestamp(),
-      });
-
-      tx.update(walletRef, {
-        balance: wallet.balance - cost,
-        totalSpent: wallet.totalSpent + cost,
-        lastTxId: txId,
-        updatedAt: serverTimestamp(),
-      });
-
-      tx.update(compRef, {
-        level: comp.level + 1,
-        capital: comp.capital + cost,
-        updatedAt: serverTimestamp(),
-      });
-
-      const xpUpdate = applyXpAndLevel(profile, 75, 8, 5);
-      tx.update(profileRef, {
-        ...xpUpdate,
-        updatedAt: serverTimestamp(),
-      });
-
-      tx.set(doc(db, 'company_logs', logId), {
-        id: logId,
-        companyId,
-        ownerUid: uid,
-        action: 'upgrade',
-        amount: -cost,
-        details: `Upgraded to Level ${comp.level + 1}`,
-        createdAt: serverTimestamp(),
-      });
-    });
-  } catch (error) {
-    if (error instanceof Error && ['COMPANY_NOT_FOUND', 'UNAUTHORIZED', 'MAX_LEVEL', 'INSUFFICIENT_FUNDS'].includes(error.message)) {
-      throw error;
-    }
-    handleFirestoreError(error, OperationType.UPDATE, `companies/${companyId}`);
-  }
+  await callCompanyVault<{ ok: boolean }>(uid, 'company_upgrade', companyId);
 }
 
 async function callCompanyVault<T>(
   uid: string,
-  action: 'upgrade' | 'collect',
+  action: 'upgrade' | 'collect' | 'company_upgrade' | 'company_complete' | 'vault_complete',
   companyId: string
 ): Promise<T> {
   const currentUser = auth.currentUser;
@@ -1115,6 +1043,14 @@ async function callCompanyVault<T>(
 
 export async function upgradeCompanyVault(uid: string, companyId: string): Promise<void> {
   await callCompanyVault<{ ok: boolean }>(uid, 'upgrade', companyId);
+}
+
+export async function completeCompanyUpgrade(uid: string, companyId: string): Promise<void> {
+  await callCompanyVault<{ ok: boolean }>(uid, 'company_complete', companyId);
+}
+
+export async function completeCompanyVaultUpgrade(uid: string, companyId: string): Promise<void> {
+  await callCompanyVault<{ ok: boolean }>(uid, 'vault_complete', companyId);
 }
 
 export async function collectCompanyRevenue(uid: string, companyId: string): Promise<number> {
