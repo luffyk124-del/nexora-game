@@ -587,11 +587,20 @@ export function BusinessHubView({
                         <span>{language === 'ar' ? 'السعة المستخدمة' : 'Capacity used'}</span>
                         <span>{vaultProgress.toFixed(1)}%</span>
                       </div>
+                      <p className={`text-[11px] ${accrued >= vaultCapacity ? 'text-amber-300' : 'text-[#9299A6]'}`}>
+                        {accrued >= vaultCapacity
+                          ? language === 'ar'
+                            ? 'الخزينة ممتلئة؛ توقف تراكم الأرباح حتى التحصيل أو تطوير الخزينة.'
+                            : 'Vault full; profit accumulation pauses until collection or an upgrade.'
+                          : language === 'ar'
+                          ? 'يتوقف تراكم الأرباح تلقائياً عند بلوغ سعة الخزينة.'
+                          : 'Profit accumulation pauses automatically when the vault reaches capacity.'}
+                      </p>
                       {vaultUpgrade ? (
                         <div className="space-y-2 border-t border-white/8 pt-3">
                           <div className="flex items-center justify-between gap-2">
                             <p className="text-xs font-semibold text-[#F4F5F7]">{language === 'ar' ? `تطوير الخزينة إلى المستوى ${vaultLevel + 1}` : `Upgrade vault to level ${vaultLevel + 1}`}</p>
-                            <span className="text-xs font-mono-num text-amber-300">${vaultUpgrade.cost.toLocaleString()} $</span>
+                            <span className="text-xs font-mono-num text-amber-300">${vaultUpgrade.cost.toLocaleString()}</span>
                           </div>
                           <div className="flex flex-wrap gap-2">
                             {Object.entries(vaultUpgrade.materials).map(([itemId, qty]) => {
