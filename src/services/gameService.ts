@@ -37,9 +37,7 @@ import {
   calculateOrgUpgradeCost,
   calculatePropertyHourlyNet,
   canManageOrgMember,
-  COMPANY_HIRE_COST,
   COMPANY_MAX_LEVEL,
-  COMPANY_MAX_STAFF,
   getAchievementProgress,
   getMissionProgress,
   hasOrgPermission,
@@ -956,7 +954,6 @@ export async function foundCompany(
         sector,
         level: 1,
         capital: spec.foundingCost,
-        employeesCount: spec.initialEmployees,
         baseRevenuePerHour: spec.baseRevenuePerHour,
         expensePerHour: spec.baseExpensePerHour,
         totalRevenue: 0,
@@ -1118,68 +1115,6 @@ async function callCompanyVault<T>(
 
 export async function upgradeCompanyVault(uid: string, companyId: string): Promise<void> {
   await callCompanyVault<{ ok: boolean }>(uid, 'upgrade', companyId);
-}
-
-export async function hireCompanyStaff(uid: string, companyId: string): Promise<void> {
-  const txId = genId('tx');
-  const logId = genId('clog');
-  const hireCost = COMPANY_HIRE_COST;
-
-  try {
-    await runTransaction(db, async (tx) => {
-      const compRef = doc(db, 'companies', companyId);
-      const walletRef = doc(db, 'wallets', uid);
-      const [compSnap, walletSnap] = await Promise.all([tx.get(compRef), tx.get(walletRef)]);
-      if (!compSnap.exists()) throw new Error('COMPANY_NOT_FOUND');
-      const comp = compSnap.data() as Company;
-      if (comp.ownerUid !== uid) throw new Error('UNAUTHORIZED');
-      if (comp.employeesCount >= COMPANY_MAX_STAFF) throw new Error('MAX_STAFF');
-
-      const wallet = walletSnap.data() as Wallet;
-      if (wallet.balance < hireCost) throw new Error('INSUFFICIENT_FUNDS');
-
-      tx.set(doc(db, 'transactions', txId), {
-        id: txId,
-        fromUid: uid,
-        toUid: 'SYSTEM',
-        amount: hireCost,
-        fee: 0,
-        netAmount: hireCost,
-        type: 'company_hire',
-        referenceId: companyId,
-        description: `Hired specialist for ${comp.name}`,
-        status: 'completed',
-        createdAt: serverTimestamp(),
-      });
-
-      tx.update(walletRef, {
-        balance: wallet.balance - hireCost,
-        totalSpent: wallet.totalSpent + hireCost,
-        lastTxId: txId,
-        updatedAt: serverTimestamp(),
-      });
-
-      tx.update(compRef, {
-        employeesCount: comp.employeesCount + 1,
-        updatedAt: serverTimestamp(),
-      });
-
-      tx.set(doc(db, 'company_logs', logId), {
-        id: logId,
-        companyId,
-        ownerUid: uid,
-        action: 'hire',
-        amount: -hireCost,
-        details: `Staff expanded to ${comp.employeesCount + 1}`,
-        createdAt: serverTimestamp(),
-      });
-    });
-  } catch (error) {
-    if (error instanceof Error && ['COMPANY_NOT_FOUND', 'UNAUTHORIZED', 'MAX_STAFF', 'INSUFFICIENT_FUNDS'].includes(error.message)) {
-      throw error;
-    }
-    handleFirestoreError(error, OperationType.UPDATE, `companies/${companyId}`);
-  }
 }
 
 export async function collectCompanyRevenue(uid: string, companyId: string): Promise<number> {
