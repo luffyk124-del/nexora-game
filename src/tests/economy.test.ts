@@ -150,4 +150,49 @@ describe('NEXORA Core Economy & Security Invariants', () => {
     expect(calculateAccruedPayout(120, 0, oneHour * 30)).toBe(1440); // capped at 12h
     expect(calculateDailyStipend(5, 3)).toBeGreaterThan(calculateDailyStipend(1, 0));
   });
+  it('keeps market prices within the configured event multiplier bounds', () => {
+    const extremeHigh: WorldEvent[] = Array.from({ length: 5 }, (_, index) => ({
+      ...sampleEvents[0],
+      id: `evt_high_${index}`,
+      stackGroup: `high_${index}`,
+      priceMultiplier: 2,
+    }));
+    const extremeLow: WorldEvent[] = Array.from({ length: 5 }, (_, index) => ({
+      ...sampleEvents[0],
+      id: `evt_low_${index}`,
+      stackGroup: `low_${index}`,
+      priceMultiplier: 0.1,
+    }));
+
+    const base = calculateDynamicItemPrice('microchips', 100, [], 1_000);
+    const high = calculateDynamicItemPrice('microchips', 100, extremeHigh, 1_000);
+    const low = calculateDynamicItemPrice('microchips', 100, extremeLow, 1_000);
+
+    expect(high).toBeLessThanOrEqual(Math.round(base * 1.45));
+    expect(low).toBeGreaterThanOrEqual(Math.round(base * 0.7));
+  });
+
+  it('clamps market tax even when world events apply extreme modifiers', () => {
+    const extremeEvents: WorldEvent[] = [
+      { ...sampleEvents[0], id: 'evt_tax_extreme_low', taxDelta: -1 },
+      { ...sampleEvents[1], id: 'evt_tax_extreme_high', taxDelta: 1, stackGroup: 'tax_high' },
+    ];
+
+    expect(calculateMarketTaxRate(0, extremeEvents, 1_000)).toBeGreaterThanOrEqual(0.01);
+    expect(calculateMarketTaxRate(0, extremeEvents, 1_000)).toBeLessThanOrEqual(0.12);
+  });
+
+  it('limits active world events to three unique effect groups', async () => {
+    const { getActiveWorldEvents } = await import('../lib/economy');
+    const events: WorldEvent[] = Array.from({ length: 5 }, (_, index) => ({
+      ...sampleEvents[0],
+      id: `evt_group_${index}`,
+      stackGroup: `group_${index}`,
+    }));
+
+    const active = getActiveWorldEvents(events, 1_000);
+    expect(active).toHaveLength(3);
+    expect(new Set(active.map((event) => event.stackGroup)).size).toBe(3);
+  });
+
 });
