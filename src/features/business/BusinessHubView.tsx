@@ -6,7 +6,6 @@ import {
   Package,
   Plus,
   TrendingUp,
-  UserPlus,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useToast } from '../../components/ui/ToastProvider';
@@ -22,14 +21,12 @@ import {
   calculateCompanyHourlyNet,
   calculateManufacturingCost,
   calculatePropertyHourlyNet,
-  COMPANY_HIRE_COST,
   COMPANY_MAX_LEVEL,
   COMPANY_VAULT_MAX_LEVEL,
   COMPANY_VAULT_UPGRADES,
   calculateCompanyVaultBalance,
   getCompanyVaultCapacity,
   getCompanyVaultLevel,
-  COMPANY_MAX_STAFF,
   PROPERTY_MAX_LEVEL,
 } from '../../lib/economy';
 import {
@@ -37,7 +34,6 @@ import {
   collectCompanyRevenue,
   collectPropertyRent,
   foundCompany,
-  hireCompanyStaff,
   manufactureRecipe,
   timestampToMs,
   togglePropertyLease,
@@ -220,32 +216,6 @@ export function BusinessHubView({
         ? (language === 'ar' ? 'وصلت الخزينة إلى أقصى مستوى.' : 'The vault is already at maximum level.')
         : (language === 'ar' ? 'تعذر تطوير الخزينة.' : 'Vault upgrade failed.');
       showToast(message, 'error');
-    } finally {
-      setBusyKey(null);
-    }
-  }
-
-  async function handleHireStaff(companyId: string) {
-    setBusyKey(`hire_${companyId}`);
-    try {
-      await hireCompanyStaff(profile.uid, companyId);
-      showToast(language === 'ar' ? 'تم توظيف كادر جديد.' : 'Staff member hired.', 'success');
-    } catch (err) {
-      const code = err instanceof Error ? err.message : '';
-      showToast(
-        code === 'MAX_STAFF'
-          ? language === 'ar'
-            ? `وصلت الشركة إلى الحد الأقصى للكوادر (${COMPANY_MAX_STAFF}).`
-            : `Company reached staff cap (${COMPANY_MAX_STAFF}).`
-          : code === 'INSUFFICIENT_FUNDS'
-          ? language === 'ar'
-            ? `الرصيد غير كافٍ (${COMPANY_HIRE_COST} $).`
-            : `Insufficient funds (${COMPANY_HIRE_COST} $).`
-          : language === 'ar'
-          ? 'تعذر إتمام التوظيف.'
-          : 'Hiring failed.',
-        'error'
-      );
     } finally {
       setBusyKey(null);
     }
@@ -504,7 +474,6 @@ export function BusinessHubView({
                 const vaultProgress = Math.min(100, (accrued / vaultCapacity) * 100);
                 const upgradeCost = c.level * 550;
                 const isMaxLevel = c.level >= COMPANY_MAX_LEVEL;
-                const isMaxStaff = c.employeesCount >= COMPANY_MAX_STAFF;
                 const sectorSpec = COMPANY_SECTORS.find((s) => s.sector === c.sector);
 
                 return (
@@ -517,9 +486,7 @@ export function BusinessHubView({
                         <h3 className="text-base font-bold text-[#F4F5F7]">{c.name}</h3>
                         <p className="text-xs text-[#9299A6] mt-0.5">
                           {language === 'ar' ? sectorSpec?.nameAr : sectorSpec?.nameEn} · {t.level}{' '}
-                          <span className="font-mono-num text-[#F4F5F7]">{c.level}</span> ·{' '}
-                          {t.employees}{' '}
-                          <span className="font-mono-num text-[#F4F5F7]">{c.employeesCount}</span>
+                          <span className="font-mono-num text-[#F4F5F7]">{c.level}</span>
                           {Math.abs(sectorEventMultiplier - 1) > 0.001 && (
                             <span
                               className={`ms-2 font-mono-num font-semibold ${
@@ -645,15 +612,6 @@ export function BusinessHubView({
                         className="min-h-[42px] px-3.5 rounded-xl bg-[#1B2230] hover:bg-[#232C3E] text-[#F4F5F7] text-xs font-semibold whitespace-nowrap disabled:opacity-50 transition-colors"
                       >
                         {isMaxLevel ? t.maxLevelReached : t.upgradeCompany}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isMaxStaff || busyKey === `hire_${c.id}` || (wallet?.balance ?? 0) < COMPANY_HIRE_COST}
-                        onClick={() => handleHireStaff(c.id)}
-                        className="min-h-[42px] px-3.5 rounded-xl bg-[#1B2230] hover:bg-[#232C3E] text-[#F4F5F7] text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 transition-colors"
-                      >
-                        <UserPlus className="w-3.5 h-3.5" />
-                        <span>{isMaxStaff ? t.maxLevelReached : `${t.hireStaff} (${COMPANY_HIRE_COST})`}</span>
                       </button>
                     </div>
                   </div>
