@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { FieldValue, getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
@@ -190,7 +191,7 @@ export const upgradeCompanyProfitVault = onCall(
         const events = eventsSnap.docs.map((docSnap) => docSnap.data());
         const netHourly = companyNetHourly(company, profile, events, now);
         const preserved = calculatedVaultBalance(company, netHourly, now);
-        const txId = `tx_${crypto.randomUUID()}`;
+        const txId = `tx_${randomUUID()}`;
         const logId = `clog_${crypto.randomUUID()}`;
         tx.update(walletRef, {
           balance: wallet.balance - upgrade.cost,
