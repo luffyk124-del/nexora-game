@@ -64,7 +64,9 @@ async function verifyUid(req: Req): Promise<string> {
   const m = typeof h === 'string' ? /^Bearer\s+(.+)$/i.exec(h) : null;
   if (!m) throw new ApiError('UNAUTHENTICATED', 401);
   const { payload } = await jwtVerify(m[1], FIREBASE_KEYS, { issuer: FIREBASE_ISSUER, audience: PROJECT_ID, algorithms: ['RS256'] });
-  if (typeof payload.sub !== 'string' || !payload.sub || payload.email_verified !== true) throw new ApiError('UNAUTHENTICATED', 401);
+  const firebaseClaim = payload.firebase && typeof payload.firebase === 'object' ? payload.firebase as Record<string, unknown> : {};
+  const isAnonymous = firebaseClaim.sign_in_provider === 'anonymous';
+  if (typeof payload.sub !== 'string' || !payload.sub || (payload.email_verified !== true && !isAnonymous)) throw new ApiError('UNAUTHENTICATED', 401);
   return payload.sub;
 }
 function getDb(req: Req) {
