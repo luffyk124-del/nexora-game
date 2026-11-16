@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getApps, initializeApp } from 'firebase-admin/app';
-import { FieldValue, getFirestore, Timestamp } from 'firebase-admin/firestore';
+import { FieldValue, getFirestore, Timestamp, type DocumentData } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import {
@@ -91,7 +91,7 @@ function timestampMillis(value: unknown, fallback: number): number {
   }
   return fallback;
 }
-function companyNetHourly(company: VaultCompany, profile: VaultProfile, events: FirebaseFirestore.DocumentData[], nowMs: number): number {
+function companyNetHourly(company: VaultCompany, profile: VaultProfile, events: DocumentData[], nowMs: number): number {
   const levelMultiplier = 1 + (company.level - 1) * 0.32;
   const staffBonus = 1 + Math.max(0, company.employeesCount - 1) * 0.05;
   const management = Math.max(0, Number(profile.skills?.management) || 0);
@@ -182,7 +182,7 @@ export const upgradeCompanyProfitVault = onCall(
         const inventorySnaps = await Promise.all(Object.entries(upgrade.materials).map(([itemId]) => tx.get(db.doc(`inventory/${uid}_${itemId}`))));
         const itemEntries = Object.entries(upgrade.materials);
         for (let i = 0; i < itemEntries.length; i += 1) {
-          const [itemId, required] = itemEntries[i];
+          const required = itemEntries[i][1];
           if (!inventorySnaps[i].exists || Number(inventorySnaps[i].data()?.quantity ?? 0) < required) {
             throw new Error('MISSING_VAULT_MATERIALS');
           }
