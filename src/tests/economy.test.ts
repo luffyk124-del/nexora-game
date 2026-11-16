@@ -3,6 +3,9 @@ import { ITEM_MAP, MANUFACTURING_RECIPES } from '../data/catalog';
 import {
   calculateAccruedPayout,
   calculateCompanyHourlyNet,
+  calculateCompanyVaultBalance,
+  getCompanyVaultCapacity,
+  getCompanyVaultLevel,
   calculateDailyStipend,
   calculateDynamicItemPrice,
   calculateLevelProgress,
@@ -42,6 +45,63 @@ const sampleEvents: WorldEvent[] = [
     createdAt: null,
   },
 ];
+
+describe('Company Profit Vault', () => {
+  const hour = 3_600_000;
+
+  it('uses independent configured capacities for all five levels', () => {
+    expect([1, 2, 3, 4, 5].map(getCompanyVaultCapacity)).toEqual([3500, 7000, 14000, 25000, 40000]);
+  });
+
+  it('defaults legacy companies to vault level 1', () => {
+    expect(getCompanyVaultLevel({})).toBe(1);
+    expect(getCompanyVaultCapacity(getCompanyVaultLevel({}))).toBe(3500);
+  });
+
+  it('adds elapsed net revenue to the stored vault balance', () => {
+    expect(calculateCompanyVaultBalance(
+      { vaultLevel: 2, vaultBalance: 1200, lastCollectedAt: 10_000 },
+      200,
+      10_000 + hour * 3
+    )).toBe(1800);
+  });
+
+  it('stops accrual at capacity without exceeding the vault limit', () => {
+    expect(calculateCompanyVaultBalance(
+      { vaultLevel: 1, vaultBalance: 3400, lastCollectedAt: 0 },
+      500,
+      hour * 24
+    )).toBe(3500);
+  });
+
+  it('preserves the stored balance when no additional time has elapsed', () => {
+    expect(calculateCompanyVaultBalance(
+      { vaultLevel: 3, vaultBalance: 8250, lastCollectedAt: hour * 5 },
+      250,
+      hour * 5
+    )).toBe(8250);
+  });
+
+  it('does not accrue for negative or non-finite revenue and sanitizes invalid stored balances', () => {
+    expect(calculateCompanyVaultBalance(
+      { vaultLevel: 1, vaultBalance: Number.NaN, lastCollectedAt: 0 },
+      Number.NaN,
+      hour * 4
+    )).toBe(0);
+    expect(calculateCompanyVaultBalance(
+      { vaultLevel: 1, vaultBalance: 500, lastCollectedAt: 0 },
+      -100,
+      hour * 4
+    )).toBe(500);
+  });
+
+  it('clamps invalid and out-of-range vault levels safely', () => {
+    expect(getCompanyVaultLevel({ vaultLevel: Number.NaN })).toBe(1);
+    expect(getCompanyVaultLevel({ vaultLevel: 99 })).toBe(5);
+    expect(getCompanyVaultCapacity(-3)).toBe(3500);
+    expect(getCompanyVaultCapacity(Number.NaN)).toBe(3500);
+  });
+});
 
 describe('NEXORA Core Economy & Security Invariants', () => {
   it('validates usernames strictly (3-24 chars, alphanumeric + underscore)', () => {
