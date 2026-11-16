@@ -916,7 +916,7 @@ service cloud.firestore {
             newWalletTx(request.auth.uid).referenceId == orgId &&
             incoming().treasuryBalance == existing().treasuryBalance + newWalletTx(request.auth.uid).amount &&
             incoming().reputation >= existing().reputation &&
-            incoming().reputation <= existing().reputation + 100
+            incoming().reputation == existing().reputation + math.max(1, math.floor(newWalletTx(request.auth.uid).amount / 100))
           ) ||
           // Action 2: Authorized treasurer withdraws from treasury (paired with atomic wallet credit)
           (
