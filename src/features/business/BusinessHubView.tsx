@@ -184,7 +184,7 @@ export function BusinessHubView({
       showToast(language === 'ar' ? 'تمت ترقية الشركة.' : 'Company upgraded.', 'success');
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
-      const firebaseErrorCode = code.match(/(?:firestore\\/)?(permission-denied|failed-precondition|not-found|unauthenticated|unavailable|deadline-exceeded|aborted|internal|invalid-argument|resource-exhausted)/i)?.[1];
+      const firebaseErrorCode = ['permission-denied', 'failed-precondition', 'not-found', 'unauthenticated', 'unavailable', 'deadline-exceeded', 'aborted', 'internal', 'invalid-argument', 'resource-exhausted'].find((errorCode) => code.toLowerCase().includes(errorCode));
       const fallbackMessage = language === 'ar'
         ? `تعذر ترقية الشركة${firebaseErrorCode ? ` (رمز: ${firebaseErrorCode})` : ''}.`
         : `Company upgrade failed${firebaseErrorCode ? ` (code: ${firebaseErrorCode})` : ''}.`;
