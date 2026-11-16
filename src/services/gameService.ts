@@ -31,7 +31,6 @@ import {
 } from '../data/catalog';
 import {
   calculateAccruedPayout,
-  calculateCompanyHourlyNet,
   calculateContractPayout,
   calculateDailyStipend,
   calculateLevelProgress,
@@ -41,10 +40,6 @@ import {
   canManageOrgMember,
   COMPANY_HIRE_COST,
   COMPANY_MAX_LEVEL,
-  COMPANY_VAULT_MAX_LEVEL,
-  COMPANY_VAULT_UPGRADES,
-  calculateCompanyVaultBalance,
-  getCompanyVaultLevel,
   COMPANY_MAX_STAFF,
   getAchievementProgress,
   getMissionProgress,
@@ -73,7 +68,6 @@ import type {
   SkillKey,
   SkillsMap,
   Wallet,
-  WorldEvent,
 } from '../types/game';
 
 function genId(prefix: string): string {
