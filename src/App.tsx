@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import { AppShell } from './components/ui/AppShell';
 import { GameAudioFeedback } from './components/ui/GameAudioFeedback';
+import { VersionUpdateNotice } from './components/ui/VersionUpdateNotice';
 import { ToastProvider } from './components/ui/ToastProvider';
 import { AuthOnboardingView } from './features/auth/AuthOnboardingView';
 import { BusinessHubView } from './features/business/BusinessHubView';
@@ -65,6 +66,8 @@ function NexoraAppContent() {
       notifications={game.notifications}
       language={game.language}
     >
+      <VersionUpdateNotice />
+
       {!game.isOnline && (
         <div className="mb-4 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200">
           {game.language === 'ar'
