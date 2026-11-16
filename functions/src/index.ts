@@ -116,7 +116,7 @@ function companyNetHourly(company: VaultCompany, profile: VaultProfile, events: 
     accepted += 1;
     if (accepted >= 3) break;
   }
-  eventMultiplier = Math.max(0.75, Math.min(1.4, eventMultiplier));
+  eventMultiplier = Number(Math.max(0.75, Math.min(1.4, eventMultiplier)).toFixed(3));
   const gross = Math.round(company.baseRevenuePerHour * levelMultiplier * staffBonus * managementBonus * eventMultiplier * reputationBonus);
   const rawExpense = company.expensePerHour * (1 + (company.level - 1) * 0.2) + Math.max(0, company.employeesCount - 3) * 8;
   const expense = Math.round(rawExpense * (1 - Math.min(0.45, finance * 0.05)));
