@@ -393,9 +393,10 @@ export function calculateOrgResearchCost(researchId: keyof typeof ORG_RESEARCH_D
   return ORG_RESEARCH_DEFINITIONS[researchId].baseCost * (level + 1) * (level + 1);
 }
 
-export function getOrgMemberCapacity(level: number): number {
+export function getOrgMemberCapacity(level: number, expansionResearchLevel = 0): number {
   const safeLevel = Math.max(1, Math.min(ORG_MAX_LEVEL, Math.floor(level)));
-  return Math.min(70, 20 + (safeLevel - 1) * 5);
+  const researchBonus = Math.max(0, Math.min(10, Math.floor(expansionResearchLevel)));
+  return Math.min(80, 20 + (safeLevel - 1) * 5 + researchBonus);
 }
 
 const ROLE_WEIGHT: Record<OrgRole, number> = {
