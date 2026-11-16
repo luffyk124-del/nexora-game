@@ -61,7 +61,7 @@ class FirestoreRest {
 }
 async function verifyUid(req: Req): Promise<string> {
   const h = req.headers.authorization;
-  const m = typeof h === 'string' ? /^Bearer\\s+(.+)$/i.exec(h) : null;
+  const m = typeof h === 'string' ? /^Bearer\s+(.+)$/i.exec(h) : null;
   if (!m) throw new ApiError('UNAUTHENTICATED', 401);
   const { payload } = await jwtVerify(m[1], FIREBASE_KEYS, { issuer: FIREBASE_ISSUER, audience: PROJECT_ID, algorithms: ['RS256'] });
   if (typeof payload.sub !== 'string' || !payload.sub || payload.email_verified !== true) throw new ApiError('UNAUTHENTICATED', 401);
