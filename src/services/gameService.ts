@@ -1358,6 +1358,15 @@ export async function createOrganization(
   if (cleanName.length < 3 || cleanName.length > 40) throw new Error('INVALID_NAME');
   if (cleanTag.length < 2 || cleanTag.length > 6) throw new Error('INVALID_TAG');
 
+  const currentUser = auth.currentUser;
+  if (!currentUser || currentUser.uid !== uid) throw new Error('AUTH_SESSION_MISMATCH');
+  if (!currentUser.emailVerified) throw new Error('EMAIL_NOT_VERIFIED');
+
+  // Firestore rules require the email_verified token claim. Refresh it before
+  // the atomic transaction so a recently refreshed Google session is not
+  // rejected because the cached ID token still carries stale claims.
+  await currentUser.getIdToken(true);
+
   const orgId = genId('org');
   const txId = genId('tx');
 
