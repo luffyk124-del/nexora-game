@@ -248,8 +248,8 @@ export async function createPlayerCharacter(
         title: language === 'ar' ? 'مرحباً بك في NEXORA' : 'Welcome to NEXORA',
         body:
           language === 'ar'
-            ? `تم إيداع ${STARTING_CREDITS.toLocaleString()} N-Credits في محفظتك وتخصيص 3 نقاط مهارة.`
-            : `${STARTING_CREDITS.toLocaleString()} N-Credits and 3 skill points credited to your account.`,
+            ? `تم إيداع ${STARTING_CREDITS.toLocaleString()} في محفظتك وتخصيص 3 نقاط مهارة.`
+            : `${STARTING_CREDITS.toLocaleString()} and 3 skill points credited to your account.`,
         type: 'system',
         read: false,
         createdAt: serverTimestamp(),
@@ -329,7 +329,7 @@ export async function claimDailyStipend(uid: string): Promise<number> {
         id: notifId,
         uid,
         title: 'Daily Stipend Credited',
-        body: `+${amount} N-Credits & +40 XP`,
+        body: `+${amount} & +40 XP`,
         type: 'economy',
         read: false,
         createdAt: serverTimestamp(),
@@ -449,7 +449,7 @@ export async function transferCredits(
         id: notifId,
         uid: fromUid,
         title: 'Transfer Sent',
-        body: `-${amount.toLocaleString()} N-Credits -> ${recipientUsername.trim()}`,
+        body: `-${amount.toLocaleString()} -> ${recipientUsername.trim()}`,
         type: 'economy',
         read: false,
         createdAt: serverTimestamp(),
@@ -1245,7 +1245,7 @@ export async function collectCompanyRevenue(uid: string, companyId: string): Pro
         ownerUid: uid,
         action: 'collect',
         amount: payout,
-        details: `Collected +${payout} N-Credits`,
+        details: `Collected +${payout}`,
         createdAt: serverTimestamp(),
       });
     });
