@@ -1,4 +1,3 @@
-import { httpsCallable } from 'firebase/functions';
 import {
   collection,
   doc,
@@ -52,7 +51,7 @@ import {
   timestampToMs as parseTimestampMs,
   validateTransfer,
 } from '../lib/economy';
-import { auth, db, functions, handleFirestoreError, OperationType } from '../lib/firebase';
+import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
 import type {
   Company,
   CompanySector,
@@ -1093,14 +1092,32 @@ export async function upgradeCompany(uid: string, companyId: string): Promise<vo
   }
 }
 
-export async function upgradeCompanyVault(uid: string, companyId: string): Promise<void> {
-  if (auth.currentUser?.uid !== uid) throw new Error('UNAUTHORIZED');
-  try {
-    const call = httpsCallable<{ companyId: string }, { ok: boolean }>(functions, 'upgradeCompanyProfitVault');
-    await call({ companyId });
-  } catch (error) {
-    throw error;
+async function callCompanyVault<T>(
+  uid: string,
+  action: 'upgrade' | 'collect',
+  companyId: string
+): Promise<T> {
+  const currentUser = auth.currentUser;
+  if (!currentUser || currentUser.uid !== uid) throw new Error('UNAUTHORIZED');
+
+  const idToken = await currentUser.getIdToken();
+  const response = await fetch('/api/company-vault', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ action, companyId }),
+  });
+  const payload = await response.json().catch(() => ({})) as { error?: unknown } & Record<string, unknown>;
+  if (!response.ok) {
+    throw new Error(typeof payload.error === 'string' ? payload.error : 'COMPANY_VAULT_OPERATION_FAILED');
   }
+  return payload as T;
+}
+
+export async function upgradeCompanyVault(uid: string, companyId: string): Promise<void> {
+  await callCompanyVault<{ ok: boolean }>(uid, 'upgrade', companyId);
 }
 
 export async function hireCompanyStaff(uid: string, companyId: string): Promise<void> {
@@ -1166,14 +1183,8 @@ export async function hireCompanyStaff(uid: string, companyId: string): Promise<
 }
 
 export async function collectCompanyRevenue(uid: string, companyId: string): Promise<number> {
-  if (auth.currentUser?.uid !== uid) throw new Error('UNAUTHORIZED');
-  try {
-    const call = httpsCallable<{ companyId: string }, { ok: boolean; payout: number }>(functions, 'collectCompanyRevenueSecure');
-    const result = await call({ companyId });
-    return result.data.payout;
-  } catch (error) {
-    throw error;
-  }
+  const result = await callCompanyVault<{ ok: boolean; payout: number }>(uid, 'collect', companyId);
+  return result.payout;
 }
 
 export async function buyProperty(
