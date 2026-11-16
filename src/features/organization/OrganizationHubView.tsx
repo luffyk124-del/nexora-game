@@ -113,6 +113,8 @@ export function OrganizationHubView({
         ALREADY_IN_ORG: language === 'ar' ? 'أنت عضو في منظمة بالفعل.' : 'You are already in an organization.',
         ACCOUNT_NOT_FOUND: language === 'ar' ? 'تعذر العثور على بيانات الحساب.' : 'Account data was not found.',
         INSUFFICIENT_FUNDS: language === 'ar' ? `يتطلب التأسيس ${ORG_CREATION_COST} $.` : `Founding requires ${ORG_CREATION_COST} $.`,
+        AUTH_SESSION_MISMATCH: language === 'ar' ? 'جلسة تسجيل الدخول لا تطابق الحساب الحالي. سجّل الخروج ثم ادخل مجدداً.' : 'The signed-in session does not match this account. Sign out and sign in again.',
+        EMAIL_NOT_VERIFIED: language === 'ar' ? 'حساب Google غير موثق لدى Firebase، لذلك لا تسمح قواعد الأمان بإنشاء المنظمة.' : 'Firebase does not consider this Google account verified, so security rules block organization creation.',
         'permission-denied': language === 'ar' ? 'رفضت قواعد Firestore حفظ المنظمة (permission-denied).' : 'Firestore rules rejected organization creation (permission-denied).',
         unavailable: language === 'ar' ? 'خدمة قاعدة البيانات غير متاحة حالياً (unavailable).' : 'Database service is currently unavailable (unavailable).',
       };
