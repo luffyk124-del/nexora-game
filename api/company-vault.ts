@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { FieldValue, Firestore, Timestamp, type DocumentData } from '@google-cloud/firestore';
 import { IdentityPoolClient } from 'google-auth-library';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
@@ -19,6 +18,7 @@ type ApiResponse = ServerResponse & {
   status: (code: number) => ApiResponse;
   json: (body: unknown) => void;
 };
+type Data = Record<string, unknown>;
 type VaultCompany = {
   ownerUid: string;
   name: string;
@@ -41,6 +41,13 @@ type VaultProfile = {
   skills?: { management?: number; finance?: number; leadership?: number };
 };
 type VaultWallet = { balance: number; totalEarned: number; totalSpent: number };
+type RestDocument = { name: string; fields?: Record<string, unknown> };
+type RestWrite = {
+  update: { name: string; fields: Record<string, unknown> };
+  updateMask: { fieldPaths: string[] };
+  updateTransforms?: Array<{ fieldPath: string; setToServerValue: 'REQUEST_TIME' }>;
+  currentDocument?: { exists: boolean };
+};
 
 const VAULT_CAPACITIES = [3500, 7000, 14000, 25000, 40000] as const;
 const VAULT_UPGRADES = [
@@ -57,17 +64,22 @@ const REPUTATION_YIELD_TIERS = [
   { min: 700, bonus: 0.08 },
 ] as const;
 
+class VaultError extends Error {
+  constructor(public readonly code: string, public readonly status: number) {
+    super(code);
+  }
+}
+
 function numberOrZero(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
 function vaultLevelOf(company: VaultCompany): number {
-  const level = Number.isFinite(company.vaultLevel) ? Math.floor(company.vaultLevel as number) : 1;
-  return Math.max(1, Math.min(5, level));
+  const raw = numberOrZero(company.vaultLevel);
+  return Math.max(1, Math.min(5, raw ? Math.floor(raw) : 1));
 }
 
 function timestampMillis(value: unknown, fallback: number): number {
-  if (value instanceof Timestamp) return value.toMillis();
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string') {
     const parsed = Date.parse(value);
@@ -79,7 +91,132 @@ function timestampMillis(value: unknown, fallback: number): number {
   return fallback;
 }
 
-function companyNetHourly(company: VaultCompany, profile: VaultProfile, events: DocumentData[], nowMs: number): number {
+function decodeValue(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value;
+  const item = value as Record<string, unknown>;
+  if ('stringValue' in item) return item.stringValue;
+  if ('integerValue' in item) return Number(item.integerValue);
+  if ('doubleValue' in item) return Number(item.doubleValue);
+  if ('booleanValue' in item) return item.booleanValue;
+  if ('timestampValue' in item) return item.timestampValue;
+  if ('nullValue' in item) return null;
+  if ('referenceValue' in item) return item.referenceValue;
+  if ('bytesValue' in item) return item.bytesValue;
+  if ('mapValue' in item) {
+    const fields = (item.mapValue as { fields?: Record<string, unknown> } | undefined)?.fields ?? {};
+    return Object.fromEntries(Object.entries(fields).map(([key, child]) => [key, decodeValue(child)]));
+  }
+  if ('arrayValue' in item) {
+    const values = (item.arrayValue as { values?: unknown[] } | undefined)?.values ?? [];
+    return values.map(decodeValue);
+  }
+  return item;
+}
+
+function decodeDocument(document: RestDocument): Data {
+  const fields = document.fields ?? {};
+  return Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, decodeValue(value)]));
+}
+
+function encodeValue(value: unknown): unknown {
+  if (value === null || value === undefined) return { nullValue: 'NULL_VALUE' };
+  if (typeof value === 'string') return { stringValue: value };
+  if (typeof value === 'boolean') return { booleanValue: value };
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? { integerValue: String(value) } : { doubleValue: value };
+  }
+  throw new Error('UNSUPPORTED_FIRESTORE_VALUE');
+}
+
+function documentName(path: string): string {
+  return `projects/${PROJECT_ID}/databases/${DATABASE_ID}/documents/${path}`;
+}
+
+function updateWrite(path: string, fields: Data, serverTimestampFields: string[] = [], createOnly = false): RestWrite {
+  const encoded = Object.fromEntries(
+    Object.entries(fields).filter(([, value]) => value !== undefined).map(([key, value]) => [key, encodeValue(value)])
+  );
+  return {
+    update: { name: documentName(path), fields: encoded },
+    updateMask: { fieldPaths: Object.keys(encoded) },
+    ...(serverTimestampFields.length
+      ? { updateTransforms: serverTimestampFields.map((fieldPath) => ({ fieldPath, setToServerValue: 'REQUEST_TIME' as const })) }
+      : {}),
+    ...(createOnly ? { currentDocument: { exists: false } } : {}),
+  };
+}
+
+class FirestoreRest {
+  constructor(private readonly authClient: IdentityPoolClient) {}
+
+  private async request<T>(method: string, body: Data): Promise<T> {
+    const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/${DATABASE_ID}/documents:${method}`;
+    const response = await this.authClient.fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return response.data as T;
+  }
+
+  async begin(): Promise<string> {
+    const result = await this.request<{ transaction?: string }>('beginTransaction', { options: { readWrite: {} } });
+    if (!result.transaction) throw new Error('FIRESTORE_TRANSACTION_START_FAILED');
+    return result.transaction;
+  }
+
+  async getMany(transaction: string, paths: string[]): Promise<Array<Data | null>> {
+    const rows = await this.request<Array<{ found?: RestDocument; missing?: string }>>('batchGet', {
+      documents: paths.map(documentName),
+      transaction,
+    });
+    const documents = new Map<string, Data | null>();
+    for (const row of rows) {
+      if (row.found) documents.set(row.found.name, decodeDocument(row.found));
+      else if (row.missing) documents.set(row.missing, null);
+    }
+    return paths.map((path) => documents.get(documentName(path)) ?? null);
+  }
+
+  async getActiveEvents(transaction: string): Promise<Data[]> {
+    const rows = await this.request<Array<{ document?: RestDocument }>>('runQuery', {
+      structuredQuery: {
+        from: [{ collectionId: 'world_events' }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: 'active' },
+            op: 'EQUAL',
+            value: { booleanValue: true },
+          },
+        },
+      },
+      transaction,
+    });
+    return rows.flatMap((row) => row.document ? [decodeDocument(row.document)] : []);
+  }
+
+  async commit(transaction: string, writes: RestWrite[]): Promise<void> {
+    await this.request('commit', { transaction, writes });
+  }
+
+  async rollback(transaction: string): Promise<void> {
+    await this.request('rollback', { transaction });
+  }
+
+  async runTransaction<T>(work: (transaction: string) => Promise<{ result: T; writes: RestWrite[] }>): Promise<T> {
+    const transaction = await this.begin();
+    try {
+      const staged = await work(transaction);
+      await this.commit(transaction, staged.writes);
+      return staged.result;
+    } catch (error) {
+      await this.rollback(transaction).catch(() => undefined);
+      throw error;
+    }
+  }
+}
+
+function companyNetHourly(company: VaultCompany, profile: VaultProfile, events: Data[], nowMs: number): number {
   const levelMultiplier = 1 + (numberOrZero(company.level) - 1) * 0.32;
   const staffBonus = 1 + Math.max(0, numberOrZero(company.employeesCount) - 1) * 0.05;
   const management = Math.max(0, numberOrZero(profile.skills?.management));
@@ -152,7 +289,6 @@ async function verifyPlayer(req: ApiRequest): Promise<string> {
   const header = req.headers.authorization;
   const match = typeof header === 'string' ? /^Bearer\s+(.+)$/i.exec(header) : null;
   if (!match) throw new VaultError('UNAUTHENTICATED', 401);
-
   const { payload } = await jwtVerify(match[1], FIREBASE_KEYS, {
     issuer: FIREBASE_ISSUER,
     audience: PROJECT_ID,
@@ -164,54 +300,37 @@ async function verifyPlayer(req: ApiRequest): Promise<string> {
   return payload.sub;
 }
 
-class VaultError extends Error {
-  constructor(public readonly code: string, public readonly status: number) {
-    super(code);
-  }
-}
-
-function firestoreForRequest(req: ApiRequest): Firestore {
+function firestoreForRequest(req: ApiRequest): FirestoreRest {
   const rawToken = req.headers['x-vercel-oidc-token'];
   const oidcToken = Array.isArray(rawToken) ? rawToken[0] : rawToken;
   if (typeof oidcToken !== 'string' || oidcToken.length < 40) {
     throw new VaultError('VERCEL_OIDC_TOKEN_MISSING', 503);
   }
-
   const authClient = new IdentityPoolClient({
     audience: WIF_AUDIENCE,
     subject_token_type: 'urn:ietf:params:oauth:token-type:jwt',
     token_url: 'https://sts.googleapis.com/v1/token',
     service_account_impersonation_url: `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${SERVICE_ACCOUNT}:generateAccessToken`,
-    subject_token_supplier: {
-      getSubjectToken: async () => oidcToken,
-    },
+    subject_token_supplier: { getSubjectToken: async () => oidcToken },
   });
   authClient.scopes = ['https://www.googleapis.com/auth/cloud-platform'];
-
-  return new Firestore({
-    projectId: PROJECT_ID,
-    databaseId: DATABASE_ID,
-    authClient,
-  });
+  return new FirestoreRest(authClient);
 }
 
-async function upgradeVault(db: Firestore, uid: string, companyId: string) {
-  return db.runTransaction(async (tx) => {
-    const companyRef = db.doc(`companies/${companyId}`);
-    const walletRef = db.doc(`wallets/${uid}`);
-    const profileRef = db.doc(`profiles/${uid}`);
-    const [companySnap, walletSnap, profileSnap, eventsSnap] = await Promise.all([
-      tx.get(companyRef),
-      tx.get(walletRef),
-      tx.get(profileRef),
-      tx.get(db.collection('world_events').where('active', '==', true)),
-    ]);
+async function upgradeVault(db: FirestoreRest, uid: string, companyId: string) {
+  return db.runTransaction(async (transaction) => {
+    const inventoryIds = Object.keys(VAULT_UPGRADES[0].materials);
+    const [companyData, walletData, profileData, events] = await Promise.all([
+      db.getMany(transaction, [`companies/${companyId}`, `wallets/${uid}`, `profiles/${uid}`]),
+      db.getActiveEvents(transaction),
+    ]).then(([docs, activeEvents]) => [docs, activeEvents] as const);
 
-    if (!companySnap.exists) throw new VaultError('COMPANY_NOT_FOUND', 404);
-    if (!walletSnap.exists || !profileSnap.exists) throw new VaultError('ACCOUNT_NOT_FOUND', 409);
-    const company = companySnap.data() as VaultCompany;
-    const wallet = walletSnap.data() as VaultWallet;
-    const profile = profileSnap.data() as VaultProfile;
+    const [companyRaw, walletRaw, profileRaw] = companyData;
+    if (!companyRaw) throw new VaultError('COMPANY_NOT_FOUND', 404);
+    if (!walletRaw || !profileRaw) throw new VaultError('ACCOUNT_NOT_FOUND', 409);
+    const company = companyRaw as VaultCompany;
+    const wallet = walletRaw as unknown as VaultWallet;
+    const profile = profileRaw as unknown as VaultProfile;
     if (company.ownerUid !== uid) throw new VaultError('UNAUTHORIZED', 403);
 
     const oldLevel = vaultLevelOf(company);
@@ -220,91 +339,68 @@ async function upgradeVault(db: Firestore, uid: string, companyId: string) {
     if (numberOrZero(wallet.balance) < upgrade.cost) throw new VaultError('INSUFFICIENT_FUNDS', 409);
 
     const itemEntries = Object.entries(upgrade.materials);
-    const inventorySnaps = await Promise.all(
-      itemEntries.map(([itemId]) => tx.get(db.doc(`inventory/${uid}_${itemId}`)))
-    );
+    const inventoryPaths = itemEntries.map(([itemId]) => `inventory/${uid}_${itemId}`);
+    const inventorySnaps = await db.getMany(transaction, inventoryPaths);
     for (let index = 0; index < itemEntries.length; index += 1) {
       const required = itemEntries[index][1];
-      if (!inventorySnaps[index].exists || numberOrZero(inventorySnaps[index].data()?.quantity) < required) {
+      if (!inventorySnaps[index] || numberOrZero(inventorySnaps[index]?.quantity) < required) {
         throw new VaultError('MISSING_VAULT_MATERIALS', 409);
       }
     }
 
     const now = Date.now();
-    const events = eventsSnap.docs.map((snapshot) => snapshot.data());
     const netHourly = companyNetHourly(company, profile, events, now);
     const preserved = calculatedVaultBalance(company, netHourly, now);
     const txId = `tx_${randomUUID()}`;
     const logId = `clog_${randomUUID()}`;
-
-    tx.update(walletRef, {
-      balance: numberOrZero(wallet.balance) - upgrade.cost,
-      totalSpent: numberOrZero(wallet.totalSpent) + upgrade.cost,
-      lastTxId: txId,
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-    itemEntries.forEach(([itemId, required], index) => {
-      const current = numberOrZero(inventorySnaps[index].data()?.quantity);
-      tx.update(db.doc(`inventory/${uid}_${itemId}`), {
-        quantity: current - required,
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-    });
-    tx.update(companyRef, {
-      vaultLevel: oldLevel + 1,
-      vaultBalance: preserved,
-      lastCollectedAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-    tx.create(db.doc(`transactions/${txId}`), {
-      id: txId,
-      fromUid: uid,
-      toUid: 'SYSTEM',
-      amount: upgrade.cost,
-      fee: 0,
-      netAmount: upgrade.cost,
-      type: 'company_vault_upgrade',
-      referenceId: companyId,
-      description: `Upgraded ${company.name} profit vault to Lv.${oldLevel + 1}`,
-      status: 'completed',
-      createdAt: FieldValue.serverTimestamp(),
-    });
-    tx.create(db.doc(`company_logs/${logId}`), {
-      id: logId,
-      companyId,
-      ownerUid: uid,
-      action: 'vault_upgrade',
-      amount: -upgrade.cost,
-      details: `Profit vault upgraded to Lv.${oldLevel + 1}; preserved ${preserved}`,
-      createdAt: FieldValue.serverTimestamp(),
-    });
-    return { ok: true, vaultLevel: oldLevel + 1, vaultBalance: preserved, capacity: VAULT_CAPACITIES[oldLevel] };
+    const writes: RestWrite[] = [
+      updateWrite(`wallets/${uid}`, {
+        balance: numberOrZero(wallet.balance) - upgrade.cost,
+        totalSpent: numberOrZero(wallet.totalSpent) + upgrade.cost,
+        lastTxId: txId,
+      }, ['updatedAt']),
+      ...itemEntries.map(([itemId, required], index) =>
+        updateWrite(`inventory/${uid}_${itemId}`, {
+          quantity: numberOrZero(inventorySnaps[index]?.quantity) - required,
+        }, ['updatedAt'])
+      ),
+      updateWrite(`companies/${companyId}`, {
+        vaultLevel: oldLevel + 1,
+        vaultBalance: preserved,
+      }, ['lastCollectedAt', 'updatedAt']),
+      updateWrite(`transactions/${txId}`, {
+        id: txId, fromUid: uid, toUid: 'SYSTEM', amount: upgrade.cost, fee: 0,
+        netAmount: upgrade.cost, type: 'company_vault_upgrade', referenceId: companyId,
+        description: `Upgraded ${company.name} profit vault to Lv.${oldLevel + 1}`, status: 'completed',
+      }, ['createdAt'], true),
+      updateWrite(`company_logs/${logId}`, {
+        id: logId, companyId, ownerUid: uid, action: 'vault_upgrade', amount: -upgrade.cost,
+        details: `Profit vault upgraded to Lv.${oldLevel + 1}; preserved ${preserved}`,
+      }, ['createdAt'], true),
+    ];
+    return {
+      result: { ok: true, vaultLevel: oldLevel + 1, vaultBalance: preserved, capacity: VAULT_CAPACITIES[oldLevel] },
+      writes,
+    };
   });
 }
 
-async function collectVault(db: Firestore, uid: string, companyId: string) {
-  return db.runTransaction(async (tx) => {
-    const companyRef = db.doc(`companies/${companyId}`);
-    const walletRef = db.doc(`wallets/${uid}`);
-    const profileRef = db.doc(`profiles/${uid}`);
-    const [companySnap, walletSnap, profileSnap, eventsSnap] = await Promise.all([
-      tx.get(companyRef),
-      tx.get(walletRef),
-      tx.get(profileRef),
-      tx.get(db.collection('world_events').where('active', '==', true)),
+async function collectVault(db: FirestoreRest, uid: string, companyId: string) {
+  return db.runTransaction(async (transaction) => {
+    const [[companyRaw, walletRaw, profileRaw], events] = await Promise.all([
+      db.getMany(transaction, [`companies/${companyId}`, `wallets/${uid}`, `profiles/${uid}`]),
+      db.getActiveEvents(transaction),
     ]);
-
-    if (!companySnap.exists) throw new VaultError('COMPANY_NOT_FOUND', 404);
-    if (!walletSnap.exists || !profileSnap.exists) throw new VaultError('ACCOUNT_NOT_FOUND', 409);
-    const company = companySnap.data() as VaultCompany;
-    const wallet = walletSnap.data() as VaultWallet;
-    const profile = profileSnap.data() as VaultProfile;
+    if (!companyRaw) throw new VaultError('COMPANY_NOT_FOUND', 404);
+    if (!walletRaw || !profileRaw) throw new VaultError('ACCOUNT_NOT_FOUND', 409);
+    const company = companyRaw as VaultCompany;
+    const wallet = walletRaw as unknown as VaultWallet;
+    const profile = profileRaw as unknown as VaultProfile;
     if (company.ownerUid !== uid) throw new VaultError('UNAUTHORIZED', 403);
 
     const now = Date.now();
     const lastCollected = timestampMillis(company.lastCollectedAt, now);
     if (now - lastCollected < 30_000) throw new VaultError('NOTHING_TO_COLLECT', 409);
-    const events = eventsSnap.docs.map((snapshot) => snapshot.data());
     const netHourly = companyNetHourly(company, profile, events, now);
     const payout = calculatedVaultBalance(company, netHourly, now);
     if (payout < 1) throw new VaultError('NOTHING_TO_COLLECT', 409);
@@ -316,50 +412,34 @@ async function collectVault(db: Firestore, uid: string, companyId: string) {
     const nextLevel = levelForXp(nextXp);
     const levelsGained = Math.max(0, nextLevel - numberOrZero(profile.level));
     const leadershipBonus = 1 + Math.max(0, numberOrZero(profile.skills?.leadership)) * 0.1;
-
-    tx.update(walletRef, {
-      balance: numberOrZero(wallet.balance) + payout,
-      totalEarned: numberOrZero(wallet.totalEarned) + payout,
-      lastTxId: txId,
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-    tx.update(companyRef, {
-      totalRevenue: numberOrZero(company.totalRevenue) + payout,
-      vaultBalance: 0,
-      lastCollectedAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-    tx.update(profileRef, {
-      xp: nextXp,
-      level: nextLevel,
-      skillPoints: numberOrZero(profile.skillPoints) + levelsGained * 2,
-      reputation: numberOrZero(profile.reputation) + Math.round(2 * leadershipBonus),
-      influence: numberOrZero(profile.influence) + Math.round(1 * leadershipBonus),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-    tx.create(db.doc(`transactions/${txId}`), {
-      id: txId,
-      fromUid: 'SYSTEM',
-      toUid: uid,
-      amount: payout,
-      fee: 0,
-      netAmount: payout,
-      type: 'company_collect',
-      referenceId: companyId,
-      description: `Company revenue collected: ${company.name}`,
-      status: 'completed',
-      createdAt: FieldValue.serverTimestamp(),
-    });
-    tx.create(db.doc(`company_logs/${logId}`), {
-      id: logId,
-      companyId,
-      ownerUid: uid,
-      action: 'collect',
-      amount: payout,
-      details: `Collected +$${payout}`,
-      createdAt: FieldValue.serverTimestamp(),
-    });
-    return { ok: true, payout };
+    const writes: RestWrite[] = [
+      updateWrite(`wallets/${uid}`, {
+        balance: numberOrZero(wallet.balance) + payout,
+        totalEarned: numberOrZero(wallet.totalEarned) + payout,
+        lastTxId: txId,
+      }, ['updatedAt']),
+      updateWrite(`companies/${companyId}`, {
+        totalRevenue: numberOrZero(company.totalRevenue) + payout,
+        vaultBalance: 0,
+      }, ['lastCollectedAt', 'updatedAt']),
+      updateWrite(`profiles/${uid}`, {
+        xp: nextXp,
+        level: nextLevel,
+        skillPoints: numberOrZero(profile.skillPoints) + levelsGained * 2,
+        reputation: numberOrZero(profile.reputation) + Math.round(2 * leadershipBonus),
+        influence: numberOrZero(profile.influence) + Math.round(1 * leadershipBonus),
+      }, ['updatedAt']),
+      updateWrite(`transactions/${txId}`, {
+        id: txId, fromUid: 'SYSTEM', toUid: uid, amount: payout, fee: 0,
+        netAmount: payout, type: 'company_collect', referenceId: companyId,
+        description: `Company revenue collected: ${company.name}`, status: 'completed',
+      }, ['createdAt'], true),
+      updateWrite(`company_logs/${logId}`, {
+        id: logId, companyId, ownerUid: uid, action: 'collect', amount: payout,
+        details: `Collected +$${payout}`,
+      }, ['createdAt'], true),
+    ];
+    return { result: { ok: true, payout }, writes };
   });
 }
 
