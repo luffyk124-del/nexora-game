@@ -1,3 +1,14 @@
+## [Unreleased] - 2026-11-16
+### Company Profit Vaults
+- Added an independent, five-level profit vault to each company, with per-company capacity and upgrades paid in both credits and required materials.
+- Preserved already accumulated profit when upgrading a vault; collection empties the vault and restarts accumulation. Revenue does not accrue retroactively while a vault is full.
+- Added UI capacity/progress details, upgrade requirements, and Firestore validation for vault-related updates.
+
+### Verification & Deployment
+- Fixed the market event multiplier boundary test to compare against the supply-adjusted, pre-final-rounding reference; production pricing logic was not changed.
+- CI passed after the test correction. Vercel preview for commit `ad299d3ffac3e8ee276e6ab122917a74309cd9db` reached `READY`, and Firestore Rules deployment was confirmed successful by the project owner.
+- Cloud Functions Gen 2 deployment remains unverified.
+
 ## [Unreleased] - 2026-11-15
 ### Currency & Audio Experience
 - Added a shared Web Audio engine: the soundtrack and UI feedback reuse one lazily-created `AudioContext`; button tones are synthesized live with oscillators and gain envelopes, with no MP3/WAV assets or audio network requests.
