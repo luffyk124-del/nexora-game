@@ -19,7 +19,6 @@ import {
   ITEM_MAP,
   MANUFACTURING_RECIPES,
   MISSIONS,
-  ORG_CREATION_COST,
   PROPERTY_SPECS,
   ROLE_DEFAULT_PERMISSIONS,
   SEED_MARKET_LISTINGS,
@@ -1348,7 +1347,7 @@ export async function claimMissionReward(uid: string, missionId: string): Promis
 
 export async function createOrganization(
   uid: string,
-  username: string,
+  _username: string,
   name: string,
   tag: string,
   description: string
@@ -1362,85 +1361,30 @@ export async function createOrganization(
   if (!currentUser || currentUser.uid !== uid) throw new Error('AUTH_SESSION_MISMATCH');
   if (!currentUser.emailVerified) throw new Error('EMAIL_NOT_VERIFIED');
 
-  // Firestore rules require the email_verified token claim. Refresh it before
-  // the atomic transaction so a recently refreshed Google session is not
-  // rejected because the cached ID token still carries stale claims.
-  await currentUser.getIdToken(true);
-
-  const orgId = genId('org');
-  const txId = genId('tx');
-
-  try {
-    await runTransaction(db, async (tx) => {
-      const walletRef = doc(db, 'wallets', uid);
-      const profileRef = doc(db, 'profiles', uid);
-      const [walletSnap, profileSnap] = await Promise.all([tx.get(walletRef), tx.get(profileRef)]);
-      if (!walletSnap.exists() || !profileSnap.exists()) throw new Error('ACCOUNT_NOT_FOUND');
-
-      const wallet = walletSnap.data() as Wallet;
-      const profile = profileSnap.data() as PlayerProfile;
-      if (profile.orgId) throw new Error('ALREADY_IN_ORG');
-      if (wallet.balance < ORG_CREATION_COST) throw new Error('INSUFFICIENT_FUNDS');
-
-      tx.set(doc(db, 'organizations', orgId), {
-        id: orgId,
-        name: cleanName,
-        tag: cleanTag,
-        description: description.trim().slice(0, 240),
-        leaderUid: uid,
-        leaderName: username,
-        treasuryBalance: 0,
-        memberCount: 1,
-        reputation: 15,
-        level: 1,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-
-      tx.set(doc(db, 'organization_members', `${orgId}_${uid}`), {
-        orgId,
-        uid,
-        username,
-        role: 'leader',
-        permissions: ROLE_DEFAULT_PERMISSIONS.leader,
-        joinedAt: serverTimestamp(),
-      });
-
-      tx.set(doc(db, 'transactions', txId), {
-        id: txId,
-        fromUid: uid,
-        toUid: 'SYSTEM',
-        amount: ORG_CREATION_COST,
-        fee: 0,
-        netAmount: ORG_CREATION_COST,
-        type: 'org_create',
-        referenceId: orgId,
-        description: `Founded organization [${cleanTag}] ${cleanName}`,
-        status: 'completed',
-        createdAt: serverTimestamp(),
-      });
-
-      tx.update(walletRef, {
-        balance: wallet.balance - ORG_CREATION_COST,
-        totalSpent: wallet.totalSpent + ORG_CREATION_COST,
-        lastTxId: txId,
-        updatedAt: serverTimestamp(),
-      });
-
-      const xpUpdate = applyXpAndLevel(profile, 150, 20, 25);
-      tx.update(profileRef, {
-        ...xpUpdate,
-        orgId,
-        updatedAt: serverTimestamp(),
-      });
-    });
-    return orgId;
-  } catch (error) {
-    if (error instanceof Error && ['INVALID_NAME', 'INVALID_TAG', 'ALREADY_IN_ORG', 'INSUFFICIENT_FUNDS'].includes(error.message)) {
-      throw error;
-    }
-    handleFirestoreError(error, OperationType.WRITE, `organizations/${orgId}`);
+  const idToken = await currentUser.getIdToken(true);
+  const response = await fetch('/api/organization-create', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: cleanName,
+      tag: cleanTag,
+      description: description.trim().slice(0, 240),
+    }),
+  });
+  const payload = await response.json().catch(() => ({})) as {
+    error?: unknown;
+    orgId?: unknown;
+  };
+  if (!response.ok) {
+    throw new Error(typeof payload.error === 'string' ? payload.error : 'ORGANIZATION_CREATE_FAILED');
   }
+  if (typeof payload.orgId !== 'string' || !payload.orgId) {
+    throw new Error('ORGANIZATION_CREATE_FAILED');
+  }
+  return payload.orgId;
 }
 
 export async function requestJoinOrganization(
