@@ -1,6 +1,6 @@
 # NEXORA
 
-**NEXORA** is a portrait-first (Mobile-First) economic, corporate management, and social strategy simulation browser game built with **React 19**, **TypeScript**, **Tailwind CSS v4**, and a backend being migrated from Firebase to Supabase.
+**NEXORA** is a portrait-first (Mobile-First) economic, corporate management, and social strategy simulation browser game built with **React 19**, **TypeScript**, **Tailwind CSS v4**, **Firebase Authentication**, and **Cloud Firestore**. Supabase is currently an isolated future backend target; it is not connected to live gameplay.
 
 Default UI language is **Arabic (`RTL`)** with instant switching to **English (`LTR`)**.
 
@@ -20,7 +20,7 @@ Default UI language is **Arabic (`RTL`)** with instant switching to **English (`
 - **Organizations & RBAC**: Organization membership, role permissions, join requests, and shared treasury.
 - **NEXORA Diagnostics**: Owner-restricted, read-only diagnostics with sanitization and JSON export.
 
-## Current Runtime — Firebase (Not Yet Cut Over)
+## Current Runtime — Firebase (Active Source of Truth)
 - Firebase Auth (Google provider) is still the active login.
 - Cloud Firestore remains the source of truth for live game data.
 - Firebase Cloud Functions Gen 2 currently provide the diagnostics backend.
