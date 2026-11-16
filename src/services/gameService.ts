@@ -813,7 +813,7 @@ export async function manufactureRecipe(uid: string, recipeId: string, batchQuan
   } catch (error) {
     if (
       error instanceof Error &&
-      ['INVALID_RECIPE', 'INDUSTRY_SKILL_TOO_LOW', 'INSUFFICIENT_FUNDS', 'MISSING_INPUTS'].includes(
+      ['INVALID_RECIPE', 'INVALID_QUANTITY', 'INDUSTRY_SKILL_TOO_LOW', 'INSUFFICIENT_FUNDS', 'MISSING_INPUTS'].includes(
         error.message
       )
     ) {
