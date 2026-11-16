@@ -8,7 +8,9 @@ export default defineConfig(() => {
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        // Vercel builds with Node 22, which provides import.meta.dirname.
+        // Avoid CommonJS __dirname in the native Vite config loader.
+        '@': path.resolve(import.meta.dirname, '.'),
       },
     },
     build: {
