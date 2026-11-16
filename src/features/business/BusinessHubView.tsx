@@ -184,6 +184,10 @@ export function BusinessHubView({
       showToast(language === 'ar' ? 'تمت ترقية الشركة.' : 'Company upgraded.', 'success');
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
+      const firebaseErrorCode = code.match(/(?:firestore\\/)?(permission-denied|failed-precondition|not-found|unauthenticated|unavailable|deadline-exceeded|aborted|internal|invalid-argument|resource-exhausted)/i)?.[1];
+      const fallbackMessage = language === 'ar'
+        ? `تعذر ترقية الشركة${firebaseErrorCode ? ` (رمز: ${firebaseErrorCode})` : ''}.`
+        : `Company upgrade failed${firebaseErrorCode ? ` (code: ${firebaseErrorCode})` : ''}.`;
       showToast(
         code === 'MAX_LEVEL'
           ? language === 'ar'
@@ -193,9 +197,7 @@ export function BusinessHubView({
           ? language === 'ar'
             ? 'الرصيد غير كافٍ للترقية.'
             : 'Insufficient funds to upgrade.'
-          : language === 'ar'
-          ? 'تعذر ترقية الشركة.'
-          : 'Company upgrade failed.',
+          : fallbackMessage,
         'error'
       );
     } finally {
