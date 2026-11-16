@@ -242,7 +242,7 @@ export function calculateMarketItemAnalytics(
  * Computes net hourly company profit factoring in Management, Finance, and active sector World Events.
  */
 export function calculateCompanyHourlyNet(
-  company: Pick<Company, 'baseRevenuePerHour' | 'expensePerHour' | 'level' | 'employeesCount'> &
+  company: Pick<Company, 'baseRevenuePerHour' | 'expensePerHour' | 'level'> &
     Partial<Pick<Company, 'sector'>>,
   skills: Pick<SkillsMap, 'management' | 'finance'>,
   worldEvents: WorldEvent[] = [],
@@ -253,14 +253,12 @@ export function calculateCompanyHourlyNet(
   expenseHourly: number;
   netHourly: number;
   levelMultiplier: number;
-  staffBonus: number;
   mgmtBonus: number;
   financeReduction: number;
   sectorEventMultiplier: number;
   reputationBonus: number;
 } {
   const levelMultiplier = 1 + (company.level - 1) * 0.32;
-  const staffBonus = 1 + Math.max(0, company.employeesCount - 1) * 0.05;
   const mgmtBonus = 1 + Math.max(0, skills.management) * 0.08;
   const repTier = getReputationTier(reputation);
   const reputationBonus = 1 + repTier.companyYieldBonusRate;
@@ -278,15 +276,13 @@ export function calculateCompanyHourlyNet(
   const grossHourly = Math.round(
     company.baseRevenuePerHour *
       levelMultiplier *
-      staffBonus *
       mgmtBonus *
       sectorEventMultiplier *
       reputationBonus
   );
 
   const rawExpense =
-    company.expensePerHour * (1 + (company.level - 1) * 0.2) +
-    Math.max(0, company.employeesCount - 3) * 8;
+    company.expensePerHour * (1 + (company.level - 1) * 0.2);
   const financeReduction = Math.min(0.45, Math.max(0, skills.finance) * 0.05);
   const expenseHourly = Math.round(rawExpense * (1 - financeReduction));
 
@@ -295,7 +291,6 @@ export function calculateCompanyHourlyNet(
     expenseHourly,
     netHourly: Math.max(15, grossHourly - expenseHourly),
     levelMultiplier,
-    staffBonus,
     mgmtBonus,
     financeReduction,
     sectorEventMultiplier,
@@ -472,9 +467,7 @@ export function calculateCompanyVaultBalance(
   return Math.min(capacity, stored + Math.max(0, accrued));
 }
 
-export const COMPANY_MAX_LEVEL = 20;
-export const COMPANY_MAX_STAFF = 500;
-export const COMPANY_HIRE_COST = 250;
+export const COMPANY_MAX_LEVEL = 100;
 export const PROPERTY_MAX_LEVEL = 15;
 export const LISTING_MAX_QTY = 10_000;
 export const LISTING_MAX_PRICE = 1_000_000;
