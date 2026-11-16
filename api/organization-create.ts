@@ -163,11 +163,13 @@ async function verifyPlayer(req: ApiRequest): Promise<string> {
     audience: PROJECT_ID,
     algorithms: ['RS256'],
   });
+  const firebaseClaim = payload.firebase && typeof payload.firebase === 'object' ? payload.firebase as Record<string, unknown> : {};
+  const isAnonymous = firebaseClaim.sign_in_provider === 'anonymous';
   if (
     typeof payload.sub !== 'string' ||
     payload.sub.length === 0 ||
     payload.sub.length > 128 ||
-    payload.email_verified !== true
+    (payload.email_verified !== true && !isAnonymous)
   ) {
     throw new OrganizationError('UNAUTHENTICATED', 401);
   }
