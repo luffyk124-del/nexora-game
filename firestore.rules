@@ -308,7 +308,7 @@ service cloud.firestore {
         && data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 64
         && data.name is string && data.name.size() >= 2 && data.name.size() <= 48
         && data.sector in ['trade', 'manufacturing', 'services', 'tech', 'logistics']
-        && data.level is int && data.level >= 1 && data.level <= 20
+        && data.level is int && data.level >= 1 && data.level <= 100
         && data.capital is number && data.capital >= 0
         && data.baseRevenuePerHour is number && data.baseRevenuePerHour >= 10 && data.baseRevenuePerHour <= 50000
         && data.expensePerHour is number && data.expensePerHour >= 0
