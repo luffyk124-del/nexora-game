@@ -13,16 +13,13 @@ import type {
   WorldEventEffectType,
 } from '../types/game';
 
-// Serve visual assets from the repository's raw asset endpoint. This avoids
-// bundler-dependent asset URL rewriting and keeps images available on Vercel previews.
-const imageAsset = (file: string) =>
-  `https://raw.githubusercontent.com/luffyk124-del/nexora-game/development/nexora-next/src/assets/images/${file}`;
-
-const emblemImage = imageAsset('nexora_emblem_1794737992806.jpg');
-const marketBannerImage = imageAsset('world_market_banner_1794737994643.jpg');
-const strategistAvatar = imageAsset('avatar_strategist_1794737993416.jpg');
-const industrialistAvatar = imageAsset('avatar_industrialist_1794737993767.jpg');
-const financierAvatar = imageAsset('avatar_financier_1794737994701.jpg');
+// Import images as build assets so every deployment contains the exact
+// image files for its own commit (no dependency on GitHub's mutable branch URL).
+const emblemImage = new URL('../assets/images/nexora_emblem_1794737992806.jpg', import.meta.url).href;
+const marketBannerImage = new URL('../assets/images/world_market_banner_1794737994643.jpg', import.meta.url).href;
+const strategistAvatar = new URL('../assets/images/avatar_strategist_1794737993416.jpg', import.meta.url).href;
+const industrialistAvatar = new URL('../assets/images/avatar_industrialist_1794737993767.jpg', import.meta.url).href;
+const financierAvatar = new URL('../assets/images/avatar_financier_1794737994701.jpg', import.meta.url).href;
 
 export const BRAND_ASSETS = {
   emblem: emblemImage,
