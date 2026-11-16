@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { FieldValue, Firestore, Timestamp } from '@google-cloud/firestore';
+import { FieldValue, Firestore, Timestamp, type DocumentData } from '@google-cloud/firestore';
 import { IdentityPoolClient } from 'google-auth-library';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
@@ -79,7 +79,7 @@ function timestampMillis(value: unknown, fallback: number): number {
   return fallback;
 }
 
-function companyNetHourly(company: VaultCompany, profile: VaultProfile, events: FirebaseFirestore.DocumentData[], nowMs: number): number {
+function companyNetHourly(company: VaultCompany, profile: VaultProfile, events: DocumentData[], nowMs: number): number {
   const levelMultiplier = 1 + (numberOrZero(company.level) - 1) * 0.32;
   const staffBonus = 1 + Math.max(0, numberOrZero(company.employeesCount) - 1) * 0.05;
   const management = Math.max(0, numberOrZero(profile.skills?.management));
