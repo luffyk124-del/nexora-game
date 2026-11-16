@@ -359,7 +359,7 @@ service cloud.firestore {
 
     function isValidOrganization(data) {
       return data.keys().hasAll(['id', 'name', 'tag', 'description', 'leaderUid', 'leaderName', 'treasuryBalance', 'memberCount', 'reputation', 'level', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'name', 'tag', 'description', 'leaderUid', 'leaderName', 'treasuryBalance', 'memberCount', 'reputation', 'level', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'name', 'tag', 'description', 'leaderUid', 'leaderName', 'treasuryBalance', 'memberCount', 'reputation', 'level', 'memberCapacity', 'upgradeStartedAt', 'upgradeEndsAt', 'upgradeTargetLevel', 'createdAt', 'updatedAt'])
         && isValidId(data.id)
         && data.name is string && data.name.size() >= 3 && data.name.size() <= 40
         && data.tag is string && data.tag.size() >= 2 && data.tag.size() <= 6
@@ -369,7 +369,11 @@ service cloud.firestore {
         && data.treasuryBalance is number && data.treasuryBalance >= 0
         && data.memberCount is int && data.memberCount >= 1 && data.memberCount <= 200
         && data.reputation is int && data.reputation >= 0
-        && data.level is int && data.level >= 1 && data.level <= 50;
+        && data.level is int && data.level >= 1 && data.level <= 50
+        && (!('memberCapacity' in data) || (data.memberCapacity is int && data.memberCapacity >= 20 && data.memberCapacity <= 70))
+        && (!('upgradeStartedAt' in data) || data.upgradeStartedAt is number)
+        && (!('upgradeEndsAt' in data) || data.upgradeEndsAt == null || data.upgradeEndsAt is number)
+        && (!('upgradeTargetLevel' in data) || data.upgradeTargetLevel == null || (data.upgradeTargetLevel is int && data.upgradeTargetLevel >= 2 && data.upgradeTargetLevel <= 10));
     }
 
     function isCanonicalOrgRolePermissions(role, perms) {
@@ -931,7 +935,8 @@ false
           (
             hasOrgPermission(orgId, 'manage_members') &&
             incoming().diff(existing()).affectedKeys().hasOnly(['memberCount', 'updatedAt']) &&
-            incoming().memberCount == existing().memberCount + 1
+            incoming().memberCount == existing().memberCount + 1 &&
+            incoming().memberCount <= (('memberCapacity' in existing()) ? existing().memberCapacity : math.min(70, 20 + ((existing().level - 1) * 5)))
           ) ||
           // Action 4: Member leaves or manager removes member
           (
@@ -943,16 +948,7 @@ false
               hasOrgPermission(orgId, 'manage_members')
             )
           ) ||
-          // Action 5: Upgrade organization level from shared treasury
-          (
-            hasOrgPermission(orgId, 'manage_org') &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['level', 'treasuryBalance', 'reputation', 'updatedAt']) &&
-            existing().level < 50 &&
-            incoming().level == existing().level + 1 &&
-            existing().treasuryBalance >= existing().level * 1500 &&
-            incoming().treasuryBalance == existing().treasuryBalance - (existing().level * 1500) &&
-            incoming().reputation == existing().reputation + 25
-          )
+
         );
       allow delete: if false;
     }
