@@ -958,8 +958,7 @@ false
               (isOrgMember(orgId) && !existsAfter(/databases/$(database)/documents/organization_members/$(orgId + '_' + request.auth.uid))) ||
               hasOrgPermission(orgId, 'manage_members')
             )
-          ) ||
-
+          )
         );
       allow delete: if false;
     }
