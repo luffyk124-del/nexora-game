@@ -107,6 +107,7 @@ function NexoraAppContent() {
           properties={game.properties}
           inventory={game.inventory}
           worldEvents={game.worldEvents}
+          organizationIncomeBonusRate={Math.min(10, game.organizations.find((org) => org.id === game.profile?.orgId)?.research?.commerce ?? 0) * 0.005}
           language={game.language}
           onGoToMarket={() => setActiveTab('market')}
         />
