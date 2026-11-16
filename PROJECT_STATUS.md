@@ -209,3 +209,15 @@
 - سجل Vercel deployment: `dpl_DbSgaqwkd3oyZkMCSeTTXa8XUqtC`، الحالة `READY`، والفرع `development/nexora-next` والـcommit مطابقان للإصلاح.
 - رابط المعاينة: https://nexora-game-git-development-nexora-next-manus24.vercel.app
 - أكد مالك المشروع نجاح Workflow نشر قواعد Firestore. يبقى نشر Cloud Functions والتحقق الحي من اللعبة منفصلين عن هذه النتائج.
+
+
+## 19. تأمين عمليات خزائن الشركات عبر Cloud Functions — 2026-11-16
+- نُقلت عمليتا ترقية خزينة الأرباح وتحصيلها من معاملات Firestore التي ينشئها العميل إلى callable Cloud Functions Gen 2: `upgradeCompanyProfitVault` و`collectCompanyRevenueSecure` في `functions/src/index.ts`.
+- الخادم يستمد UID من Firebase Auth token ولا يقبل UID من العميل، ويتحقق من ملكية الشركة والرصيد والمواد ومستوى الخزينة، وينفذ تحديث المحفظة والمخزون والشركة والسجل المالي داخل معاملة Firestore ذرّية باستخدام Admin SDK.
+- التحصيل يحسب صافي الدخل من بيانات الشركة والمهارات والأحداث النشطة على الخادم، ويحد الرصيد بسعة الخزينة، ويحدّث XP/المستوى/السمعة/التأثير، ثم يصفّر الرصيد ويحدث وقت التحصيل.
+- واجهة العميل تستخدم `httpsCallable` فقط لهاتين العمليتين. قواعد Firestore تمنع تحديث حقول الخزينة والتحصيل مباشرة من العميل؛ ما زالت عمليات تطوير الشركة والتوظيف المعتادة ضمن قواعدها السابقة.
+- أضيفت `.github/workflows/deploy-company-vault-functions.yml` كمسار نشر يدوي فقط، ومحدد لنشر الدالتين دون بقية الوظائف. لا يبدأ النشر تلقائياً.
+- **التحقق**: CI ناجح على commit `d1f18e83d5f75c086863a9980ad3246f7425be0c`، بما يشمل TypeScript، lint قواعد Firestore، Vitest، بناء Vite وبناء Cloud Functions. Vercel كان في حالة BUILDING عند آخر فحص؛ لم يتم اعتماد رابط المعاينة بعد.
+- **النشر الحي**: لم يتم بعد نشر الدالتين الجديدتين أو تأكيد نشر قواعد Firestore التي تغلق مسارات العميل. يجب نشر الدالتين أولاً، ثم نشر قواعد Firestore، ثم اختبار الترقية والتحصيل بحساب اختبار. لا تعتبر هذه الوظائف متاحة في الإنتاج قبل هذه الخطوات.
+- **الصلاحيات**: Workflow النشر اليدوي يستخدم السر الحالي `FIREBASE_SERVICE_ACCOUNT_NEXORA`. قد يحتاج حساب الخدمة أدوار نشر Cloud Functions Gen 2 وCloud Build وCloud Run وService Account User إضافة إلى Service Usage؛ لا تُشارك مفاتيح الحساب في المحادثة.
+- **قرار الدمج**: لا دمج إلى `main` حتى ينجح النشر والاختبار الحي وتتم مراجعة سجلات المعاملات والمواد والأرصدة.
