@@ -936,7 +936,7 @@ false
             hasOrgPermission(orgId, 'manage_members') &&
             incoming().diff(existing()).affectedKeys().hasOnly(['memberCount', 'updatedAt']) &&
             incoming().memberCount == existing().memberCount + 1 &&
-            incoming().memberCount <= (('memberCapacity' in existing()) ? existing().memberCapacity : math.min(70, 20 + ((existing().level - 1) * 5)))
+            incoming().memberCount <= (('memberCapacity' in existing()) ? existing().memberCapacity : (existing().level >= 11 ? 70 : 20 + ((existing().level - 1) * 5)))
           ) ||
           // Action 4: Member leaves or manager removes member
           (
@@ -968,6 +968,8 @@ false
           (
             hasOrgPermission(incoming().orgId, 'manage_members') &&
             incoming().role == 'member' &&
+            getAfter(/databases/$(database)/documents/organizations/$(incoming().orgId)).data.memberCount == get(/databases/$(database)/documents/organizations/$(incoming().orgId)).data.memberCount + 1 &&
+            getAfter(/databases/$(database)/documents/organizations/$(incoming().orgId)).data.memberCount <= (('memberCapacity' in get(/databases/$(database)/documents/organizations/$(incoming().orgId)).data) ? get(/databases/$(database)/documents/organizations/$(incoming().orgId)).data.memberCapacity : (get(/databases/$(database)/documents/organizations/$(incoming().orgId)).data.level >= 11 ? 70 : 20 + ((get(/databases/$(database)/documents/organizations/$(incoming().orgId)).data.level - 1) * 5))) &&
             (
               !exists(/databases/$(database)/documents/profiles/$(incoming().uid)) ||
               !('orgId' in get(/databases/$(database)/documents/profiles/$(incoming().uid)).data) ||
