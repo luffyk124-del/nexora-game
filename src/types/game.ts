@@ -165,6 +165,13 @@ export interface Company {
   totalRevenue: number;
   vaultLevel?: number;
   vaultBalance?: number;
+  levelUpgradeStartedAt?: number;
+  levelUpgradeEndsAt?: number;
+  levelUpgradeTargetLevel?: number;
+  levelUpgradeCost?: number;
+  vaultUpgradeStartedAt?: number;
+  vaultUpgradeEndsAt?: number;
+  vaultUpgradeTargetLevel?: number;
   lastCollectedAt: unknown;
   createdAt: unknown;
   updatedAt: unknown;
