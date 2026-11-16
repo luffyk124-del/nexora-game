@@ -30,6 +30,14 @@ type VaultCompany = {
   vaultLevel?: number;
   vaultBalance?: number;
   lastCollectedAt?: unknown;
+  capital?: number;
+  levelUpgradeStartedAt?: number;
+  levelUpgradeEndsAt?: number;
+  levelUpgradeTargetLevel?: number;
+  levelUpgradeCost?: number;
+  vaultUpgradeStartedAt?: number;
+  vaultUpgradeEndsAt?: number;
+  vaultUpgradeTargetLevel?: number;
 };
 type VaultProfile = {
   xp: number;
@@ -131,13 +139,13 @@ function documentName(path: string): string {
   return `projects/${PROJECT_ID}/databases/${DATABASE_ID}/documents/${path}`;
 }
 
-function updateWrite(path: string, fields: Data, serverTimestampFields: string[] = [], createOnly = false): RestWrite {
+function updateWrite(path: string, fields: Data, serverTimestampFields: string[] = [], createOnly = false, deleteFields: string[] = []): RestWrite {
   const encoded = Object.fromEntries(
     Object.entries(fields).filter(([, value]) => value !== undefined).map(([key, value]) => [key, encodeValue(value)])
   );
   return {
     update: { name: documentName(path), fields: encoded },
-    updateMask: { fieldPaths: Object.keys(encoded) },
+    updateMask: { fieldPaths: [...Object.keys(encoded), ...deleteFields] },
     ...(serverTimestampFields.length
       ? { updateTransforms: serverTimestampFields.map((fieldPath) => ({ fieldPath, setToServerValue: 'REQUEST_TIME' as const })) }
       : {}),
@@ -273,6 +281,13 @@ function companyNetHourly(company: VaultCompany, profile: VaultProfile, events: 
   return Math.max(15, gross - expense);
 }
 
+
+function companyUpgradeDurationMs(targetLevel: number): number {
+  const level = Math.max(2, Math.min(100, Math.floor(targetLevel)));
+  if (level <= 50) return Math.round(2_000 * Math.pow(43_200, (level - 2) / 48));
+  return Math.round(86_400_000 * Math.pow(15, (level - 50) / 50));
+}
+
 function calculatedVaultBalance(company: VaultCompany, netHourly: number, nowMs: number): number {
   const level = vaultLevelOf(company);
   const capacity = VAULT_CAPACITIES[level - 1];
@@ -326,6 +341,72 @@ function firestoreForRequest(req: ApiRequest): FirestoreRest {
   return new FirestoreRest(authClient);
 }
 
+
+async function startCompanyUpgrade(db: FirestoreRest, uid: string, companyId: string) {
+  return db.runTransaction(async (transaction) => {
+    const [companyRaw, walletRaw] = await db.getMany(transaction, [`companies/${companyId}`, `wallets/${uid}`]);
+    if (!companyRaw) throw new VaultError('COMPANY_NOT_FOUND',404);
+    if (!walletRaw) throw new VaultError('ACCOUNT_NOT_FOUND',409);
+    const company = companyRaw as VaultCompany;
+    const wallet = walletRaw as unknown as VaultWallet;
+    if (company.ownerUid !== uid) throw new VaultError('UNAUTHORIZED',403);
+    if (numberOrZero(company.level) >= 100) throw new VaultError('MAX_LEVEL',409);
+    if (numberOrZero(company.levelUpgradeEndsAt) > Date.now()) throw new VaultError('UPGRADE_IN_PROGRESS',409);
+    const cost = numberOrZero(company.level)*550;
+    if (numberOrZero(wallet.balance)<cost) throw new VaultError('INSUFFICIENT_FUNDS',409);
+    const target=numberOrZero(company.level)+1, now=Date.now(), endsAt=now+companyUpgradeDurationMs(target);
+    const txId=`tx_${randomUUID()}`, logId=`clog_${randomUUID()}`;
+    const writes: RestWrite[]=[
+      updateWrite(`wallets/${uid}`,{balance:numberOrZero(wallet.balance)-cost,totalSpent:numberOrZero(wallet.totalSpent)+cost,lastTxId:txId},['updatedAt']),
+      updateWrite(`companies/${companyId}`,{levelUpgradeStartedAt:now,levelUpgradeEndsAt:endsAt,levelUpgradeTargetLevel:target,levelUpgradeCost:cost},['updatedAt']),
+      updateWrite(`transactions/${txId}`,{id:txId,fromUid:uid,toUid:'SYSTEM',amount:cost,fee:0,netAmount:cost,type:'company_upgrade',referenceId:companyId,description:`Started upgrade of ${company.name} to Lv.${target}`,status:'completed'},['createdAt'],true),
+      updateWrite(`company_logs/${logId}`,{id:logId,companyId,ownerUid:uid,action:'upgrade_started',amount:-cost,details:`Started upgrade to Level ${target}`},['createdAt'],true),
+    ];
+    return {result:{ok:true,targetLevel:target,endsAt},writes};
+  });
+}
+
+async function completeCompanyUpgrade(db: FirestoreRest, uid: string, companyId: string) {
+  return db.runTransaction(async (transaction) => {
+    const [companyRaw,profileRaw]=await db.getMany(transaction,[`companies/${companyId}`,`profiles/${uid}`]);
+    if(!companyRaw) throw new VaultError('COMPANY_NOT_FOUND',404);
+    if(!profileRaw) throw new VaultError('ACCOUNT_NOT_FOUND',409);
+    const company=companyRaw as VaultCompany, profile=profileRaw as unknown as VaultProfile;
+    if(company.ownerUid!==uid) throw new VaultError('UNAUTHORIZED',403);
+    const endsAt=numberOrZero(company.levelUpgradeEndsAt),target=numberOrZero(company.levelUpgradeTargetLevel);
+    if(!endsAt||!target) throw new VaultError('NO_UPGRADE_IN_PROGRESS',409);
+    if(Date.now()<endsAt) throw new VaultError('UPGRADE_NOT_FINISHED',409);
+    if(target!==numberOrZero(company.level)+1||target>100) throw new VaultError('INVALID_UPGRADE_STATE',409);
+    const xp=numberOrZero(profile.xp)+75,nextLevel=levelForXp(xp),gained=Math.max(0,nextLevel-numberOrZero(profile.level));
+    const logId=`clog_${randomUUID()}`,cost=numberOrZero(company.levelUpgradeCost);
+    const writes:RestWrite[]=[
+      updateWrite(`companies/${companyId}`,{level:target,capital:numberOrZero(company.capital)+cost},['updatedAt'],false,['levelUpgradeStartedAt','levelUpgradeEndsAt','levelUpgradeTargetLevel','levelUpgradeCost']),
+      updateWrite(`profiles/${uid}`,{xp,level:nextLevel,skillPoints:numberOrZero(profile.skillPoints)+gained*2},['updatedAt']),
+      updateWrite(`company_logs/${logId}`,{id:logId,companyId,ownerUid:uid,action:'upgrade_completed',amount:0,details:`Company reached Level ${target}`},['createdAt'],true),
+    ];
+    return {result:{ok:true,level:target},writes};
+  });
+}
+
+async function completeVaultUpgrade(db: FirestoreRest, uid: string, companyId: string) {
+  return db.runTransaction(async (transaction) => {
+    const [companyRaw]=await db.getMany(transaction,[`companies/${companyId}`]);
+    if(!companyRaw) throw new VaultError('COMPANY_NOT_FOUND',404);
+    const company=companyRaw as VaultCompany;
+    if(company.ownerUid!==uid) throw new VaultError('UNAUTHORIZED',403);
+    const endsAt=numberOrZero(company.vaultUpgradeEndsAt),target=numberOrZero(company.vaultUpgradeTargetLevel);
+    if(!endsAt||!target) throw new VaultError('NO_UPGRADE_IN_PROGRESS',409);
+    if(Date.now()<endsAt) throw new VaultError('UPGRADE_NOT_FINISHED',409);
+    if(target!==vaultLevelOf(company)+1||target>5) throw new VaultError('INVALID_UPGRADE_STATE',409);
+    const logId=`clog_${randomUUID()}`;
+    const writes:RestWrite[]=[
+      updateWrite(`companies/${companyId}`,{vaultLevel:target},['updatedAt'],false,['vaultUpgradeStartedAt','vaultUpgradeEndsAt','vaultUpgradeTargetLevel']),
+      updateWrite(`company_logs/${logId}`,{id:logId,companyId,ownerUid:uid,action:'vault_upgrade_completed',amount:0,details:`Profit vault reached Level ${target}`},['createdAt'],true),
+    ];
+    return {result:{ok:true,vaultLevel:target},writes};
+  });
+}
+
 async function upgradeVault(db: FirestoreRest, uid: string, companyId: string) {
   return db.runTransaction(async (transaction) => {
     const [[companyRaw, walletRaw, profileRaw], events] = await Promise.all([
@@ -340,6 +421,7 @@ async function upgradeVault(db: FirestoreRest, uid: string, companyId: string) {
     if (company.ownerUid !== uid) throw new VaultError('UNAUTHORIZED', 403);
 
     const oldLevel = vaultLevelOf(company);
+    if (numberOrZero(company.vaultUpgradeEndsAt) > Date.now()) throw new VaultError('UPGRADE_IN_PROGRESS',409);
     if (oldLevel >= 5) throw new VaultError('VAULT_MAX_LEVEL', 409);
     const upgrade = VAULT_UPGRADES[oldLevel - 1];
     if (numberOrZero(wallet.balance) < upgrade.cost) throw new VaultError('INSUFFICIENT_FUNDS', 409);
@@ -355,6 +437,8 @@ async function upgradeVault(db: FirestoreRest, uid: string, companyId: string) {
     }
 
     const now = Date.now();
+    const target = oldLevel + 1;
+    const endsAt = now + Math.max(1_000, Math.floor(companyUpgradeDurationMs(Math.min(100, Math.max(2,target))) / 2));
     const netHourly = companyNetHourly(company, profile, events, now);
     const preserved = calculatedVaultBalance(company, netHourly, now);
     const txId = `tx_${randomUUID()}`;
@@ -371,8 +455,10 @@ async function upgradeVault(db: FirestoreRest, uid: string, companyId: string) {
         }, ['updatedAt'])
       ),
       updateWrite(`companies/${companyId}`, {
-        vaultLevel: oldLevel + 1,
         vaultBalance: preserved,
+        vaultUpgradeStartedAt: now,
+        vaultUpgradeEndsAt: endsAt,
+        vaultUpgradeTargetLevel: target,
       }, ['lastCollectedAt', 'updatedAt']),
       updateWrite(`transactions/${txId}`, {
         id: txId, fromUid: uid, toUid: 'SYSTEM', amount: upgrade.cost, fee: 0,
@@ -385,7 +471,7 @@ async function upgradeVault(db: FirestoreRest, uid: string, companyId: string) {
       }, ['createdAt'], true),
     ];
     return {
-      result: { ok: true, vaultLevel: oldLevel + 1, vaultBalance: preserved, capacity: VAULT_CAPACITIES[oldLevel] },
+      result: { ok: true, targetLevel: target, endsAt, vaultBalance: preserved, capacity: VAULT_CAPACITIES[oldLevel - 1] },
       writes,
     };
   });
@@ -460,7 +546,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
   const action = body.action;
   const companyId = typeof body.companyId === 'string' ? body.companyId.trim() : '';
   if (
-    (action !== 'health' && action !== 'upgrade' && action !== 'collect') ||
+    (action !== 'health' && action !== 'upgrade' && action !== 'collect' && action !== 'company_upgrade' && action !== 'company_complete' && action !== 'vault_complete') ||
     (action !== 'health' && (!companyId || companyId.length > 128))
   ) {
     res.status(400).json({ error: 'INVALID_ARGUMENT' });
@@ -483,6 +569,12 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
     }
     const result = action === 'upgrade'
       ? await upgradeVault(db, uid, companyId)
+      : action === 'company_upgrade'
+      ? await startCompanyUpgrade(db, uid, companyId)
+      : action === 'company_complete'
+      ? await completeCompanyUpgrade(db, uid, companyId)
+      : action === 'vault_complete'
+      ? await completeVaultUpgrade(db, uid, companyId)
       : await collectVault(db, uid, companyId);
     res.status(200).json(result);
   } catch (error) {
