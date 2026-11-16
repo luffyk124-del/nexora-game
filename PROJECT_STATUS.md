@@ -221,3 +221,13 @@
 - **النشر الحي**: لم يتم بعد نشر الدالتين الجديدتين أو تأكيد نشر قواعد Firestore التي تغلق مسارات العميل. يجب نشر الدالتين أولاً، ثم نشر قواعد Firestore، ثم اختبار الترقية والتحصيل بحساب اختبار. لا تعتبر هذه الوظائف متاحة في الإنتاج قبل هذه الخطوات.
 - **الصلاحيات**: Workflow النشر اليدوي يستخدم السر الحالي `FIREBASE_SERVICE_ACCOUNT_NEXORA`. قد يحتاج حساب الخدمة أدوار نشر Cloud Functions Gen 2 وCloud Build وCloud Run وService Account User إضافة إلى Service Usage؛ لا تُشارك مفاتيح الحساب في المحادثة.
 - **قرار الدمج**: لا دمج إلى `main` حتى ينجح النشر والاختبار الحي وتتم مراجعة سجلات المعاملات والمواد والأرصدة.
+
+
+## 20. نقل عمليات خزائن الشركات إلى Vercel + WIF — 2026-11-16
+- أضيف endpoint خادمي `api/company-vault.ts` على فرع `development/nexora-next` لتنفيذ الترقية والتحصيل عبر Vercel Functions.
+- يتحقق endpoint من Firebase ID token بتوقيع Google ومطابقة `issuer` و`audience`، ويستخرج UID من claim الموقّع فقط؛ لا يقبل UID من جسم الطلب.
+- يعتمد الوصول إلى Google Cloud على Vercel OIDC token داخل ترويسة الطلب، ثم Google STS وService Account Impersonation عبر `IdentityPoolClient`؛ لا يوجد مفتاح Service Account JSON ولا أسرار WIF طويلة الأجل في متغيرات Vercel.
+- تُنفذ عمليات القراءة والكتابة ضمن Firestore REST read-write transactions على قاعدة البيانات المسماة `ai-studio-74843d9e-8228-49b7-a616-317cadd90bff`. تم نقل حسابات العائد والترقية والمواد والسجل المالي من callable functions إلى endpoint الجديد.
+- تم تحديث `src/services/gameService.ts` لاستدعاء `/api/company-vault` بعد الحصول على Firebase ID token.
+- **حالة النشر والتحقق:** التغييرات موجودة على فرع التطوير فقط. Vercel deployments قيد الانتظار/البناء عند آخر فحص؛ لم يتم اعتماد READY للـcommit الأخير، ولم يتم إجراء اختبار حي على حساب لاعب. لا تعتبر الخزائن جاهزة للإنتاج بعد.
+- **القيود:** لا تغيير على `main`، ولا تغيير على بيانات اللاعبين أو أرصدتهم أو قواعد Firestore المنشورة، ولا تفعيل Billing/Blaze.
