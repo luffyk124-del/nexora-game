@@ -218,6 +218,10 @@ export interface Organization {
   memberCount: number;
   reputation: number;
   level: number;
+  memberCapacity?: number;
+  upgradeStartedAt?: number;
+  upgradeEndsAt?: number;
+  upgradeTargetLevel?: number;
   createdAt: unknown;
   updatedAt: unknown;
 }
