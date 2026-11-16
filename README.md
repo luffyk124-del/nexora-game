@@ -16,14 +16,14 @@ Default UI language is **Arabic (`RTL`)** with instant switching to **English (`
 - **Character & Skill Tree**: Level/XP progression and six functionally bound skills.
 - **Interconnected Economy**: Atomic `$` wallets, append-only ledger, player transfers, market listings/orders, dynamic pricing, tax rates, and world events.
 - **Manufacturing Chains**: Three-tier industrial chains and daily trade contracts.
-- **Companies & Real Estate**: Five business sectors, staffing, upgrades, properties, leases, and hourly revenue.
+- **Companies & Real Estate**: Five business sectors, staffing, upgrades, independent profit vaults, properties, leases, and hourly revenue. Vault upgrades and collection are handled by authenticated server-side callables; deployment is pending.
 - **Organizations & RBAC**: Organization membership, role permissions, join requests, and shared treasury.
 - **NEXORA Diagnostics**: Owner-restricted, read-only diagnostics with sanitization and JSON export.
 
 ## Current Runtime — Firebase (Active Source of Truth)
 - Firebase Auth (Google provider) is still the active login.
 - Cloud Firestore remains the source of truth for live game data.
-- Firebase Cloud Functions Gen 2 currently provide the diagnostics backend.
+- Firebase Cloud Functions Gen 2 provide the read-only diagnostics backend. Company profit-vault callable functions are implemented and pass CI, but must be deployed together with the matching Firestore Rules before live use.
 - Do not remove Firebase or switch live writes until Supabase auth strategy, trusted server operations, RLS, migration, parity tests, and rollback are complete.
 
 ## Supabase Target — Isolated Namespace
