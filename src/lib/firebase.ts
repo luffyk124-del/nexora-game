@@ -14,6 +14,7 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const functions = getFunctions(app, 'us-central1');
 export const googleAuthProvider = new GoogleAuthProvider();
+googleAuthProvider.setCustomParameters({ prompt: 'select_account' });
 
 export enum OperationType {
   CREATE = 'create',
