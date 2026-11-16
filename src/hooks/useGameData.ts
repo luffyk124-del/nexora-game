@@ -562,17 +562,10 @@ export function useGameData(): GameDataState {
   }, [authUser, profile, unlockedAchievements]);
 
   const loginWithGoogle = useCallback(async () => {
-    const isMobileBrowser =
-      typeof navigator !== 'undefined' &&
-      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-
-    // Mobile browsers and in-app webviews often block or lose OAuth pop-ups.
-    // Redirect auth survives the browser hand-off and resumes through onAuthStateChanged.
-    if (isMobileBrowser) {
-      await signInWithRedirect(auth, googleAuthProvider);
-      return;
-    }
-
+    // Prefer popup on every device. On mobile browsers, redirect-based OAuth can
+    // return to the app without restoring the Firebase session when third-party
+    // storage or the browser's in-app authentication hand-off is restricted.
+    // Keep redirect as a fallback only when the browser explicitly blocks popups.
     try {
       await signInWithPopup(auth, googleAuthProvider);
     } catch (error) {
