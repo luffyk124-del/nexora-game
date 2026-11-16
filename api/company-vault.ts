@@ -319,13 +319,10 @@ function firestoreForRequest(req: ApiRequest): FirestoreRest {
 
 async function upgradeVault(db: FirestoreRest, uid: string, companyId: string) {
   return db.runTransaction(async (transaction) => {
-    const inventoryIds = Object.keys(VAULT_UPGRADES[0].materials);
-    const [companyData, walletData, profileData, events] = await Promise.all([
+    const [[companyRaw, walletRaw, profileRaw], events] = await Promise.all([
       db.getMany(transaction, [`companies/${companyId}`, `wallets/${uid}`, `profiles/${uid}`]),
       db.getActiveEvents(transaction),
-    ]).then(([docs, activeEvents]) => [docs, activeEvents] as const);
-
-    const [companyRaw, walletRaw, profileRaw] = companyData;
+    ]);
     if (!companyRaw) throw new VaultError('COMPANY_NOT_FOUND', 404);
     if (!walletRaw || !profileRaw) throw new VaultError('ACCOUNT_NOT_FOUND', 409);
     const company = companyRaw as VaultCompany;
