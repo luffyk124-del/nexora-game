@@ -1,6 +1,11 @@
 name: Deploy NEXORA Company Vault Functions
 
 on:
+  push:
+    branches:
+      - development/nexora-next
+    paths:
+      - '.github/workflows/deploy-company-vault-functions.yml'
   workflow_dispatch:
 
 permissions:
