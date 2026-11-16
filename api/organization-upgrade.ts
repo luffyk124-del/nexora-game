@@ -89,7 +89,7 @@ export default async function handler(req: Req, res: Res): Promise<void> {
     try {
       const [org, member] = await db.get(transaction, [`organizations/${orgId}`, `organization_members/${orgId}_${uid}`]);
       if (!org || !member) throw new ApiError('NOT_FOUND', 404);
-      if (member.role !== 'leader' && member.role !== 'deputy') throw new ApiError('UNAUTHORIZED', 403);
+      if (action === 'start' && member.role !== 'leader' && member.role !== 'deputy') throw new ApiError('UNAUTHORIZED', 403);
       const now = Date.now(); const endsAt = number(org.upgradeEndsAt); const target = number(org.upgradeTargetLevel);
       if (action === 'complete') {
         if (!endsAt || !target || now < endsAt) throw new ApiError('UPGRADE_NOT_READY', 409);
