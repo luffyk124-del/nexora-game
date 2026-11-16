@@ -1,4 +1,9 @@
 ## [Unreleased] - 2026-11-16
+### Vercel Workload Identity Backend
+- Added an authenticated Vercel API route for company vault upgrades and revenue collection, using Vercel OIDC with Google Workload Identity Federation and short-lived service-account impersonation tokens.
+- Added Firebase ID-token signature/issuer/audience verification and Firestore REST transactions against the dedicated named database; no service-account JSON key or new Firebase billing plan is used.
+- Routed the client vault actions away from the Firebase callable functions. Vercel deployment/build and live transaction verification are pending.
+
 ### Company Profit Vaults
 - Added an independent, five-level profit vault to each company, with per-company capacity and upgrades paid in both credits and required materials.
 - Preserved already accumulated profit when upgrading a vault; collection empties the vault and restarts accumulation. Revenue does not accrue retroactively while a vault is full.
@@ -7,7 +12,7 @@
 ### Verification & Deployment
 - Fixed the market event multiplier boundary test to compare against the supply-adjusted, pre-final-rounding reference; production pricing logic was not changed.
 - CI passed after the test correction. Vercel preview for commit `ad299d3ffac3e8ee276e6ab122917a74309cd9db` reached `READY`, and Firestore Rules deployment was confirmed successful by the project owner.
-- Cloud Functions Gen 2 deployment remains unverified.
+- Cloud Functions Gen 2 deployment remains unverified; the vault operations have since been moved to the Vercel WIF backend, whose live verification is pending.
 
 ## [Unreleased] - 2026-11-15
 ### Currency & Audio Experience
