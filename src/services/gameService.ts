@@ -1909,7 +1909,7 @@ export async function depositToOrgTreasury(
   amountRaw: number
 ): Promise<void> {
   const amount = Math.floor(amountRaw);
-  if (amount <= 0) throw new Error('INVALID_AMOUNT');
+  if (!Number.isFinite(amountRaw) || amount <= 0 || amount > 10_000_000) throw new Error('INVALID_AMOUNT');
   const txId = genId('tx');
   const orgTxId = genId('otx');
 
@@ -1917,8 +1917,10 @@ export async function depositToOrgTreasury(
     await runTransaction(db, async (tx) => {
       const walletRef = doc(db, 'wallets', uid);
       const orgRef = doc(db, 'organizations', orgId);
-      const [walletSnap, orgSnap] = await Promise.all([tx.get(walletRef), tx.get(orgRef)]);
+      const memberRef = doc(db, 'organization_members', `${orgId}_${uid}`);
+      const [walletSnap, orgSnap, memberSnap] = await Promise.all([tx.get(walletRef), tx.get(orgRef), tx.get(memberRef)]);
       if (!walletSnap.exists() || !orgSnap.exists()) throw new Error('NOT_FOUND');
+      if (!memberSnap.exists()) throw new Error('UNAUTHORIZED');
 
       const wallet = walletSnap.data() as Wallet;
       const org = orgSnap.data() as Organization;
@@ -1963,7 +1965,7 @@ export async function depositToOrgTreasury(
       });
     });
   } catch (error) {
-    if (error instanceof Error && ['INVALID_AMOUNT', 'INSUFFICIENT_FUNDS'].includes(error.message)) {
+    if (error instanceof Error && ['INVALID_AMOUNT', 'INSUFFICIENT_FUNDS', 'UNAUTHORIZED'].includes(error.message)) {
       throw error;
     }
     handleFirestoreError(error, OperationType.WRITE, `organizations/${orgId}`);
@@ -1977,7 +1979,7 @@ export async function withdrawFromOrgTreasury(
   amountRaw: number
 ): Promise<void> {
   const amount = Math.floor(amountRaw);
-  if (amount <= 0) throw new Error('INVALID_AMOUNT');
+  if (!Number.isFinite(amountRaw) || amount <= 0 || amount > 10_000_000) throw new Error('INVALID_AMOUNT');
   const txId = genId('tx');
   const orgTxId = genId('otx');
 
@@ -1985,8 +1987,12 @@ export async function withdrawFromOrgTreasury(
     await runTransaction(db, async (tx) => {
       const walletRef = doc(db, 'wallets', uid);
       const orgRef = doc(db, 'organizations', orgId);
-      const [walletSnap, orgSnap] = await Promise.all([tx.get(walletRef), tx.get(orgRef)]);
+      const memberRef = doc(db, 'organization_members', `${orgId}_${uid}`);
+      const [walletSnap, orgSnap, memberSnap] = await Promise.all([tx.get(walletRef), tx.get(orgRef), tx.get(memberRef)]);
       if (!walletSnap.exists() || !orgSnap.exists()) throw new Error('NOT_FOUND');
+      if (!memberSnap.exists() || !hasOrgPermission(memberSnap.data() as OrganizationMember, 'manage_treasury')) {
+        throw new Error('UNAUTHORIZED');
+      }
 
       const wallet = walletSnap.data() as Wallet;
       const org = orgSnap.data() as Organization;
@@ -2030,7 +2036,7 @@ export async function withdrawFromOrgTreasury(
       });
     });
   } catch (error) {
-    if (error instanceof Error && ['INVALID_AMOUNT', 'INSUFFICIENT_TREASURY'].includes(error.message)) {
+    if (error instanceof Error && ['INVALID_AMOUNT', 'INSUFFICIENT_TREASURY', 'UNAUTHORIZED'].includes(error.message)) {
       throw error;
     }
     handleFirestoreError(error, OperationType.WRITE, `organizations/${orgId}`);
