@@ -1680,7 +1680,7 @@ export async function depositToOrgTreasury(
 
       tx.update(orgRef, {
         treasuryBalance: org.treasuryBalance + amount,
-        reputation: org.reputation + Math.max(1, Math.floor(amount / 100)),
+        reputation: org.reputation + Math.max(1, Math.floor((amount / 100) * (1 + Math.min(10, org.research?.diplomacy ?? 0) * 0.01))),
         updatedAt: serverTimestamp(),
       });
 
