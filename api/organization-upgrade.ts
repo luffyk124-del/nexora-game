@@ -102,7 +102,7 @@ export default async function handler(req: Req, res: Res): Promise<void> {
         res.status(200).json({ ok: true, level: target, memberCapacity: capacity }); return;
       }
       if (action === 'research') {
-        if (!(researchId in RESEARCH_BASE_COSTS)) throw new ApiError('INVALID_RESEARCH', 400);
+        if (!Object.prototype.hasOwnProperty.call(RESEARCH_BASE_COSTS, researchId)) throw new ApiError('INVALID_RESEARCH', 400);
         const currentResearch = researchLevel(org.research, researchId);
         if (currentResearch >= 10) throw new ApiError('RESEARCH_MAX_LEVEL', 409);
         const cost = RESEARCH_BASE_COSTS[researchId] * (currentResearch + 1) * (currentResearch + 1);
