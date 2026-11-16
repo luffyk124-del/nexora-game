@@ -576,7 +576,7 @@ export function OrganizationHubView({
                 onClick={handleDeposit}
                 className="min-h-[44px] px-4 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white text-xs font-semibold whitespace-nowrap disabled:bg-[#1B2230] disabled:text-[#9299A6]"
               >
-                {t.deposit}
+                {language === 'ar' ? 'تبرع للخزنة' : 'Donate to treasury'}
               </button>
               {canManageTreasury && (
                 <button
