@@ -1,4 +1,4 @@
-import { Activity, Award, Globe, LogOut, ShieldCheck, Sliders, Trophy, Volume2, Zap } from 'lucide-react';
+import { Activity, Award, Globe, Lightbulb, LogOut, MessageSquareWarning, ShieldCheck, Sliders, Trophy, Volume2, Zap } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { useToast } from '../../components/ui/ToastProvider';
 import { ACHIEVEMENTS, AVATARS, MISSIONS, SKILL_DEFINITIONS } from '../../data/catalog';
@@ -70,6 +70,8 @@ export function ProfileHubView({
   }>({ players: [], companies: [], organizations: [] });
   const [lbLoading, setLbLoading] = useState(false);
   const [lbError, setLbError] = useState(false);
+  const [feedbackText, setFeedbackText] = useState('');
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
   const [musicVolume, setMusicVolume] = useState(() => {
     try { const stored = window.localStorage.getItem('nexora-music-volume'); return stored === null ? 22 : Math.round(Math.max(0, Math.min(1, Number(stored))) * 100); } catch { return 22; }
   });
@@ -182,6 +184,30 @@ export function ProfileHubView({
   }
 
 
+
+  async function handleFeedbackSubmit(type: 'issue' | 'suggestion') {
+    const message = feedbackText.trim();
+    if (message.length < 10 || message.length > 3000) {
+      showToast(language === 'ar' ? 'اكتب وصفاً من 10 إلى 3000 حرف.' : 'Enter 10–3000 characters.', 'error');
+      return;
+    }
+    setFeedbackBusy(true);
+    try {
+      const response = await fetch('/api/game-feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, message }),
+      });
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(result.error || 'FEEDBACK_DELIVERY_FAILED');
+      setFeedbackText('');
+      showToast(language === 'ar' ? 'تم إرسال رسالتك بنجاح. شكراً لمساعدتنا في تحسين NEXORA.' : 'Your message was sent. Thank you for helping improve NEXORA.', 'success');
+    } catch {
+      showToast(language === 'ar' ? 'تعذر إرسال الرسالة حالياً. حاول لاحقاً.' : 'Could not send your message right now. Try again later.', 'error');
+    } finally {
+      setFeedbackBusy(false);
+    }
+  }
 
   function handleMusicVolumeChange(rawValue: string) {
     const next = Math.max(0, Math.min(100, Number(rawValue) || 0));
@@ -733,6 +759,29 @@ export function ProfileHubView({
               {' '}<a href="https://creativecommons.org/licenses/by/4.0/" rel="noreferrer" target="_blank" className="text-[#E5A0A8] underline">CC BY 4.0</a>
             </p>
           </div>
+
+          <section className="space-y-3 border-b border-white/8 pb-4">
+            <div className="flex items-center gap-2.5">
+              <MessageSquareWarning className="w-4 h-4 text-[#E04455]" />
+              <h3 className="text-sm font-semibold text-[#F4F5F7]">{language === 'ar' ? 'إبلاغ عن مشكلة أو تقديم اقتراح' : 'Report an issue or send a suggestion'}</h3>
+            </div>
+            <textarea
+              value={feedbackText}
+              onChange={(event) => setFeedbackText(event.target.value.slice(0, 3000))}
+              rows={4}
+              maxLength={3000}
+              placeholder={language === 'ar' ? 'اكتب التفاصيل هنا (10 أحرف على الأقل)...' : 'Describe it here (at least 10 characters)...'}
+              className="w-full resize-y rounded-xl border border-white/10 bg-[#0B0D12] p-3 text-sm text-[#F4F5F7] placeholder:text-[#9299A6]/60 focus:outline-none focus:border-[#E04455]"
+            />
+            <div className="flex flex-wrap gap-2">
+              <button type="button" disabled={feedbackBusy || feedbackText.trim().length < 10} onClick={() => handleFeedbackSubmit('issue')} className="flex min-h-[40px] flex-1 items-center justify-center gap-2 rounded-xl bg-[#1B2230] px-3 text-xs font-semibold text-[#F4F5F7] hover:bg-[#232C3E] disabled:opacity-40">
+                <MessageSquareWarning className="h-4 w-4" />{language === 'ar' ? 'إرسال بلاغ' : 'Send issue'}
+              </button>
+              <button type="button" disabled={feedbackBusy || feedbackText.trim().length < 10} onClick={() => handleFeedbackSubmit('suggestion')} className="flex min-h-[40px] flex-1 items-center justify-center gap-2 rounded-xl bg-[#B91C32] px-3 text-xs font-semibold text-white hover:bg-[#E04455] disabled:opacity-40">
+                <Lightbulb className="h-4 w-4" />{language === 'ar' ? 'إرسال اقتراح' : 'Send suggestion'}
+              </button>
+            </div>
+          </section>
 
           {isOwnerAuthorized && (
             <div className="pt-2 border-t border-white/8 flex items-center justify-between gap-3">
