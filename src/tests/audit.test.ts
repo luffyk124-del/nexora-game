@@ -84,9 +84,12 @@ describe('NEXORA Audit Regression & Security Invariants', () => {
     // No open allow list for any signed-in user
     expect(rules).not.toMatch(/allow\s+list\s*:\s*if\s+isSignedIn\(\)\s*;/);
 
-    // Company staff hire has dedicated transaction type & exact cost check
-    expect(rules).toContain("'company_hire'");
-    expect(rules).toContain("tx.type == 'company_hire'");
+    // Employee hiring has been removed; timed company and vault upgrades remain supported.
+    expect(rules).not.toContain("'company_hire'");
+    expect(rules).toContain("'levelUpgradeStartedAt'");
+    expect(rules).toContain("'levelUpgradeEndsAt'");
+    expect(rules).toContain("'vaultUpgradeStartedAt'");
+    expect(rules).toContain("'vaultUpgradeEndsAt'");
 
     // Market buy fee cap and order receipt verification
     expect(rules).toContain('tx.fee <= (tx.amount * 0.12) + 0.5');
