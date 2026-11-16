@@ -99,17 +99,27 @@ export function OrganizationHubView({
         'success'
       );
     } catch (err) {
-      const code = err instanceof Error ? err.message : '';
-      showToast(
-        code === 'INSUFFICIENT_FUNDS'
-          ? language === 'ar'
-            ? `يتطلب التأسيس ${ORG_CREATION_COST} $.`
-            : `Founding requires ${ORG_CREATION_COST} $.`
-          : language === 'ar'
-          ? 'تأكد من صحة الاسم والرمز.'
-          : 'Check organization name and tag.',
-        'error'
-      );
+      const rawMessage = err instanceof Error ? err.message : '';
+      let code = rawMessage;
+      try {
+        const parsed = JSON.parse(rawMessage) as { code?: unknown };
+        if (typeof parsed.code === 'string') code = parsed.code;
+      } catch {
+        // Keep the original application error code.
+      }
+      const knownMessages: Record<string, string> = {
+        INVALID_NAME: language === 'ar' ? 'اسم المنظمة يجب أن يكون بين 3 و40 حرفاً.' : 'Organization name must be 3–40 characters.',
+        INVALID_TAG: language === 'ar' ? 'رمز المنظمة يجب أن يكون بين حرفين و6 أحرف.' : 'Organization tag must be 2–6 characters.',
+        ALREADY_IN_ORG: language === 'ar' ? 'أنت عضو في منظمة بالفعل.' : 'You are already in an organization.',
+        ACCOUNT_NOT_FOUND: language === 'ar' ? 'تعذر العثور على بيانات الحساب.' : 'Account data was not found.',
+        INSUFFICIENT_FUNDS: language === 'ar' ? `يتطلب التأسيس ${ORG_CREATION_COST} $.` : `Founding requires ${ORG_CREATION_COST} $.`,
+        'permission-denied': language === 'ar' ? 'رفضت قواعد Firestore حفظ المنظمة (permission-denied).' : 'Firestore rules rejected organization creation (permission-denied).',
+        unavailable: language === 'ar' ? 'خدمة قاعدة البيانات غير متاحة حالياً (unavailable).' : 'Database service is currently unavailable (unavailable).',
+      };
+      const message = knownMessages[code] || (code && code !== rawMessage
+        ? (language === 'ar' ? `فشل تأسيس المنظمة: ${code}` : `Organization creation failed: ${code}`)
+        : (language === 'ar' ? 'تعذر تأسيس المنظمة. تحقق من تفاصيل الخطأ.' : 'Organization creation failed. Check the error details.'));
+      showToast(message, 'error');
     } finally {
       setBusyKey(null);
     }
