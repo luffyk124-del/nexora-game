@@ -24,6 +24,11 @@ import {
   calculatePropertyHourlyNet,
   COMPANY_HIRE_COST,
   COMPANY_MAX_LEVEL,
+  COMPANY_VAULT_MAX_LEVEL,
+  COMPANY_VAULT_UPGRADES,
+  calculateCompanyVaultBalance,
+  getCompanyVaultCapacity,
+  getCompanyVaultLevel,
   COMPANY_MAX_STAFF,
   PROPERTY_MAX_LEVEL,
 } from '../../lib/economy';
@@ -37,6 +42,7 @@ import {
   timestampToMs,
   togglePropertyLease,
   upgradeCompany,
+  upgradeCompanyVault,
   upgradeProperty,
 } from '../../services/gameService';
 import type {
@@ -192,6 +198,26 @@ export function BusinessHubView({
           : 'Company upgrade failed.',
         'error'
       );
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function handleUpgradeCompanyVault(companyId: string) {
+    setBusyKey(`vault_${companyId}`);
+    try {
+      await upgradeCompanyVault(profile.uid, companyId);
+      showToast(language === 'ar' ? 'تم تطوير خزينة الشركة مع الاحتفاظ بالأرباح.' : 'Company vault upgraded; accrued profits preserved.', 'success');
+    } catch (err) {
+      const code = err instanceof Error ? err.message : '';
+      const message = code === 'MISSING_VAULT_MATERIALS'
+        ? (language === 'ar' ? 'المواد المطلوبة لتطوير الخزينة غير متوفرة.' : 'Required vault upgrade materials are missing.')
+        : code === 'INSUFFICIENT_FUNDS'
+        ? (language === 'ar' ? 'الرصيد غير كافٍ لتطوير الخزينة.' : 'Insufficient credits to upgrade the vault.')
+        : code === 'VAULT_MAX_LEVEL'
+        ? (language === 'ar' ? 'وصلت الخزينة إلى أقصى مستوى.' : 'The vault is already at maximum level.')
+        : (language === 'ar' ? 'تعذر تطوير الخزينة.' : 'Vault upgrade failed.');
+      showToast(message, 'error');
     } finally {
       setBusyKey(null);
     }
@@ -466,11 +492,14 @@ export function BusinessHubView({
                   profile.reputation
                 );
                 const { netHourly, grossHourly, expenseHourly, sectorEventMultiplier } = breakdown;
-                const accrued = calculateAccruedPayout(
-                  netHourly,
-                  timestampToMs(c.lastCollectedAt),
-                  nowMs
-                );
+                const accrued = calculateCompanyVaultBalance(c, netHourly, nowMs);
+                const vaultLevel = getCompanyVaultLevel(c);
+                const vaultCapacity = getCompanyVaultCapacity(vaultLevel);
+                const vaultUpgrade = COMPANY_VAULT_UPGRADES[vaultLevel - 1];
+                const vaultMaterialsAvailable = vaultUpgrade
+                  ? Object.entries(vaultUpgrade.materials).every(([itemId, qty]) => (invMap.get(itemId) || 0) >= qty)
+                  : false;
+                const vaultProgress = Math.min(100, (accrued / vaultCapacity) * 100);
                 const upgradeCost = c.level * 550;
                 const isMaxLevel = c.level >= COMPANY_MAX_LEVEL;
                 const isMaxStaff = c.employeesCount >= COMPANY_MAX_STAFF;
@@ -539,6 +568,54 @@ export function BusinessHubView({
                           {isMaxLevel ? t.maxLevelReached : `$${upgradeCost.toLocaleString()}`}
                         </p>
                       </div>
+                    </div>
+
+                    <div className="rounded-xl border border-cyan-400/15 bg-[#0B111A] p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-bold text-cyan-200">{language === 'ar' ? 'خزينة الأرباح' : 'Profit Vault'}</p>
+                          <p className="text-[11px] text-[#9299A6]">{language === 'ar' ? `المستوى ${vaultLevel} من ${COMPANY_VAULT_MAX_LEVEL}` : `Level ${vaultLevel} of ${COMPANY_VAULT_MAX_LEVEL}`}</p>
+                        </div>
+                        <p className="font-mono-num text-sm font-bold text-[#F4F5F7]">
+                          ${accrued.toLocaleString()} / ${vaultCapacity.toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="h-2.5 rounded-full bg-[#202938] overflow-hidden">
+                        <div className="h-full rounded-full bg-cyan-400 transition-all" style={{ width: `${vaultProgress}%` }} />
+                      </div>
+                      <div className="flex justify-between text-[11px] text-[#9299A6]">
+                        <span>{language === 'ar' ? 'السعة المستخدمة' : 'Capacity used'}</span>
+                        <span>{vaultProgress.toFixed(1)}%</span>
+                      </div>
+                      {vaultUpgrade ? (
+                        <div className="space-y-2 border-t border-white/8 pt-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-semibold text-[#F4F5F7]">{language === 'ar' ? `تطوير الخزينة إلى المستوى ${vaultLevel + 1}` : `Upgrade vault to level ${vaultLevel + 1}`}</p>
+                            <span className="text-xs font-mono-num text-amber-300">${vaultUpgrade.cost.toLocaleString()} $</span>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {Object.entries(vaultUpgrade.materials).map(([itemId, qty]) => {
+                              const item = ITEM_MAP[itemId];
+                              const owned = invMap.get(itemId) || 0;
+                              return (
+                                <span key={itemId} className={`rounded-lg px-2 py-1 text-[11px] ${owned >= qty ? 'bg-emerald-500/10 text-emerald-300' : 'bg-rose-500/10 text-rose-300'}`}>
+                                  {language === 'ar' ? item?.nameAr : item?.nameEn}: {owned}/{qty}
+                                </span>
+                              );
+                            })}
+                          </div>
+                          <button
+                            type="button"
+                            disabled={(wallet?.balance ?? 0) < vaultUpgrade.cost || !vaultMaterialsAvailable || busyKey === `vault_${c.id}`}
+                            onClick={() => handleUpgradeCompanyVault(c.id)}
+                            className="w-full min-h-[40px] rounded-xl bg-cyan-700/80 hover:bg-cyan-600 text-white text-xs font-semibold disabled:opacity-40 transition-colors"
+                          >
+                            {language === 'ar' ? 'تطوير الخزينة' : 'Upgrade Vault'}
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="text-xs font-semibold text-emerald-300">{language === 'ar' ? 'وصلت الخزينة إلى أقصى مستوى' : 'Maximum vault level reached'}</p>
+                      )}
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2.5">
