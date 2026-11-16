@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MANUFACTURING_RECIPES } from '../data/catalog';
+import { ITEM_MAP, MANUFACTURING_RECIPES } from '../data/catalog';
 import {
   calculateAccruedPayout,
   calculateCompanyHourlyNet,
@@ -164,12 +164,14 @@ describe('NEXORA Core Economy & Security Invariants', () => {
       priceMultiplier: 0.1,
     }));
 
-    const base = calculateDynamicItemPrice('microchips', 100, [], 1_000);
+    // Compare against the unrounded supply-adjusted reference so the event
+    // multiplier is bounded before the final integer rounding in production.
+    const supplyAdjustedPrice = ITEM_MAP.microchips.basePrice * 1.05;
     const high = calculateDynamicItemPrice('microchips', 100, extremeHigh, 1_000);
     const low = calculateDynamicItemPrice('microchips', 100, extremeLow, 1_000);
 
-    expect(high).toBeLessThanOrEqual(Math.round(base * 1.45));
-    expect(low).toBeGreaterThanOrEqual(Math.round(base * 0.7));
+    expect(high).toBeLessThanOrEqual(Math.round(supplyAdjustedPrice * 1.45));
+    expect(low).toBeGreaterThanOrEqual(Math.round(supplyAdjustedPrice * 0.7));
   });
 
   it('clamps market tax even when world events apply extreme modifiers', () => {
