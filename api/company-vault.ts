@@ -159,6 +159,19 @@ class FirestoreRest {
     return response.data as T;
   }
 
+  async getDocument(path: string): Promise<Data | null> {
+    const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/${DATABASE_ID}/documents/${path}`;
+    try {
+      const response = await this.authClient.fetch(url, { method: 'GET' });
+      const document = response.data as RestDocument;
+      return decodeDocument(document);
+    } catch (error) {
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      if (status === 404) return null;
+      throw error;
+    }
+  }
+
   async begin(): Promise<string> {
     const result = await this.request<{ transaction?: string }>('beginTransaction', { options: { readWrite: {} } });
     if (!result.transaction) throw new Error('FIRESTORE_TRANSACTION_START_FAILED');
@@ -450,7 +463,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
   const body = req.body && typeof req.body === 'object' ? req.body as Record<string, unknown> : {};
   const action = body.action;
   const companyId = typeof body.companyId === 'string' ? body.companyId.trim() : '';
-  if ((action !== 'upgrade' && action !== 'collect') || !companyId || companyId.length > 128) {
+  if (
+    (action !== 'health' && action !== 'upgrade' && action !== 'collect') ||
+    (action !== 'health' && (!companyId || companyId.length > 128))
+  ) {
     res.status(400).json({ error: 'INVALID_ARGUMENT' });
     return;
   }
@@ -458,6 +474,17 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
   try {
     const uid = await verifyPlayer(req);
     const db = firestoreForRequest(req);
+    if (action === 'health') {
+      const profile = await db.getDocument(`profiles/${uid}`);
+      res.status(200).json({
+        ok: true,
+        firebaseAuthVerified: true,
+        wifConnected: true,
+        firestoreReadable: true,
+        profileDocumentExists: Boolean(profile),
+      });
+      return;
+    }
     const result = action === 'upgrade'
       ? await upgradeVault(db, uid, companyId)
       : await collectVault(db, uid, companyId);
