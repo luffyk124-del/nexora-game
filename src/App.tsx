@@ -41,6 +41,9 @@ function NexoraAppContent() {
         language={game.language}
         onLanguageChange={game.setLanguageLocal}
         onLogin={game.loginWithGoogle}
+        onLoginWithEmail={game.loginWithEmail}
+        onRegisterWithEmail={game.registerWithEmail}
+        onGuestLogin={game.loginAsGuest}
       />
     );
   }
@@ -54,6 +57,10 @@ function NexoraAppContent() {
         language={game.language}
         onLanguageChange={game.setLanguageLocal}
         onLogin={game.loginWithGoogle}
+        onLoginWithEmail={game.loginWithEmail}
+        onRegisterWithEmail={game.registerWithEmail}
+        onGuestLogin={game.loginAsGuest}
+        isGuest={game.authUser.isAnonymous}
       />
     );
   }
