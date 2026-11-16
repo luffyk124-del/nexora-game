@@ -56,6 +56,16 @@ export function AuthOnboardingView({
           language === 'ar'
             ? 'تعذر الاتصال بالشبكة. تحقق من اتصالك بالإنترنت.'
             : 'Network error. Check your internet connection and retry.';
+      } else if (code === 'auth/unauthorized-domain') {
+        msg =
+          language === 'ar'
+            ? 'نطاق اللعبة غير مضاف إلى النطاقات المسموح بها في Firebase Authentication.'
+            : 'This game domain is not authorized in Firebase Authentication.';
+      } else if (code === 'auth/operation-not-allowed') {
+        msg =
+          language === 'ar'
+            ? 'تسجيل الدخول عبر Google غير مفعّل في إعدادات Firebase.'
+            : 'Google sign-in is not enabled in Firebase Authentication.';
       } else {
         msg =
           language === 'ar'
