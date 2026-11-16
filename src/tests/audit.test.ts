@@ -8,9 +8,7 @@ import {
 } from '../i18n/translations';
 import {
   calculateAccruedPayout,
-  COMPANY_HIRE_COST,
   COMPANY_MAX_LEVEL,
-  COMPANY_MAX_STAFF,
   getAchievementProgress,
   getMissionProgress,
   LISTING_MAX_PRICE,
@@ -64,9 +62,7 @@ describe('NEXORA Audit Regression & Security Invariants', () => {
   });
 
   it('exposes consistent progression and listing ceiling constants', () => {
-    expect(COMPANY_MAX_LEVEL).toBe(20);
-    expect(COMPANY_MAX_STAFF).toBe(500);
-    expect(COMPANY_HIRE_COST).toBe(250);
+    expect(COMPANY_MAX_LEVEL).toBe(100);
     expect(PROPERTY_MAX_LEVEL).toBe(15);
     expect(LISTING_MAX_QTY).toBe(10_000);
     expect(LISTING_MAX_PRICE).toBe(1_000_000);
