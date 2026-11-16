@@ -162,11 +162,11 @@ describe('NEXORA Core Economy & Security Invariants', () => {
 
   it('calculates company hourly net profit with Management and Finance skills', () => {
     const base = calculateCompanyHourlyNet(
-      { baseRevenuePerHour: 200, expensePerHour: 60, level: 1, employeesCount: 3 },
+      { baseRevenuePerHour: 200, expensePerHour: 60, level: 1 },
       { management: 0, finance: 0 }
     );
     const skilled = calculateCompanyHourlyNet(
-      { baseRevenuePerHour: 200, expensePerHour: 60, level: 2, employeesCount: 5 },
+      { baseRevenuePerHour: 200, expensePerHour: 60, level: 2 },
       { management: 3, finance: 4 }
     );
     expect(skilled.netHourly).toBeGreaterThan(base.netHourly);
