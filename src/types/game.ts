@@ -70,6 +70,7 @@ export type TransactionType =
   | 'company_upgrade'
   | 'company_collect'
   | 'company_hire'
+  | 'company_vault_upgrade'
   | 'property_buy'
   | 'property_upgrade'
   | 'property_collect'
