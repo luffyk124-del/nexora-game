@@ -443,11 +443,15 @@ export const COMPANY_VAULT_UPGRADES = [
 ] as const;
 
 export function getCompanyVaultLevel(company: { vaultLevel?: number }): number {
-  return Math.max(1, Math.min(COMPANY_VAULT_MAX_LEVEL, Math.floor(company.vaultLevel || 1)));
+  const rawLevel = company.vaultLevel;
+  if (typeof rawLevel !== 'number' || !Number.isFinite(rawLevel)) return 1;
+  return Math.max(1, Math.min(COMPANY_VAULT_MAX_LEVEL, Math.floor(rawLevel)));
 }
 
 export function getCompanyVaultCapacity(level: number): number {
-  return COMPANY_VAULT_CAPACITIES[Math.max(0, Math.min(COMPANY_VAULT_MAX_LEVEL - 1, level - 1))];
+  const safeLevel = Number.isFinite(level) ? Math.floor(level) : 1;
+  const index = Math.max(0, Math.min(COMPANY_VAULT_MAX_LEVEL - 1, safeLevel - 1));
+  return COMPANY_VAULT_CAPACITIES[index];
 }
 
 export function calculateCompanyVaultBalance(
@@ -456,11 +460,16 @@ export function calculateCompanyVaultBalance(
   nowMs: number
 ): number {
   const level = getCompanyVaultLevel(company);
-  const stored = Math.max(0, Number(company.vaultBalance || 0));
-  const lastMs = timestampToMs(company.lastCollectedAt, nowMs);
-  const elapsedMs = Math.max(0, nowMs - lastMs);
-  const accrued = netPerHour > 0 ? Math.floor((netPerHour * elapsedMs) / 3_600_000) : 0;
-  return Math.min(getCompanyVaultCapacity(level), stored + Math.max(0, accrued));
+  const capacity = getCompanyVaultCapacity(level);
+  const safeNowMs = Number.isFinite(nowMs) ? nowMs : 0;
+  const stored = typeof company.vaultBalance === 'number' && Number.isFinite(company.vaultBalance)
+    ? Math.max(0, company.vaultBalance)
+    : 0;
+  const lastMs = timestampToMs(company.lastCollectedAt, safeNowMs);
+  const elapsedMs = Math.max(0, safeNowMs - lastMs);
+  const safeNetPerHour = Number.isFinite(netPerHour) ? Math.max(0, netPerHour) : 0;
+  const accrued = Math.floor((safeNetPerHour * elapsedMs) / 3_600_000);
+  return Math.min(capacity, stored + Math.max(0, accrued));
 }
 
 export const COMPANY_MAX_LEVEL = 20;
