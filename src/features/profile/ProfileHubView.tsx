@@ -1,5 +1,7 @@
-import { Activity, Award, Globe, Lightbulb, LogOut, MessageSquareWarning, ShieldCheck, Sliders, Trophy, Volume2, Zap } from 'lucide-react';
+import { Activity, Award, Globe, Lightbulb, LogOut, MessageSquareWarning, ShieldCheck, Sliders, Trash2, Trophy, Volume2, Zap } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { EmailAuthProvider, reauthenticateWithCredential, reauthenticateWithPopup } from 'firebase/auth';
+import { auth, googleAuthProvider } from '../../lib/firebase';
 import { useToast } from '../../components/ui/ToastProvider';
 import { ACHIEVEMENTS, AVATARS, MISSIONS, SKILL_DEFINITIONS } from '../../data/catalog';
 import { formatMissionCategory, useTranslations } from '../../i18n/translations';
@@ -70,6 +72,9 @@ export function ProfileHubView({
   }>({ players: [], companies: [], organizations: [] });
   const [lbLoading, setLbLoading] = useState(false);
   const [lbError, setLbError] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
   const [feedbackBusy, setFeedbackBusy] = useState(false);
   const [musicVolume, setMusicVolume] = useState(() => {
@@ -184,6 +189,49 @@ export function ProfileHubView({
   }
 
 
+
+  async function handleDeleteAccount() {
+    const user = auth.currentUser;
+    if (!user) return;
+    const providers = user.providerData.map((provider) => provider.providerId);
+    if (!user.isAnonymous && providers.includes('password') && !deletePassword) {
+      showToast(language === 'ar' ? 'أدخل كلمة المرور لتأكيد هويتك.' : 'Enter your password to confirm your identity.', 'error');
+      return;
+    }
+    setDeleteBusy(true);
+    try {
+      if (user.isAnonymous) {
+        // A newly-created anonymous session is already the active identity.
+      } else if (providers.includes('password') && user.email) {
+        await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, deletePassword));
+      } else if (providers.includes('google.com')) {
+        await reauthenticateWithPopup(user, googleAuthProvider);
+      } else {
+        throw new Error('REAUTHENTICATION_REQUIRED');
+      }
+      const token = await user.getIdToken(true);
+      const response = await fetch('/api/account-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ confirm: true }),
+      });
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(result.error || 'ACCOUNT_DELETE_FAILED');
+      setDeleteConfirmOpen(false);
+      showToast(language === 'ar' ? 'تم حذف الحساب وبيانات اللعب.' : 'Your account and game data have been deleted.', 'success');
+      await onLogout();
+    } catch (error) {
+      const code = error instanceof Error ? error.message : '';
+      const message = code === 'LEADER_MUST_TRANSFER'
+        ? (language === 'ar' ? 'انقل قيادة منظمتك أولاً قبل حذف الحساب.' : 'Transfer your organization leadership before deleting this account.')
+        : code === 'REAUTHENTICATION_REQUIRED' || code.includes('auth/requires-recent-login')
+        ? (language === 'ar' ? 'سجّل الدخول من جديد ثم أعد محاولة الحذف.' : 'Sign in again, then retry account deletion.')
+        : (language === 'ar' ? 'تعذر حذف الحساب بالكامل. لم يتم تأكيد الحذف.' : 'Account deletion could not be completed. No success was reported.');
+      showToast(message, 'error');
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
 
   async function handleFeedbackSubmit(type: 'issue' | 'suggestion') {
     const message = feedbackText.trim();
@@ -782,6 +830,35 @@ export function ProfileHubView({
               </button>
             </div>
           </section>
+
+          <div className="flex items-center justify-between gap-3 border-b border-white/8 py-3">
+            <div className="flex items-center gap-2.5">
+              <Trash2 className="h-4 w-4 text-[#E04455]" />
+              <div>
+                <p className="text-sm font-semibold text-[#F4F5F7]">{language === 'ar' ? 'حذف الحساب' : 'Delete account'}</p>
+                <p className="text-[11px] text-[#9299A6]">{language === 'ar' ? 'حذف نهائي لبيانات اللعب والحساب.' : 'Permanently delete your game data and account.'}</p>
+              </div>
+            </div>
+            <button type="button" onClick={() => setDeleteConfirmOpen(true)} className="min-h-[38px] rounded-lg border border-[#B91C32]/50 px-3 text-xs font-semibold text-[#F1A0A8] hover:bg-[#B91C32]/10">
+              {language === 'ar' ? 'حذف' : 'Delete'}
+            </button>
+          </div>
+
+          {deleteConfirmOpen && (
+            <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/75 p-0 backdrop-blur-sm sm:items-center sm:p-4" role="dialog" aria-modal="true">
+              <div className="w-full max-w-md space-y-4 rounded-t-3xl border border-white/10 bg-[#141821] p-6 sm:rounded-2xl">
+                <h3 className="text-lg font-bold text-[#F4F5F7]">{language === 'ar' ? 'تأكيد حذف الحساب نهائياً' : 'Confirm permanent account deletion'}</h3>
+                <p className="text-sm leading-relaxed text-[#9299A6]">{language === 'ar' ? 'سيتم حذف حساب الدخول وملف اللاعب والمحفظة والشركات والممتلكات وسجلات اللعب المرتبطة به. لا يمكن التراجع عن هذه العملية.' : 'Your sign-in account, player profile, wallet, companies, properties and associated game records will be deleted. This cannot be undone.'}</p>
+                {!auth.currentUser?.isAnonymous && auth.currentUser?.providerData.some((provider) => provider.providerId === 'password') && (
+                  <input type="password" value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} autoComplete="current-password" placeholder={language === 'ar' ? 'كلمة المرور لتأكيد الهوية' : 'Password to confirm identity'} className="min-h-[44px] w-full rounded-xl border border-white/10 bg-[#0B0D12] px-3 text-sm text-[#F4F5F7]" />
+                )}
+                <div className="flex gap-3">
+                  <button type="button" disabled={deleteBusy} onClick={() => { setDeleteConfirmOpen(false); setDeletePassword(''); }} className="min-h-[44px] flex-1 rounded-xl bg-[#1B2230] text-sm font-semibold text-[#F4F5F7] disabled:opacity-50">{language === 'ar' ? 'إلغاء' : 'Cancel'}</button>
+                  <button type="button" disabled={deleteBusy} onClick={handleDeleteAccount} className="min-h-[44px] flex-1 rounded-xl bg-[#B91C32] text-sm font-semibold text-white disabled:opacity-50">{deleteBusy ? '...' : (language === 'ar' ? 'حذف نهائي' : 'Delete permanently')}</button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {isOwnerAuthorized && (
             <div className="pt-2 border-t border-white/8 flex items-center justify-between gap-3">
