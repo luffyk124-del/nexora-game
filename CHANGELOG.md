@@ -1,4 +1,9 @@
 ## [Unreleased] - 2026-11-16
+### Google Sign-In Reliability
+- Changed Google authentication to prefer signInWithPopup on mobile and desktop, retaining redirect only as a fallback when the browser blocks pop-ups. This targets mobile redirect-session restoration failures; live sign-in verification is still pending.
+
+### Deployment Workflow Cleanup
+- Removed the obsolete manual Cloud Functions company-vault deployment workflow. The client now calls the authenticated Vercel /api/company-vault endpoint, so the old workflow could redeploy superseded callables and depended on a legacy service-account JSON secret.
 ### Vercel Workload Identity Backend
 - Added an authenticated Vercel API route for company vault upgrades and revenue collection, using Vercel OIDC with Google Workload Identity Federation and short-lived service-account impersonation tokens.
 - Added Firebase ID-token signature/issuer/audience verification and Firestore REST transactions against the dedicated named database; no service-account JSON key or new Firebase billing plan is used.
