@@ -758,7 +758,7 @@ export function OrganizationHubView({
                 );
               })}
             </div>
-          </div>}
+          </div></div>}
           </div>
         </div>
 
