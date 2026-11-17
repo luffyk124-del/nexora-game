@@ -1151,3 +1151,275 @@ export const settleExpiredCompanyAuctions = onSchedule(
     }
   }
 );
+
+
+type SocialProfile = {
+  username?: string;
+  usernameLower?: string;
+  avatarId?: string;
+  title?: string;
+  level?: number;
+  reputation?: number;
+  influence?: number;
+  orgId?: string | null;
+};
+type SocialMember = { role?: string; permissions?: string[] };
+type SocialOrganization = {
+  id: string; name: string; tag: string; leaderUid: string; memberCount: number;
+  level: number; memberCapacity?: number;
+};
+
+function cleanChatText(value: unknown, maxLength: number): string {
+  if (typeof value !== 'string') return '';
+  return value.replace(/[<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+}
+
+async function assertChatCooldown(tx: FirebaseFirestore.Transaction, uid: string, channel: 'dm' | 'global', cooldownMs: number) {
+  const ref = db.doc('chat_rate_limits/' + channel + '_' + uid);
+  const snap = await tx.get(ref);
+  const lastSent = snap.exists ? timestampMillis(snap.data()?.lastSentAt, 0) : 0;
+  if (Date.now() - lastSent < cooldownMs) throw new HttpsError('resource-exhausted', 'CHAT_RATE_LIMIT');
+  return ref;
+}
+
+export const searchPlayersSecure = onCall(
+  { region: 'us-central1', maxInstances: 20 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+    const prefix = cleanChatText(request.data?.prefix, 24).toLowerCase();
+    if (prefix.length < 2) return { players: [] };
+    const snapshot = await db.collection('profiles')
+      .orderBy('usernameLower')
+      .startAt(prefix)
+      .endAt(prefix + '\uf8ff')
+      .limit(15)
+      .get();
+    return {
+      players: snapshot.docs
+        .filter((docSnap) => docSnap.id !== request.auth!.uid)
+        .map((docSnap) => {
+          const data = docSnap.data() as SocialProfile;
+          return {
+            uid: docSnap.id,
+            username: typeof data.username === 'string' ? data.username : 'Player',
+            avatarId: typeof data.avatarId === 'string' ? data.avatarId : 'default',
+            title: typeof data.title === 'string' ? data.title : '',
+            level: Math.max(1, Number(data.level) || 1),
+            reputation: Math.max(0, Number(data.reputation) || 0),
+            influence: Math.max(0, Number(data.influence) || 0),
+            orgId: typeof data.orgId === 'string' ? data.orgId : null,
+          };
+        }),
+    };
+  }
+);
+
+export const openDirectConversationSecure = onCall(
+  { region: 'us-central1', maxInstances: 20 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    const targetUid = typeof request.data?.targetUid === 'string' ? request.data.targetUid.trim() : '';
+    if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+    if (!targetUid || targetUid === uid || targetUid.length > 128) throw new HttpsError('invalid-argument', 'INVALID_TARGET');
+    const participants = [uid, targetUid].sort();
+    const conversationId = 'dm_' + participants.join('_');
+    const conversationRef = db.doc('conversations/' + conversationId);
+    return db.runTransaction(async (tx) => {
+      const [senderSnap, targetSnap, conversationSnap] = await Promise.all([
+        tx.get(db.doc('profiles/' + uid)),
+        tx.get(db.doc('profiles/' + targetUid)),
+        tx.get(conversationRef),
+      ]);
+      if (!senderSnap.exists || !targetSnap.exists) throw new HttpsError('not-found', 'PLAYER_NOT_FOUND');
+      if (!conversationSnap.exists) {
+        const sender = senderSnap.data() as SocialProfile;
+        const target = targetSnap.data() as SocialProfile;
+        const names: Record<string, string> = {};
+        const avatars: Record<string, string> = {};
+        names[uid] = typeof sender.username === 'string' ? sender.username : 'Player';
+        names[targetUid] = typeof target.username === 'string' ? target.username : 'Player';
+        avatars[uid] = typeof sender.avatarId === 'string' ? sender.avatarId : 'default';
+        avatars[targetUid] = typeof target.avatarId === 'string' ? target.avatarId : 'default';
+        tx.create(conversationRef, {
+          id: conversationId, participants, participantNames: names, participantAvatars: avatars,
+          lastMessage: '', lastMessageAt: FieldValue.serverTimestamp(), lastSenderUid: '',
+          createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+        });
+      } else {
+        const existing = conversationSnap.data()!;
+        if (!Array.isArray(existing.participants) || !participants.every((id) => existing.participants.includes(id))) {
+          throw new HttpsError('permission-denied', 'CONVERSATION_ACCESS_DENIED');
+        }
+      }
+      return { conversationId };
+    });
+  }
+);
+
+export const sendDirectMessageSecure = onCall(
+  { region: 'us-central1', maxInstances: 30 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    const targetUid = typeof request.data?.targetUid === 'string' ? request.data.targetUid.trim() : '';
+    const messageText = cleanChatText(request.data?.text, 1000);
+    if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+    if (!targetUid || targetUid === uid || targetUid.length > 128 || !messageText) throw new HttpsError('invalid-argument', 'INVALID_MESSAGE');
+    const participants = [uid, targetUid].sort();
+    const conversationId = 'dm_' + participants.join('_');
+    const conversationRef = db.doc('conversations/' + conversationId);
+    const senderProfileRef = db.doc('profiles/' + uid);
+    const targetProfileRef = db.doc('profiles/' + targetUid);
+    const rateRef = db.doc('chat_rate_limits/dm_' + uid);
+    const messageRef = conversationRef.collection('messages').doc('msg_' + randomUUID());
+
+    await db.runTransaction(async (tx) => {
+      const [senderSnap, targetSnap, conversationSnap, rateSnap] = await Promise.all([
+        tx.get(senderProfileRef), tx.get(targetProfileRef), tx.get(conversationRef), tx.get(rateRef),
+      ]);
+      if (!senderSnap.exists || !targetSnap.exists) throw new HttpsError('not-found', 'PLAYER_NOT_FOUND');
+      const lastSent = rateSnap.exists ? timestampMillis(rateSnap.data()?.lastSentAt, 0) : 0;
+      if (Date.now() - lastSent < 1_000) throw new HttpsError('resource-exhausted', 'CHAT_RATE_LIMIT');
+      const sender = senderSnap.data() as SocialProfile;
+      const target = targetSnap.data() as SocialProfile;
+      const names: Record<string, string> = {};
+      const avatars: Record<string, string> = {};
+      names[uid] = typeof sender.username === 'string' ? sender.username : 'Player';
+      names[targetUid] = typeof target.username === 'string' ? target.username : 'Player';
+      avatars[uid] = typeof sender.avatarId === 'string' ? sender.avatarId : 'default';
+      avatars[targetUid] = typeof target.avatarId === 'string' ? target.avatarId : 'default';
+      if (conversationSnap.exists) {
+        const existing = conversationSnap.data()!;
+        if (!Array.isArray(existing.participants) || !participants.every((id) => existing.participants.includes(id))) {
+          throw new HttpsError('permission-denied', 'CONVERSATION_ACCESS_DENIED');
+        }
+        tx.update(conversationRef, {
+          lastMessage: messageText.slice(0, 120),
+          lastMessageAt: FieldValue.serverTimestamp(),
+          lastSenderUid: uid,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      } else {
+        tx.create(conversationRef, {
+          id: conversationId, participants, participantNames: names, participantAvatars: avatars,
+          lastMessage: messageText.slice(0, 120), lastMessageAt: FieldValue.serverTimestamp(),
+          lastSenderUid: uid, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+      tx.create(messageRef, {
+        id: messageRef.id, senderUid: uid, senderName: names[uid],
+        text: messageText, createdAt: FieldValue.serverTimestamp(),
+      });
+      tx.set(rateRef, { lastSentAt: FieldValue.serverTimestamp() }, { merge: true });
+    });
+    return { ok: true };
+  }
+);
+
+export const sendGlobalChatMessageSecure = onCall(
+  { region: 'us-central1', maxInstances: 30 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    const messageText = cleanChatText(request.data?.text, 280);
+    if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+    if (!messageText) throw new HttpsError('invalid-argument', 'EMPTY_MESSAGE');
+    const profileRef = db.doc('profiles/' + uid);
+    const rateRef = db.doc('chat_rate_limits/global_' + uid);
+    const messageRef = db.collection('global_chat_messages').doc('gmsg_' + randomUUID());
+    await db.runTransaction(async (tx) => {
+      const [profileSnap, rateSnap] = await Promise.all([tx.get(profileRef), tx.get(rateRef)]);
+      if (!profileSnap.exists) throw new HttpsError('not-found', 'PROFILE_NOT_FOUND');
+      const lastSent = rateSnap.exists ? timestampMillis(rateSnap.data()?.lastSentAt, 0) : 0;
+      if (Date.now() - lastSent < 3_000) throw new HttpsError('resource-exhausted', 'CHAT_RATE_LIMIT');
+      const profile = profileSnap.data() as SocialProfile;
+      tx.create(messageRef, {
+        id: messageRef.id, senderUid: uid,
+        senderName: typeof profile.username === 'string' ? profile.username : 'Player',
+        avatarId: typeof profile.avatarId === 'string' ? profile.avatarId : 'default',
+        text: messageText, createdAt: FieldValue.serverTimestamp(),
+      });
+      tx.set(rateRef, { lastSentAt: FieldValue.serverTimestamp() }, { merge: true });
+    });
+    return { ok: true };
+  }
+);
+
+export const invitePlayerToOrganizationSecure = onCall(
+  { region: 'us-central1', maxInstances: 20 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    const targetUid = typeof request.data?.targetUid === 'string' ? request.data.targetUid.trim() : '';
+    if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+    if (!targetUid || targetUid === uid || targetUid.length > 128) throw new HttpsError('invalid-argument', 'INVALID_TARGET');
+    const profileSnap = await db.doc('profiles/' + uid).get();
+    const orgId = typeof profileSnap.data()?.orgId === 'string' ? profileSnap.data()!.orgId as string : '';
+    if (!orgId) throw new HttpsError('failed-precondition', 'NOT_IN_ORG');
+    const memberRef = db.doc('organization_members/' + orgId + '_' + uid);
+    const orgRef = db.doc('organizations/' + orgId);
+    const targetRef = db.doc('profiles/' + targetUid);
+    const inviteRef = db.doc('organization_invites/' + orgId + '_' + targetUid);
+    return db.runTransaction(async (tx) => {
+      const [memberSnap, orgSnap, targetSnap, inviteSnap] = await Promise.all([
+        tx.get(memberRef), tx.get(orgRef), tx.get(targetRef), tx.get(inviteRef),
+      ]);
+      if (!memberSnap.exists || !orgSnap.exists || !targetSnap.exists) throw new HttpsError('not-found', 'NOT_FOUND');
+      const member = memberSnap.data() as SocialMember;
+      const org = orgSnap.data() as SocialOrganization;
+      const canInvite = member.role === 'leader' || member.role === 'deputy' ||
+        (Array.isArray(member.permissions) && member.permissions.includes('manage_members'));
+      if (!canInvite) throw new HttpsError('permission-denied', 'INVITE_PERMISSION_REQUIRED');
+      const target = targetSnap.data() as SocialProfile;
+      if (target.orgId) throw new HttpsError('failed-precondition', 'TARGET_ALREADY_IN_ORG');
+      if (inviteSnap.exists && inviteSnap.data()?.status === 'pending') throw new HttpsError('already-exists', 'INVITE_ALREADY_PENDING');
+      tx.set(inviteRef, {
+        id: inviteRef.id, orgId, orgName: org.name, orgTag: org.tag,
+        targetUid, inviterUid: uid,
+        inviterName: typeof profileSnap.data()?.username === 'string' ? profileSnap.data()!.username : 'Player',
+        status: 'pending', createdAt: FieldValue.serverTimestamp(),
+      });
+      return { ok: true };
+    });
+  }
+);
+
+export const respondOrganizationInviteSecure = onCall(
+  { region: 'us-central1', maxInstances: 20 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    const inviteId = typeof request.data?.inviteId === 'string' ? request.data.inviteId.trim() : '';
+    const response = request.data?.response;
+    if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+    if (!inviteId || inviteId.length > 160 || !['accept', 'decline'].includes(response)) {
+      throw new HttpsError('invalid-argument', 'INVALID_ARGUMENT');
+    }
+    return db.runTransaction(async (tx) => {
+      const inviteRef = db.doc('organization_invites/' + inviteId);
+      const inviteSnap = await tx.get(inviteRef);
+      if (!inviteSnap.exists) throw new HttpsError('not-found', 'INVITE_NOT_FOUND');
+      const invite = inviteSnap.data()!;
+      if (invite.targetUid !== uid || invite.status !== 'pending') throw new HttpsError('permission-denied', 'INVITE_NOT_AVAILABLE');
+      if (response === 'decline') {
+        tx.update(inviteRef, { status: 'rejected', respondedAt: FieldValue.serverTimestamp() });
+        return { ok: true, status: 'rejected' };
+      }
+      const orgId = typeof invite.orgId === 'string' ? invite.orgId : '';
+      const orgRef = db.doc('organizations/' + orgId);
+      const profileRef = db.doc('profiles/' + uid);
+      const memberRef = db.doc('organization_members/' + orgId + '_' + uid);
+      const [orgSnap, profileSnap, memberSnap] = await Promise.all([tx.get(orgRef), tx.get(profileRef), tx.get(memberRef)]);
+      if (!orgSnap.exists || !profileSnap.exists) throw new HttpsError('not-found', 'ORG_OR_PROFILE_NOT_FOUND');
+      const org = orgSnap.data() as SocialOrganization;
+      const profile = profileSnap.data() as SocialProfile;
+      if (profile.orgId || memberSnap.exists) throw new HttpsError('failed-precondition', 'ALREADY_IN_ORG');
+      const capacity = typeof org.memberCapacity === 'number' ? org.memberCapacity : Math.min(70, 20 + (org.level - 1) * 5);
+      if (org.memberCount >= capacity) throw new HttpsError('resource-exhausted', 'ORG_FULL');
+      tx.create(memberRef, {
+        orgId, uid, username: typeof profile.username === 'string' ? profile.username : 'Player',
+        role: 'member', permissions: [], joinedAt: FieldValue.serverTimestamp(),
+      });
+      tx.update(profileRef, { orgId, updatedAt: FieldValue.serverTimestamp() });
+      tx.update(orgRef, { memberCount: org.memberCount + 1, updatedAt: FieldValue.serverTimestamp() });
+      tx.update(inviteRef, { status: 'accepted', respondedAt: FieldValue.serverTimestamp() });
+      return { ok: true, status: 'accepted' };
+    });
+  }
+);
