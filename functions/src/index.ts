@@ -1764,3 +1764,25 @@ export const updatePlayerReportAdmin = onCall(
     return { ok: true };
   }
 );
+
+export const listPlayerReportAuditAdmin = onCall(
+  { region: 'us-central1', maxInstances: 10, timeoutSeconds: 30 },
+  async (request) => {
+    await requireReportsAdmin(request);
+    const limit = Math.max(1, Math.min(100, Number(request.data?.limit) || 50));
+    const snapshot = await db.collection('player_report_audit').orderBy('createdAt', 'desc').limit(limit).get();
+    return {
+      entries: snapshot.docs.map((item) => {
+        const data = item.data();
+        return {
+          id: item.id,
+          reportId: typeof data.reportId === 'string' ? data.reportId : '',
+          actorUid: typeof data.actorUid === 'string' ? data.actorUid : '',
+          action: typeof data.action === 'string' ? data.action : '',
+          newStatus: typeof data.newStatus === 'string' ? data.newStatus : '',
+          createdAt: data.createdAt && typeof data.createdAt.toMillis === 'function' ? data.createdAt.toMillis() : null,
+        };
+      }),
+    };
+  }
+);
