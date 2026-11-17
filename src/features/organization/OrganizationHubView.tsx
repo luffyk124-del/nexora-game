@@ -517,6 +517,7 @@ export function OrganizationHubView({
   const upgradeHoursLeft = upgradeInProgress ? Math.ceil((currentOrg.upgradeEndsAt! - clockNow) / 3_600_000) : 0;
 
   return (
+    <>
     <div className="space-y-5">
       {/* Organization Header */}
       <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -903,6 +904,6 @@ export function OrganizationHubView({
         onConfirm={handleConfirmKick}
         onCancel={() => setKickTarget(null)}
       />
-    </div>
+    </>
   );
 }
