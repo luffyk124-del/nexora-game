@@ -714,7 +714,7 @@ export function OrganizationHubView({
           </div>}
 
           {/* Role Permissions Matrix */}
-          {activeOrgTab === 'overview' && <>
+          {activeOrgTab === 'overview' && <div className="space-y-5">
           <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-3">
             <h2 className="text-sm font-semibold text-[#F4F5F7]">{t.orgPerks}</h2>
             <div className="grid grid-cols-2 gap-2.5 text-xs">
@@ -758,7 +758,7 @@ export function OrganizationHubView({
                 );
               })}
             </div>
-          </>}
+          </div>}
           </div>
         </div>
 
