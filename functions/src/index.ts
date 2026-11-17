@@ -1509,14 +1509,18 @@ export const invitePlayerToOrganizationSecure = onCall(
     const targetUid = typeof request.data?.targetUid === 'string' ? request.data.targetUid.trim() : '';
     if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
     if (!targetUid || targetUid === uid || targetUid.length > 128) throw new HttpsError('invalid-argument', 'INVALID_TARGET');
-    const profileSnap = await db.doc('profiles/' + uid).get();
-    const orgId = typeof profileSnap.data()?.orgId === 'string' ? profileSnap.data()!.orgId as string : '';
-    if (!orgId) throw new HttpsError('failed-precondition', 'NOT_IN_ORG');
-    const memberRef = db.doc('organization_members/' + orgId + '_' + uid);
-    const orgRef = db.doc('organizations/' + orgId);
+    const inviterProfileRef = db.doc('profiles/' + uid);
     const targetRef = db.doc('profiles/' + targetUid);
-    const inviteRef = db.doc('organization_invites/' + orgId + '_' + targetUid);
     return db.runTransaction(async (tx) => {
+      const inviterProfileSnap = await tx.get(inviterProfileRef);
+      if (!inviterProfileSnap.exists) throw new HttpsError('not-found', 'PROFILE_NOT_FOUND');
+      const orgId = typeof inviterProfileSnap.data()?.orgId === 'string'
+        ? inviterProfileSnap.data()!.orgId as string
+        : '';
+      if (!orgId) throw new HttpsError('failed-precondition', 'NOT_IN_ORG');
+      const memberRef = db.doc('organization_members/' + orgId + '_' + uid);
+      const orgRef = db.doc('organizations/' + orgId);
+      const inviteRef = db.doc('organization_invites/' + orgId + '_' + targetUid);
       const [memberSnap, orgSnap, targetSnap, inviteSnap] = await Promise.all([
         tx.get(memberRef), tx.get(orgRef), tx.get(targetRef), tx.get(inviteRef),
       ]);
@@ -1532,7 +1536,7 @@ export const invitePlayerToOrganizationSecure = onCall(
       tx.set(inviteRef, {
         id: inviteRef.id, orgId, orgName: org.name, orgTag: org.tag,
         targetUid, inviterUid: uid,
-        inviterName: typeof profileSnap.data()?.username === 'string' ? profileSnap.data()!.username : 'Player',
+        inviterName: typeof inviterProfileSnap.data()?.username === 'string' ? inviterProfileSnap.data()!.username : 'Player',
         status: 'pending', createdAt: FieldValue.serverTimestamp(),
       });
       return { ok: true };
