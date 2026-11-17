@@ -1,0 +1,356 @@
+import { useEffect, useMemo, useState } from 'react';
+import { collection, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
+import { ArrowLeft, Globe2, MessageCircle, Search, Send, ShieldCheck, Users, UserRound } from 'lucide-react';
+import { db, functions } from '../../lib/firebase';
+import { timestampToMs } from '../../lib/economy';
+import type { Language, OrganizationMember, PlayerProfile } from '../../types/game';
+
+type PublicPlayer = {
+  uid: string;
+  username: string;
+  avatarId: string;
+  title: string;
+  level: number;
+  reputation: number;
+  influence: number;
+  orgId: string | null;
+};
+type Conversation = {
+  id: string;
+  participants: string[];
+  participantNames: Record<string, string>;
+  lastMessage: string;
+  lastMessageAt: unknown;
+  lastSenderUid: string;
+};
+type DirectMessage = { id: string; senderUid: string; senderName: string; text: string; createdAt: unknown };
+type GlobalMessage = { id: string; senderUid: string; senderName: string; avatarId: string; text: string; createdAt: unknown };
+type OrgInvite = { id: string; orgId: string; orgName: string; orgTag: string; inviterName: string; status: string; targetUid: string };
+
+interface SocialHubViewProps {
+  profile: PlayerProfile;
+  myOrgMember: OrganizationMember | null;
+  language: Language;
+}
+
+export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewProps) {
+  const ar = language === 'ar';
+  const [mode, setMode] = useState<'players' | 'messages' | 'global'>('players');
+  const [search, setSearch] = useState('');
+  const [players, setPlayers] = useState<PublicPlayer[]>([]);
+  const [selectedPlayer, setSelectedPlayer] = useState<PublicPlayer | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
+  const [directMessages, setDirectMessages] = useState<DirectMessage[]>([]);
+  const [globalMessages, setGlobalMessages] = useState<GlobalMessage[]>([]);
+  const [invites, setInvites] = useState<OrgInvite[]>([]);
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState('');
+
+  const canInvite = Boolean(myOrgMember && (
+    myOrgMember.role === 'leader' ||
+    myOrgMember.role === 'deputy' ||
+    myOrgMember.permissions.includes('manage_members')
+  ));
+
+  const selectedConversationData = conversations.find((item) => item.id === selectedConversation) || null;
+  const targetUid = selectedConversationData?.participants.find((uid) => uid !== profile.uid) || '';
+
+  useEffect(() => {
+    const prefix = search.trim().toLowerCase();
+    if (prefix.length < 2) {
+      setPlayers([]);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const searchFn = httpsCallable<{ prefix: string }, { players: PublicPlayer[] }>(functions, 'searchPlayersSecure');
+      void searchFn({ prefix }).then((result) => setPlayers(result.data.players)).catch(() => setError(ar ? 'تعذر البحث عن اللاعبين.' : 'Player search failed.'));
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [search, ar]);
+
+  useEffect(() => {
+    const unsubscribers = [
+      onSnapshot(
+        query(collection(db, 'conversations'), where('participants', 'array-contains', profile.uid), limit(50)),
+        (snapshot) => setConversations(snapshot.docs.map((item) => item.data() as Conversation).sort(
+          (a, b) => timestampToMs(b.lastMessageAt, 0) - timestampToMs(a.lastMessageAt, 0)
+        )),
+        () => setError(ar ? 'تعذر تحميل المحادثات.' : 'Could not load conversations.')
+      ),
+      onSnapshot(
+        query(collection(db, 'global_chat_messages'), orderBy('createdAt', 'desc'), limit(60)),
+        (snapshot) => setGlobalMessages(snapshot.docs.map((item) => item.data() as GlobalMessage).reverse()),
+        () => setError(ar ? 'تعذر تحميل الدردشة العامة.' : 'Could not load global chat.')
+      ),
+      onSnapshot(
+        query(collection(db, 'organization_invites'), where('targetUid', '==', profile.uid), limit(20)),
+        (snapshot) => setInvites(snapshot.docs.map((item) => item.data() as OrgInvite).filter((item) => item.status === 'pending')),
+        () => setError(ar ? 'تعذر تحميل دعوات المنظمات.' : 'Could not load organization invites.')
+      ),
+    ];
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }, [profile.uid, ar]);
+
+  useEffect(() => {
+    if (!selectedConversation) {
+      setDirectMessages([]);
+      return;
+    }
+    const messagesQuery = query(
+      collection(db, 'conversations', selectedConversation, 'messages'),
+      orderBy('createdAt', 'asc'),
+      limit(80)
+    );
+    return onSnapshot(
+      messagesQuery,
+      (snapshot) => setDirectMessages(snapshot.docs.map((item) => item.data() as DirectMessage)),
+      () => setError(ar ? 'تعذر تحميل الرسائل.' : 'Could not load messages.')
+    );
+  }, [selectedConversation, ar]);
+
+  const dateLabel = (value: unknown) => {
+    const ms = timestampToMs(value, 0);
+    if (!ms) return '';
+    return new Date(ms).toLocaleTimeString(ar ? 'ar' : 'en', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  async function openConversation(player: PublicPlayer) {
+    setBusy('open');
+    setError('');
+    try {
+      const openFn = httpsCallable<{ targetUid: string }, { conversationId: string }>(functions, 'openDirectConversationSecure');
+      const result = await openFn({ targetUid: player.uid });
+      setSelectedPlayer(player);
+      setSelectedConversation(result.data.conversationId);
+      setMode('messages');
+    } catch {
+      setError(ar ? 'تعذر فتح المحادثة.' : 'Could not open conversation.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function sendDirect() {
+    const text = draft.trim();
+    if (!text || !targetUid) return;
+    setBusy('send_dm');
+    try {
+      const sendFn = httpsCallable<{ targetUid: string; text: string }, { ok: boolean }>(functions, 'sendDirectMessageSecure');
+      await sendFn({ targetUid, text });
+      setDraft('');
+    } catch {
+      setError(ar ? 'تعذر إرسال الرسالة. انتظر قليلاً ثم حاول.' : 'Message could not be sent. Wait a moment and retry.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function sendGlobal() {
+    const text = draft.trim();
+    if (!text) return;
+    setBusy('send_global');
+    try {
+      const sendFn = httpsCallable<{ text: string }, { ok: boolean }>(functions, 'sendGlobalChatMessageSecure');
+      await sendFn({ text });
+      setDraft('');
+    } catch {
+      setError(ar ? 'تعذر إرسال الرسالة. الدردشة تحدّ الإرسال المتكرر.' : 'Message could not be sent. Chat has a short rate limit.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function invitePlayer(player: PublicPlayer) {
+    setBusy('invite');
+    try {
+      const inviteFn = httpsCallable<{ targetUid: string }, { ok: boolean }>(functions, 'invitePlayerToOrganizationSecure');
+      await inviteFn({ targetUid: player.uid });
+      setError(ar ? 'تم إرسال دعوة المنظمة.' : 'Organization invite sent.');
+    } catch {
+      setError(ar ? 'تعذر إرسال الدعوة. تحقق من صلاحيتك وحالة اللاعب.' : 'Invite failed. Check your permission and player eligibility.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function respondInvite(inviteId: string, response: 'accept' | 'decline') {
+    setBusy(inviteId);
+    try {
+      const respondFn = httpsCallable<{ inviteId: string; response: 'accept' | 'decline' }, { ok: boolean }>(functions, 'respondOrganizationInviteSecure');
+      await respondFn({ inviteId, response });
+      setInvites((previous) => previous.filter((invite) => invite.id !== inviteId));
+    } catch {
+      setError(ar ? 'تعذر معالجة الدعوة.' : 'Could not process invite.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const tabs = [
+    { id: 'players' as const, label: ar ? 'اللاعبون' : 'Players', icon: UserRound },
+    { id: 'messages' as const, label: ar ? 'الرسائل' : 'Messages', icon: MessageCircle },
+    { id: 'global' as const, label: ar ? 'الدردشة العامة' : 'Global chat', icon: Globe2 },
+  ];
+
+  return (
+    <div className="space-y-4 pb-2">
+      <header className="space-y-1">
+        <h1 className="text-xl font-bold text-[#F4F5F7]">{ar ? 'التواصل' : 'Social'}</h1>
+        <p className="text-xs text-[#9299A6]">{ar ? 'ابحث عن اللاعبين، أرسل الرسائل، وتابع الدردشة العامة.' : 'Find players, send private messages and join the global chat.'}</p>
+      </header>
+
+      {invites.length > 0 && (
+        <section className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4 space-y-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-amber-200"><ShieldCheck className="w-4 h-4" />{ar ? 'دعوات المنظمات' : 'Organization invites'}</div>
+          {invites.map((invite) => (
+            <div key={invite.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl bg-[#0B0D12]/70 p-3">
+              <p className="text-xs text-[#F4F5F7]">{invite.orgName} <span className="text-amber-200">[{invite.orgTag}]</span> · {ar ? 'من' : 'From'} {invite.inviterName}</p>
+              <div className="flex gap-2">
+                <button type="button" disabled={busy === invite.id} onClick={() => void respondInvite(invite.id, 'accept')} className="min-h-[36px] px-3 rounded-lg bg-emerald-700 text-white text-xs">{ar ? 'قبول' : 'Accept'}</button>
+                <button type="button" disabled={busy === invite.id} onClick={() => void respondInvite(invite.id, 'decline')} className="min-h-[36px] px-3 rounded-lg bg-[#252B36] text-white text-xs">{ar ? 'رفض' : 'Decline'}</button>
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
+
+      <nav className="grid grid-cols-3 gap-1 rounded-xl bg-[#141821] p-1">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          return (
+            <button key={tab.id} type="button" onClick={() => { setMode(tab.id); setError(''); }}
+              className={'min-h-[42px] flex items-center justify-center gap-1.5 rounded-lg text-xs font-semibold ' + (mode === tab.id ? 'bg-[#B91C32] text-white' : 'text-[#9299A6]')}>
+              <Icon className="w-4 h-4" />{tab.label}
+            </button>
+          );
+        })}
+      </nav>
+
+      {error && <p className="rounded-xl border border-white/10 bg-[#141821] px-3 py-2 text-xs text-[#F4C66A]">{error}</p>}
+
+      {mode === 'players' && (
+        <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="space-y-3">
+            <div className="relative">
+              <Search className="absolute start-3 top-3.5 w-4 h-4 text-[#9299A6]" />
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={ar ? 'ابحث باسم اللاعب...' : 'Search player name...'}
+                className="w-full min-h-[46px] rounded-xl border border-white/10 bg-[#141821] ps-10 pe-3 text-sm text-[#F4F5F7]" />
+            </div>
+            {players.map((player) => (
+              <button key={player.uid} type="button" onClick={() => setSelectedPlayer(player)}
+                className="w-full flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-[#141821] p-3 text-start hover:border-white/20">
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-[#F4F5F7] truncate">{player.username}</span>
+                  <span className="block mt-1 text-[11px] text-[#9299A6]">{ar ? 'المستوى' : 'Level'} {player.level} · {player.title}</span>
+                </span>
+                <span className="shrink-0 rounded-lg bg-[#0B0D12] px-2 py-1 text-xs font-mono-num text-amber-200">Lv.{player.level}</span>
+              </button>
+            ))}
+            {search.trim().length >= 2 && players.length === 0 && <p className="text-xs text-[#9299A6]">{ar ? 'لا توجد نتائج مطابقة.' : 'No matching players found.'}</p>}
+          </div>
+          <div className="rounded-2xl border border-white/8 bg-[#141821] p-5">
+            {selectedPlayer ? (
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-14 h-14 rounded-2xl bg-[#252B36] flex items-center justify-center text-xl font-bold text-amber-200">{selectedPlayer.username.slice(0, 1).toUpperCase()}</div>
+                  <div>
+                    <h2 className="text-base font-bold text-[#F4F5F7]">{selectedPlayer.username}</h2>
+                    <p className="text-xs text-[#9299A6]">{selectedPlayer.title || (ar ? 'لا يوجد لقب' : 'No title')}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-xl bg-[#0B0D12] p-3"><p className="text-[11px] text-[#9299A6]">{ar ? 'المستوى' : 'Level'}</p><p className="mt-1 text-lg font-bold">{selectedPlayer.level}</p></div>
+                  <div className="rounded-xl bg-[#0B0D12] p-3"><p className="text-[11px] text-[#9299A6]">{ar ? 'السمعة' : 'Reputation'}</p><p className="mt-1 text-lg font-bold">{selectedPlayer.reputation}</p></div>
+                  <div className="rounded-xl bg-[#0B0D12] p-3"><p className="text-[11px] text-[#9299A6]">{ar ? 'النفوذ' : 'Influence'}</p><p className="mt-1 text-lg font-bold">{selectedPlayer.influence}</p></div>
+                  <div className="rounded-xl bg-[#0B0D12] p-3"><p className="text-[11px] text-[#9299A6]">{ar ? 'المنظمة' : 'Organization'}</p><p className="mt-1 text-sm font-semibold">{selectedPlayer.orgId || (ar ? 'بدون منظمة' : 'None')}</p></div>
+                </div>
+                <button type="button" disabled={busy === 'open'} onClick={() => void openConversation(selectedPlayer)}
+                  className="w-full min-h-[44px] rounded-xl bg-[#B91C32] text-white text-sm font-semibold flex items-center justify-center gap-2">
+                  <MessageCircle className="w-4 h-4" />{ar ? 'إرسال رسالة' : 'Send message'}
+                </button>
+                {canInvite && !selectedPlayer.orgId && (
+                  <button type="button" disabled={busy === 'invite'} onClick={() => void invitePlayer(selectedPlayer)}
+                    className="w-full min-h-[44px] rounded-xl bg-[#1B2230] border border-white/10 text-[#F4F5F7] text-sm font-semibold flex items-center justify-center gap-2">
+                    <Users className="w-4 h-4" />{ar ? 'دعوة إلى المنظمة' : 'Invite to organization'}
+                  </button>
+                )}
+                {!canInvite && <p className="text-[11px] text-[#9299A6]">{ar ? 'دعوات المنظمة متاحة للقائد والنائب والمدير المخوّل فقط.' : 'Organization invites are limited to leaders, deputies and authorized managers.'}</p>}
+              </div>
+            ) : (
+              <div className="h-full min-h-48 flex flex-col items-center justify-center text-center text-[#9299A6] gap-2">
+                <UserRound className="w-8 h-8 opacity-50" /><p className="text-xs">{ar ? 'اختر لاعباً لعرض ملفه العام.' : 'Select a player to view their public profile.'}</p>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {mode === 'messages' && (
+        <section className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-3 min-h-[420px]">
+          <div className={(selectedConversation ? 'hidden lg:block ' : '') + 'rounded-2xl border border-white/8 bg-[#141821] p-3 space-y-2'}>
+            <h2 className="px-2 py-1 text-xs font-semibold text-[#9299A6]">{ar ? 'المحادثات' : 'Conversations'}</h2>
+            {conversations.map((conversation) => {
+              const otherUid = conversation.participants.find((uid) => uid !== profile.uid) || '';
+              const name = conversation.participantNames?.[otherUid] || (ar ? 'لاعب' : 'Player');
+              return (
+                <button key={conversation.id} type="button" onClick={() => setSelectedConversation(conversation.id)}
+                  className={'w-full rounded-xl p-3 text-start ' + (selectedConversation === conversation.id ? 'bg-[#252B36]' : 'hover:bg-[#1B2230]')}>
+                  <span className="block text-sm font-semibold text-[#F4F5F7]">{name}</span>
+                  <span className="block mt-1 text-[11px] text-[#9299A6] truncate">{conversation.lastMessage || (ar ? 'ابدأ المحادثة' : 'Start conversation')}</span>
+                </button>
+              );
+            })}
+            {conversations.length === 0 && <p className="px-2 py-5 text-xs text-[#9299A6]">{ar ? 'لا توجد محادثات بعد. ابحث عن لاعب لبدء محادثة.' : 'No conversations yet. Find a player to start one.'}</p>}
+          </div>
+          <div className={(selectedConversation ? '' : 'hidden lg:flex ') + 'rounded-2xl border border-white/8 bg-[#141821] p-3 flex flex-col min-h-[420px]'}>
+            {selectedConversation ? (
+              <>
+                <div className="flex items-center gap-2 border-b border-white/8 pb-3">
+                  <button type="button" onClick={() => setSelectedConversation(null)} className="lg:hidden min-h-[38px] min-w-[38px] rounded-lg bg-[#252B36] flex items-center justify-center"><ArrowLeft className="w-4 h-4" /></button>
+                  <h2 className="text-sm font-semibold">{selectedConversationData?.participantNames?.[targetUid] || (ar ? 'المحادثة' : 'Conversation')}</h2>
+                </div>
+                <div className="flex-1 min-h-[280px] max-h-[55vh] overflow-y-auto py-3 space-y-2">
+                  {directMessages.map((message) => (
+                    <div key={message.id} className={'max-w-[85%] rounded-xl p-3 text-xs ' + (message.senderUid === profile.uid ? 'ms-auto bg-[#54202B]' : 'me-auto bg-[#0B0D12]')}>
+                      <p className="mb-1 text-[10px] text-[#D2A8AF]">{message.senderName} · {dateLabel(message.createdAt)}</p>
+                      <p className="whitespace-pre-wrap break-words">{message.text}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2 pt-3 border-t border-white/8">
+                  <input value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={1000} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendDirect(); } }}
+                    placeholder={ar ? 'اكتب رسالة...' : 'Write a message...'} className="flex-1 min-w-0 min-h-[44px] rounded-xl bg-[#0B0D12] border border-white/10 px-3 text-sm" />
+                  <button type="button" disabled={!draft.trim() || busy === 'send_dm'} onClick={() => void sendDirect()} className="min-w-[44px] rounded-xl bg-[#B91C32] flex items-center justify-center disabled:opacity-40"><Send className="w-4 h-4" /></button>
+                </div>
+              </>
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center text-center text-[#9299A6] gap-2"><MessageCircle className="w-8 h-8 opacity-50" /><p className="text-xs">{ar ? 'اختر محادثة من القائمة.' : 'Choose a conversation from the list.'}</p></div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {mode === 'global' && (
+        <section className="rounded-2xl border border-white/8 bg-[#141821] p-3 flex flex-col min-h-[520px]">
+          <div className="flex items-center gap-2 border-b border-white/8 px-2 pb-3"><Globe2 className="w-4 h-4 text-amber-200" /><h2 className="text-sm font-semibold">{ar ? 'الدردشة العامة' : 'Global chat'}</h2><span className="ms-auto text-[10px] text-[#9299A6]">{ar ? 'حد الإرسال: رسالة كل 3 ثوانٍ' : 'Rate limit: one message every 3 seconds'}</span></div>
+          <div className="flex-1 min-h-[360px] max-h-[60vh] overflow-y-auto py-3 space-y-2">
+            {globalMessages.map((message) => (
+              <div key={message.id} className="rounded-xl bg-[#0B0D12] p-3">
+                <div className="flex items-center justify-between gap-2 mb-1"><span className="text-xs font-semibold text-amber-200">{message.senderName}</span><span className="text-[10px] text-[#9299A6]">{dateLabel(message.createdAt)}</span></div>
+                <p className="text-xs whitespace-pre-wrap break-words">{message.text}</p>
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-2 pt-3 border-t border-white/8">
+            <input value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={280} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void sendGlobal(); } }}
+              placeholder={ar ? 'اكتب للجميع...' : 'Message everyone...'} className="flex-1 min-w-0 min-h-[44px] rounded-xl bg-[#0B0D12] border border-white/10 px-3 text-sm" />
+            <button type="button" disabled={!draft.trim() || busy === 'send_global'} onClick={() => void sendGlobal()} className="min-w-[44px] rounded-xl bg-[#B91C32] flex items-center justify-center disabled:opacity-40"><Send className="w-4 h-4" /></button>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
