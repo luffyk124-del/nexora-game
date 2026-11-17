@@ -774,7 +774,7 @@ export function BusinessHubView({
                 <div className="grid grid-cols-2 gap-2">
                   <div className="rounded-xl bg-[#0B0D12] p-3">
                     <p className="text-[11px] text-[#9299A6]">{language === 'ar' ? 'سعر البداية' : 'Starting price'}</p>
-                    <p className="mt-1 text-sm font-semibold font-mono-num>{'
+                    <p className="mt-1 text-sm font-semibold font-mono-num">{'
         <div className="space-y-4">
           <div className="bg-[#141821] border border-white/8 rounded-2xl p-4 space-y-3">
             <div className="flex items-center justify-between gap-3">
@@ -1134,7 +1134,7 @@ export function BusinessHubView({
                   </div>
                   <div className="rounded-xl bg-[#0B0D12] p-3">
                     <p className="text-[11px] text-[#9299A6]">{language === 'ar' ? 'أعلى مزايدة' : 'Current bid'}</p>
-                    <p className="mt-1 text-sm font-semibold font-mono-num text-emerald-300>{'
+                    <p className="mt-1 text-sm font-semibold font-mono-num text-emerald-300">{'
         <div className="space-y-4">
           <div className="bg-[#141821] border border-white/8 rounded-2xl p-4 space-y-3">
             <div className="flex items-center justify-between gap-3">
