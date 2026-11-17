@@ -1482,31 +1482,9 @@ export async function updateOrgMemberRole(
 }
 
 export async function leaveOrganization(uid: string, orgId: string): Promise<void> {
-  try {
-    await runTransaction(db, async (tx) => {
-      const orgRef = doc(db, 'organizations', orgId);
-      const memberRef = doc(db, 'organization_members', `${orgId}_${uid}`);
-      const profileRef = doc(db, 'profiles', uid);
-      const [orgSnap, memberSnap] = await Promise.all([tx.get(orgRef), tx.get(memberRef)]);
-      if (!orgSnap.exists() || !memberSnap.exists()) throw new Error('NOT_FOUND');
-      const member = memberSnap.data() as OrganizationMember;
-      if (member.role === 'leader') throw new Error('LEADER_CANNOT_LEAVE');
-
-      const org = orgSnap.data() as Organization;
-      tx.delete(memberRef);
-      tx.update(orgRef, {
-        memberCount: Math.max(1, org.memberCount - 1),
-        updatedAt: serverTimestamp(),
-      });
-      tx.update(profileRef, {
-        orgId: null,
-        updatedAt: serverTimestamp(),
-      });
-    });
-  } catch (error) {
-    if (error instanceof Error && error.message === 'LEADER_CANNOT_LEAVE') throw error;
-    handleFirestoreError(error, OperationType.DELETE, `organization_members/${orgId}_${uid}`);
-  }
+  if (!uid || auth.currentUser?.uid !== uid) throw new Error('UNAUTHENTICATED');
+  const leave = httpsCallable(functions, 'leaveOrganizationSecure');
+  await leave({ orgId });
 }
 
 export async function kickOrgMember(
