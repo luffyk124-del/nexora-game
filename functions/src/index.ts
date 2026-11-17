@@ -1373,6 +1373,82 @@ export const searchPlayersSecure = onCall(
   }
 );
 
+function socialBlockRef(ownerUid: string, targetUid: string) {
+  return db.doc('user_blocks/' + ownerUid + '__' + targetUid);
+}
+
+export const listBlockedPlayersSecure = onCall(
+  { region: 'us-central1', maxInstances: 20 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+    const snapshot = await db.collection('user_blocks').where('ownerUid', '==', uid).limit(200).get();
+    return { blockedUids: snapshot.docs.map((docSnap) => docSnap.data().targetUid).filter((value): value is string => typeof value === 'string') };
+  }
+);
+
+export const blockPlayerSecure = onCall(
+  { region: 'us-central1', maxInstances: 20 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    const targetUid = typeof request.data?.targetUid === 'string' ? request.data.targetUid.trim() : '';
+    if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+    if (!targetUid || targetUid === uid || targetUid.length > 128) throw new HttpsError('invalid-argument', 'INVALID_TARGET');
+    const [ownerSnap, targetSnap] = await Promise.all([
+      db.doc('profiles/' + uid).get(), db.doc('profiles/' + targetUid).get(),
+    ]);
+    if (!ownerSnap.exists || !targetSnap.exists) throw new HttpsError('not-found', 'PLAYER_NOT_FOUND');
+    await socialBlockRef(uid, targetUid).set({
+      ownerUid: uid, targetUid, createdAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    return { ok: true };
+  }
+);
+
+export const unblockPlayerSecure = onCall(
+  { region: 'us-central1', maxInstances: 20 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    const targetUid = typeof request.data?.targetUid === 'string' ? request.data.targetUid.trim() : '';
+    if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+    if (!targetUid || targetUid === uid || targetUid.length > 128) throw new HttpsError('invalid-argument', 'INVALID_TARGET');
+    await socialBlockRef(uid, targetUid).delete();
+    return { ok: true };
+  }
+);
+
+export const reportPlayerSecure = onCall(
+  { region: 'us-central1', maxInstances: 20 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    const targetUid = typeof request.data?.targetUid === 'string' ? request.data.targetUid.trim() : '';
+    const reason = request.data?.reason;
+    const allowedReasons = ['harassment', 'spam', 'inappropriate', 'impersonation', 'other'];
+    if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+    if (!targetUid || targetUid === uid || targetUid.length > 128 || !allowedReasons.includes(reason)) {
+      throw new HttpsError('invalid-argument', 'INVALID_REPORT');
+    }
+    const targetRef = db.doc('profiles/' + targetUid);
+    const reporterRef = db.doc('profiles/' + uid);
+    const rateRef = db.doc('chat_rate_limits/report_' + uid);
+    const reportRef = db.collection('player_reports').doc('report_' + randomUUID());
+    await db.runTransaction(async (tx) => {
+      const [reporterSnap, targetSnap, rateSnap] = await Promise.all([
+        tx.get(reporterRef), tx.get(targetRef), tx.get(rateRef),
+      ]);
+      if (!reporterSnap.exists || !targetSnap.exists) throw new HttpsError('not-found', 'PLAYER_NOT_FOUND');
+      const lastReported = rateSnap.exists ? timestampMillis(rateSnap.data()?.lastSentAt, 0) : 0;
+      if (Date.now() - lastReported < 30_000) throw new HttpsError('resource-exhausted', 'REPORT_RATE_LIMIT');
+      tx.create(reportRef, {
+        id: reportRef.id, reporterUid: uid, targetUid, reason,
+        status: 'open', createdAt: FieldValue.serverTimestamp(),
+      });
+      tx.set(rateRef, { lastSentAt: FieldValue.serverTimestamp() }, { merge: true });
+    });
+    return { ok: true };
+  }
+);
+
 export const openDirectConversationSecure = onCall(
   { region: 'us-central1', maxInstances: 20 },
   async (request) => {
@@ -1384,12 +1460,15 @@ export const openDirectConversationSecure = onCall(
     const conversationId = 'dm_' + participants.join('_');
     const conversationRef = db.doc('conversations/' + conversationId);
     return db.runTransaction(async (tx) => {
-      const [senderSnap, targetSnap, conversationSnap] = await Promise.all([
+      const [senderSnap, targetSnap, conversationSnap, outgoingBlockSnap, incomingBlockSnap] = await Promise.all([
         tx.get(db.doc('profiles/' + uid)),
         tx.get(db.doc('profiles/' + targetUid)),
         tx.get(conversationRef),
+        tx.get(socialBlockRef(uid, targetUid)),
+        tx.get(socialBlockRef(targetUid, uid)),
       ]);
       if (!senderSnap.exists || !targetSnap.exists) throw new HttpsError('not-found', 'PLAYER_NOT_FOUND');
+      if (outgoingBlockSnap.exists || incomingBlockSnap.exists) throw new HttpsError('permission-denied', 'PLAYER_BLOCKED');
       if (!conversationSnap.exists) {
         const sender = senderSnap.data() as SocialProfile;
         const target = targetSnap.data() as SocialProfile;
@@ -1432,10 +1511,12 @@ export const sendDirectMessageSecure = onCall(
     const messageRef = conversationRef.collection('messages').doc('msg_' + randomUUID());
 
     await db.runTransaction(async (tx) => {
-      const [senderSnap, targetSnap, conversationSnap, rateSnap] = await Promise.all([
+      const [senderSnap, targetSnap, conversationSnap, rateSnap, outgoingBlockSnap, incomingBlockSnap] = await Promise.all([
         tx.get(senderProfileRef), tx.get(targetProfileRef), tx.get(conversationRef), tx.get(rateRef),
+        tx.get(socialBlockRef(uid, targetUid)), tx.get(socialBlockRef(targetUid, uid)),
       ]);
       if (!senderSnap.exists || !targetSnap.exists) throw new HttpsError('not-found', 'PLAYER_NOT_FOUND');
+      if (outgoingBlockSnap.exists || incomingBlockSnap.exists) throw new HttpsError('permission-denied', 'PLAYER_BLOCKED');
       const lastSent = rateSnap.exists ? timestampMillis(rateSnap.data()?.lastSentAt, 0) : 0;
       if (Date.now() - lastSent < 1_000) throw new HttpsError('resource-exhausted', 'CHAT_RATE_LIMIT');
       const sender = senderSnap.data() as SocialProfile;
