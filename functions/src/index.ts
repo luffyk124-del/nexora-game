@@ -1235,22 +1235,27 @@ async function settleCompanyAuction(auctionId: string): Promise<void> {
       winnerOwned < companyOwnershipLimit(winnerProfile.level)
     );
 
-    if (!canTransfer || !company || !winnerProfile || !winnerWallet || !sellerProfile || !sellerWallet) {
-      if (winnerWallet) {
-        const refundTxId = `tx_${randomUUID()}`;
-        tx.update(winnerWalletRef, {
-          balance: winnerWallet.balance + auction.currentBid,
-          totalSpent: Math.max(0, winnerWallet.totalSpent - auction.currentBid),
-          lastTxId: refundTxId,
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-        tx.create(db.doc(`transactions/${refundTxId}`), {
-          id: refundTxId, fromUid: 'SYSTEM', toUid: winnerUid, amount: auction.currentBid,
-          fee: 0, netAmount: auction.currentBid, type: 'company_auction_refund',
-          referenceId: auctionId, description: `Auction settlement refund for ${auction.companyName}`,
-          status: 'completed', createdAt: FieldValue.serverTimestamp(),
-        });
-      }
+    if (!winnerWallet) {
+      // The winning bid is still held in escrow. Keep the auction active and the
+      // company locked so the scheduled settlement can retry instead of marking
+      // the auction refunded when no wallet exists to receive the refund.
+      return;
+    }
+
+    if (!canTransfer || !company || !winnerProfile || !sellerProfile || !sellerWallet) {
+      const refundTxId = `tx_${randomUUID()}`;
+      tx.update(winnerWalletRef, {
+        balance: winnerWallet.balance + auction.currentBid,
+        totalSpent: Math.max(0, winnerWallet.totalSpent - auction.currentBid),
+        lastTxId: refundTxId,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      tx.create(db.doc(`transactions/${refundTxId}`), {
+        id: refundTxId, fromUid: 'SYSTEM', toUid: winnerUid, amount: auction.currentBid,
+        fee: 0, netAmount: auction.currentBid, type: 'company_auction_refund',
+        referenceId: auctionId, description: `Auction settlement refund for ${auction.companyName}`,
+        status: 'completed', createdAt: FieldValue.serverTimestamp(),
+      });
       releaseCompany();
       tx.update(auctionRef, { status: 'ended_refunded', updatedAt: FieldValue.serverTimestamp() });
       return;
