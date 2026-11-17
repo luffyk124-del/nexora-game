@@ -196,13 +196,13 @@ function firestoreForRequest(req: ApiRequest): FirestoreRest {
 function levelForXp(totalXp: number): number {
   let level = 1;
   let remaining = Math.max(0, Math.floor(totalXp));
-  while (level < 200) {
+  while (level < 100) {
     const step = 200 + (level - 1) * 120;
     if (remaining < step) return level;
     remaining -= step;
     level += 1;
   }
-  return 200;
+  return 100;
 }
 
 async function createOrganization(
