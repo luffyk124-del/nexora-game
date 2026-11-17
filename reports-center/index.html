@@ -8,7 +8,10 @@
 </head>
 <body><main id="app">
 <header><div class="brand"><span class="mark">N</span><div><b>NEXORA</b><small>REPORTS CENTER</small></div></div><span class="secure">بوابة إدارية آمنة</span></header>
-<section id="login" class="panel login"><div class="eyebrow">ADMIN ACCESS</div><h1>مركز البلاغات</h1><p>منصة مستقلة لمراجعة بلاغات لاعبي NEXORA.</p><button id="loginBtn" class="primary">تسجيل الدخول بحساب Google</button><small class="muted">الدخول متاح للمشرفين المعتمدين فقط.</small><div id="loginError" class="error"></div></section>
+<section id="login" class="panel login"><div class="eyebrow">ADMIN ACCESS</div><h1>مركز البلاغات</h1><p>منصة مستقلة لمراجعة بلاغات لاعبي NEXORA.</p>
+<label class="field-label" for="username">اسم المستخدم</label><input id="username" name="username" autocomplete="username" maxlength="32" placeholder="أدخل اسم المستخدم">
+<label class="field-label" for="password">كلمة المرور</label><input id="password" name="password" type="password" autocomplete="current-password" maxlength="128" placeholder="أدخل كلمة المرور">
+<button id="loginBtn" class="primary">تسجيل الدخول</button><small class="muted">الدخول مخصص لحساب إداري واحد معتمد فقط.</small><div id="loginError" class="error" role="alert"></div></section>
 <section id="dashboard" hidden>
 <div class="welcome"><div><div class="eyebrow">MODERATION WORKSPACE</div><h1>لوحة البلاغات</h1><p>مراجعة البلاغات وإدارة حالتها.</p></div><button id="logoutBtn" class="quiet">تسجيل الخروج</button></div>
 <nav id="filters"><button data-status="all" class="active">الكل</button><button data-status="open">مفتوحة</button><button data-status="reviewing">قيد المراجعة</button><button data-status="closed">مغلقة</button></nav>
