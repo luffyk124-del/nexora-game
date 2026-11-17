@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { getApps, initializeApp } from 'firebase-admin/app';
-import { FieldValue, getFirestore, Timestamp, type DocumentData } from 'firebase-admin/firestore';
-import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { FieldValue, getFirestore, Timestamp, type DocumentData, type Query } from 'firebase-admin/firestore';
+import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import {
   ALLOWED_DIAGNOSTIC_COLLECTIONS,
@@ -1692,7 +1692,7 @@ export const getPublicPlayerProfileSecure = onCall(
 
 
 // Dedicated NEXORA Reports Center API. Access is restricted to verified report administrators.
-async function requireReportsAdmin(request: Parameters<Parameters<typeof onCall>[1]>[0]): Promise<string> {
+async function requireReportsAdmin(request: CallableRequest<unknown>): Promise<string> {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
   if (request.auth?.token.email_verified !== true) {
@@ -1713,7 +1713,7 @@ export const listPlayerReportsAdmin = onCall(
     const allowed = ['all', 'open', 'reviewing', 'closed'];
     if (!allowed.includes(status)) throw new HttpsError('invalid-argument', 'INVALID_STATUS');
     const limit = Math.max(1, Math.min(100, Number(request.data?.limit) || 50));
-    let query: FirebaseFirestore.Query = db.collection('player_reports').orderBy('createdAt', 'desc').limit(limit);
+    let query: Query = db.collection('player_reports').orderBy('createdAt', 'desc').limit(limit);
     if (status !== 'all') query = db.collection('player_reports').where('status', '==', status).orderBy('createdAt', 'desc').limit(limit);
     const snapshot = await query.get();
     return {
