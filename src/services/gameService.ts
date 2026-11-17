@@ -913,6 +913,34 @@ export async function fulfillTradeContract(uid: string, contractId: string): Pro
   }
 }
 
+export async function createCompanyAuction(
+  uid: string,
+  companyId: string,
+  startingPrice: number
+): Promise<{ auctionId: string; endsAt: number; minPrice: number; maxPrice: number }> {
+  if (auth.currentUser?.uid !== uid) throw new Error('AUTH_SESSION_MISMATCH');
+  const create = httpsCallable<
+    { companyId: string; startingPrice: number },
+    { ok: boolean; auctionId: string; endsAt: number; minPrice: number; maxPrice: number }
+  >(functions, 'createCompanyAuctionSecure');
+  const result = await create({ companyId, startingPrice });
+  return result.data;
+}
+
+export async function placeCompanyAuctionBid(
+  uid: string,
+  auctionId: string,
+  bidAmount: number
+): Promise<{ ok: boolean; currentBid: number; nextMinimumBid: number }> {
+  if (auth.currentUser?.uid !== uid) throw new Error('AUTH_SESSION_MISMATCH');
+  const placeBid = httpsCallable<
+    { auctionId: string; bidAmount: number },
+    { ok: boolean; currentBid: number; nextMinimumBid: number }
+  >(functions, 'placeCompanyAuctionBidSecure');
+  const result = await placeBid({ auctionId, bidAmount });
+  return result.data;
+}
+
 export async function foundCompany(
   uid: string,
   ownerName: string,
