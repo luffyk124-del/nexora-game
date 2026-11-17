@@ -1,7 +1,9 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { FieldValue, getFirestore, Timestamp, type DocumentData, type Query } from 'firebase-admin/firestore';
 import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/https';
+import { defineSecret } from 'firebase-functions/params';
+import { getAuth } from 'firebase-admin/auth';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import {
   ALLOWED_DIAGNOSTIC_COLLECTIONS,
@@ -1691,18 +1693,51 @@ export const getPublicPlayerProfileSecure = onCall(
 );
 
 
-// Dedicated NEXORA Reports Center API. Access is restricted to verified report administrators.
+// Dedicated NEXORA Reports Center API. Exactly one fixed Firebase UID is allowed.
+const REPORTS_ADMIN_UID = 'nexora-reports-mjnon-admin';
+const reportsAdminPasswordHash = defineSecret('REPORTS_ADMIN_PASSWORD_HASH');
+const reportsLoginAttempts = new Map<string, { count: number; resetAt: number }>();
+
+export const loginReportsAdmin = onCall(
+  { region: 'us-central1', maxInstances: 5, timeoutSeconds: 15, secrets: [reportsAdminPasswordHash] },
+  async (request) => {
+    const username = typeof request.data?.username === 'string' ? request.data.username.trim() : '';
+    const password = typeof request.data?.password === 'string' ? request.data.password : '';
+    const ip = request.rawRequest.ip || 'unknown';
+    const now = Date.now();
+    const attempt = reportsLoginAttempts.get(ip);
+    if (attempt && attempt.resetAt > now && attempt.count >= 5) {
+      throw new HttpsError('resource-exhausted', 'TRY_LATER');
+    }
+    if (!attempt || attempt.resetAt <= now) reportsLoginAttempts.set(ip, { count: 0, resetAt: now + 10 * 60_000 });
+    const encoded = reportsAdminPasswordHash.value();
+    const [saltHex, expectedHex] = encoded.split(':');
+    let valid = false;
+    if (/^[a-f0-9]{32,128}$/i.test(saltHex || '') && /^[a-f0-9]{128}$/i.test(expectedHex || '') && username === 'MJNON' && password.length >= 12 && password.length <= 128) {
+      const actual = scryptSync(password, Buffer.from(saltHex, 'hex'), 64);
+      const expected = Buffer.from(expectedHex, 'hex');
+      valid = timingSafeEqual(actual, expected);
+    }
+    if (!valid) {
+      const current = reportsLoginAttempts.get(ip) || { count: 0, resetAt: now + 10 * 60_000 };
+      current.count += 1;
+      reportsLoginAttempts.set(ip, current);
+      throw new HttpsError('unauthenticated', 'INVALID_CREDENTIALS');
+    }
+    reportsLoginAttempts.delete(ip);
+    const token = await getAuth(adminApp).createCustomToken(REPORTS_ADMIN_UID, { reportsAdmin: true });
+    return { token };
+  }
+);
+
 async function requireReportsAdmin(request: CallableRequest<unknown>): Promise<string> {
   const uid = request.auth?.uid;
+  const claims = request.auth?.token as Record<string, unknown> | undefined;
   if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
-  if (request.auth?.token.email_verified !== true) {
-    throw new HttpsError('permission-denied', 'VERIFIED_EMAIL_REQUIRED');
+  if (uid !== REPORTS_ADMIN_UID || claims?.reportsAdmin !== true) {
+    throw new HttpsError('permission-denied', 'REPORTS_ADMIN_REQUIRED');
   }
-  const claims = request.auth.token as Record<string, unknown>;
-  if (claims.reportsAdmin === true) return uid;
-  const adminSnap = await db.doc('reports_admins/' + uid).get();
-  if (adminSnap.exists && adminSnap.data()?.enabled === true) return uid;
-  throw new HttpsError('permission-denied', 'REPORTS_ADMIN_REQUIRED');
+  return uid;
 }
 
 export const listPlayerReportsAdmin = onCall(
