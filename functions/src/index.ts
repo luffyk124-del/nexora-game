@@ -831,7 +831,7 @@ export const setOrganizationJoinModeSecure = onCall(
       if (!orgSnap.exists || !memberSnap.exists) throw new HttpsError('not-found', 'NOT_FOUND');
       const org = orgSnap.data()!;
       const member = memberSnap.data()!;
-      const canManage = org.leaderUid === uid || (Array.isArray(member.permissions) && member.permissions.includes('manage_org'));
+      const canManage = org.leaderUid === uid || member.role === 'deputy' || (Array.isArray(member.permissions) && member.permissions.includes('manage_org'));
       if (!canManage) throw new HttpsError('permission-denied', 'PERMISSION_DENIED');
       tx.update(orgRef, { joinMode: mode, updatedAt: FieldValue.serverTimestamp() });
     });
