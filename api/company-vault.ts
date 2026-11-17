@@ -21,6 +21,7 @@ type ApiResponse = ServerResponse & {
 type Data = Record<string, unknown>;
 type VaultCompany = {
   ownerUid: string;
+  auctionId?: string;
   name: string;
   sector?: string;
   level: number;
