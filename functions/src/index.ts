@@ -816,6 +816,46 @@ export const joinOrganizationSecure = onCall(
   }
 );
 
+export const leaveOrganizationSecure = onCall(
+  { region: 'us-central1', maxInstances: 20 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+    const orgId = typeof request.data?.orgId === 'string' ? request.data.orgId.trim() : '';
+    if (!/^org_[a-zA-Z0-9_-]{8,128}$/.test(orgId)) {
+      throw new HttpsError('invalid-argument', 'INVALID_ORG_ID');
+    }
+    return db.runTransaction(async (tx) => {
+      const orgRef = db.doc('organizations/' + orgId);
+      const memberRef = db.doc('organization_members/' + orgId + '_' + uid);
+      const profileRef = db.doc('profiles/' + uid);
+      const [orgSnap, memberSnap, profileSnap] = await Promise.all([
+        tx.get(orgRef), tx.get(memberRef), tx.get(profileRef),
+      ]);
+      if (!orgSnap.exists || !memberSnap.exists || !profileSnap.exists) {
+        throw new HttpsError('not-found', 'NOT_FOUND');
+      }
+      const org = orgSnap.data()!;
+      const member = memberSnap.data()!;
+      const profile = profileSnap.data()!;
+      if (member.uid !== uid || member.orgId !== orgId || profile.orgId !== orgId) {
+        throw new HttpsError('failed-precondition', 'MEMBERSHIP_MISMATCH');
+      }
+      if (member.role === 'leader' || org.leaderUid === uid) {
+        throw new HttpsError('failed-precondition', 'LEADER_CANNOT_LEAVE');
+      }
+      const count = Math.max(1, Number(org.memberCount) || 1);
+      tx.delete(memberRef);
+      tx.update(profileRef, { orgId: null, updatedAt: FieldValue.serverTimestamp() });
+      tx.update(orgRef, {
+        memberCount: Math.max(1, count - 1),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return { ok: true };
+    });
+  }
+);
+
 export const approveOrganizationJoinRequestSecure = onCall(
   { region: 'us-central1', maxInstances: 20 },
   async (request) => {
