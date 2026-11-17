@@ -48,6 +48,7 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
   const [globalMessages, setGlobalMessages] = useState<GlobalMessage[]>([]);
   const [invites, setInvites] = useState<OrgInvite[]>([]);
   const [blockedUids, setBlockedUids] = useState<string[]>([]);
+  const [reportReason, setReportReason] = useState<'harassment' | 'spam' | 'inappropriate' | 'impersonation' | 'other'>('other');
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -214,7 +215,7 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
     setError('');
     try {
       const reportFn = httpsCallable<{ targetUid: string; reason: string }, { ok: boolean }>(functions, 'reportPlayerSecure');
-      await reportFn({ targetUid: player.uid, reason: 'other' });
+      await reportFn({ targetUid: player.uid, reason: reportReason });
       setError(ar ? 'تم إرسال البلاغ للمراجعة.' : 'Report submitted for review.');
     } catch {
       setError(ar ? 'تعذر إرسال البلاغ. حاول لاحقاً.' : 'Could not submit report. Try again later.');
@@ -334,6 +335,17 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
                   className="w-full min-h-[44px] rounded-xl bg-[#B91C32] text-white text-sm font-semibold flex items-center justify-center gap-2">
                   <MessageCircle className="w-4 h-4" />{ar ? 'إرسال رسالة' : 'Send message'}
                 </button>
+                <label className="block text-[11px] text-[#9299A6]">
+                  {ar ? 'سبب الإبلاغ' : 'Report reason'}
+                  <select value={reportReason} onChange={(event) => setReportReason(event.target.value as typeof reportReason)}
+                    className="mt-1 w-full min-h-[40px] rounded-lg bg-[#0B0D12] border border-white/10 px-3 text-xs text-[#F4F5F7]">
+                    <option value="harassment">{ar ? 'مضايقة أو إساءة' : 'Harassment'}</option>
+                    <option value="spam">{ar ? 'رسائل مزعجة' : 'Spam'}</option>
+                    <option value="inappropriate">{ar ? 'محتوى غير مناسب' : 'Inappropriate content'}</option>
+                    <option value="impersonation">{ar ? 'انتحال شخصية' : 'Impersonation'}</option>
+                    <option value="other">{ar ? 'سبب آخر' : 'Other'}</option>
+                  </select>
+                </label>
                 <div className="grid grid-cols-2 gap-2">
                   <button type="button" disabled={busy === 'block'} onClick={() => void togglePlayerBlock(selectedPlayer)}
                     className="min-h-[42px] rounded-xl bg-[#252B36] border border-white/10 text-xs font-semibold flex items-center justify-center gap-2">
