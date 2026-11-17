@@ -851,6 +851,12 @@ type AuctionCompany = {
   auctionId?: string;
   levelUpgradeEndsAt?: number;
   vaultUpgradeEndsAt?: number;
+  employeesCount?: number;
+  baseRevenuePerHour?: number;
+  expensePerHour?: number;
+  vaultLevel?: number;
+  vaultBalance?: number;
+  lastCollectedAt?: unknown;
 };
 type AuctionProfile = {
   username?: string;
@@ -892,14 +898,17 @@ export const createCompanyAuctionSecure = onCall(
     return db.runTransaction(async (tx) => {
       const companyRef = db.doc(`companies/${companyId}`);
       const profileRef = db.doc(`profiles/${uid}`);
-      const [companySnap, profileSnap] = await Promise.all([tx.get(companyRef), tx.get(profileRef)]);
+      const eventsQuery = db.collection('world_events').where('active', '==', true);
+      const [companySnap, profileSnap, eventsSnap] = await Promise.all([
+        tx.get(companyRef), tx.get(profileRef), tx.get(eventsQuery),
+      ]);
       if (!companySnap.exists || !profileSnap.exists) throw new HttpsError('not-found', 'NOT_FOUND');
-      const company = companySnap.data() as AuctionCompany;
-      const profile = profileSnap.data() as AuctionProfile;
+      const company = companySnap.data() as AuctionCompany & VaultCompany;
+      const profile = profileSnap.data() as AuctionProfile & VaultProfile;
       if (company.ownerUid !== uid) throw new HttpsError('permission-denied', 'NOT_COMPANY_OWNER');
       if (company.level < 50) throw new HttpsError('failed-precondition', 'COMPANY_LEVEL_TOO_LOW');
       if (company.auctionId) throw new HttpsError('already-exists', 'AUCTION_ALREADY_ACTIVE');
-      if ((company.levelUpgradeEndsAt || 0) > Date.now() || (company.vaultUpgradeEndsAt || 0) > Date.now()) {
+      if (company.levelUpgradeEndsAt || company.vaultUpgradeEndsAt) {
         throw new HttpsError('failed-precondition', 'COMPANY_UPGRADE_IN_PROGRESS');
       }
       const minPrice = company.level * 1_000;
@@ -932,6 +941,8 @@ export const createCompanyAuctionSecure = onCall(
         auctionId,
         auctionEndsAt: endsAt,
         auctionStatus: 'active',
+        vaultBalance: preservedVaultBalance,
+        lastCollectedAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
       return { ok: true, auctionId, endsAt, minPrice, maxPrice };
@@ -1048,6 +1059,7 @@ async function settleCompanyAuction(auctionId: string): Promise<void> {
           auctionId: FieldValue.delete(),
           auctionEndsAt: FieldValue.delete(),
           auctionStatus: FieldValue.delete(),
+          lastCollectedAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),
         });
       }
