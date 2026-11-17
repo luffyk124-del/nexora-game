@@ -1161,6 +1161,38 @@ false
       allow update, delete: if false;
     }
 
+    // Private direct-message conversations. Only the two participants can read.
+    match /conversations/{conversationId} {
+      allow get, list: if isSignedIn()
+        && resource.data.participants is list
+        && request.auth.uid in resource.data.participants;
+      allow create, update, delete: if false;
+
+      match /messages/{messageId} {
+        allow get, list: if isSignedIn()
+          && exists(/databases/$(database)/documents/conversations/$(conversationId))
+          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
+        allow create, update, delete: if false;
+      }
+    }
+
+    // Public global chat is read-only to clients; Cloud Functions validate and publish messages.
+    match /global_chat_messages/{messageId} {
+      allow get, list: if isSignedIn();
+      allow create, update, delete: if false;
+    }
+
+    // Organization invitations are visible only to their target player.
+    match /organization_invites/{inviteId} {
+      allow get, list: if isSignedIn() && resource.data.targetUid == request.auth.uid;
+      allow create, update, delete: if false;
+    }
+
+    // Chat rate limits and escrow metadata are server-only.
+    match /chat_rate_limits/{rateId} {
+      allow read, write: if false;
+    }
+
     // Read-only Diagnostics Owner Registry (Managed solely via Firebase Admin SDK / Console)
     match /diagnostics_admins/{uid} {
       allow get: if isSignedIn() && isValidId(uid) && request.auth.uid == uid;
