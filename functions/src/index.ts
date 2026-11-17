@@ -1174,13 +1174,6 @@ function cleanChatText(value: unknown, maxLength: number): string {
   return value.replace(/[<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
 }
 
-async function assertChatCooldown(tx: FirebaseFirestore.Transaction, uid: string, channel: 'dm' | 'global', cooldownMs: number) {
-  const ref = db.doc('chat_rate_limits/' + channel + '_' + uid);
-  const snap = await tx.get(ref);
-  const lastSent = snap.exists ? timestampMillis(snap.data()?.lastSentAt, 0) : 0;
-  if (Date.now() - lastSent < cooldownMs) throw new HttpsError('resource-exhausted', 'CHAT_RATE_LIMIT');
-  return ref;
-}
 
 export const searchPlayersSecure = onCall(
   { region: 'us-central1', maxInstances: 20 },
