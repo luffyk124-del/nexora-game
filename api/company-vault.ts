@@ -356,7 +356,8 @@ async function startCompanyUpgrade(db: FirestoreRest, uid: string, companyId: st
     if (!walletRaw) throw new VaultError('ACCOUNT_NOT_FOUND',409);
     const company = companyRaw as VaultCompany;
     const wallet = walletRaw as unknown as VaultWallet;
-    if (company.ownerUid !== uid) throw new VaultError('UNAUTHORIZED',403);\n    if (company.auctionId) throw new VaultError('COMPANY_IN_AUCTION',409);
+    if (company.ownerUid !== uid) throw new VaultError('UNAUTHORIZED',403);
+    if (company.auctionId) throw new VaultError('COMPANY_IN_AUCTION',409);
     if (numberOrZero(company.level) >= 100) throw new VaultError('MAX_LEVEL',409);
     if (numberOrZero(company.levelUpgradeEndsAt) > Date.now()) throw new VaultError('UPGRADE_IN_PROGRESS',409);
     const cost = numberOrZero(company.level)*550;
@@ -379,7 +380,8 @@ async function completeCompanyUpgrade(db: FirestoreRest, uid: string, companyId:
     if(!companyRaw) throw new VaultError('COMPANY_NOT_FOUND',404);
     if(!profileRaw) throw new VaultError('ACCOUNT_NOT_FOUND',409);
     const company=companyRaw as VaultCompany, profile=profileRaw as unknown as VaultProfile;
-    if(company.ownerUid!==uid) throw new VaultError('UNAUTHORIZED',403);\n    if(company.auctionId) throw new VaultError('COMPANY_IN_AUCTION',409);
+    if(company.ownerUid!==uid) throw new VaultError('UNAUTHORIZED',403);
+    if(company.auctionId) throw new VaultError('COMPANY_IN_AUCTION',409);
     const endsAt=numberOrZero(company.levelUpgradeEndsAt),target=numberOrZero(company.levelUpgradeTargetLevel);
     if(!endsAt||!target) throw new VaultError('NO_UPGRADE_IN_PROGRESS',409);
     if(Date.now()<endsAt) throw new VaultError('UPGRADE_NOT_FINISHED',409);
