@@ -494,6 +494,12 @@ export function calculateCompanyVaultBalance(
 }
 
 export const COMPANY_MAX_LEVEL = 100;
+
+/** Progressive company ownership allowance: level 1 starts at one, level 50 reaches ten. */
+export function getCompanyOwnershipLimit(playerLevel: number): number {
+  const level = Math.max(1, Math.min(100, Math.floor(Number.isFinite(playerLevel) ? playerLevel : 1)));
+  return Math.min(10, 1 + Math.floor(((level - 1) * 9) / 49));
+}
 export const PROPERTY_MAX_LEVEL = 15;
 export const LISTING_MAX_QTY = 10_000;
 export const LISTING_MAX_PRICE = 1_000_000;
