@@ -190,6 +190,7 @@ export interface CompanyAuction {
   startingPrice: number;
   currentBid: number;
   highestBidderName?: string | null;
+  highestBidderUid?: string | null;
   endsAt: number;
   status: 'active' | 'ended_sold' | 'ended_no_bids' | 'ended_refunded';
   createdAt: unknown;
