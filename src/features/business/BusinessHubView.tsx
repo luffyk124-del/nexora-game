@@ -158,7 +158,9 @@ export function BusinessHubView({
       setSubTab('auctions');
     } catch {
       showToast(language === 'ar' ? 'تعذر إنشاء المزاد. تحقق من مستوى الشركة وسعر البداية.' : 'Could not create auction. Check company level and starting price.', 'error');
-    } finally { setBusyKey(null); }
+    } finally {
+      setBusyKey(null);
+    }
   }
 
   async function handlePlaceAuctionBid(auctionId: string) {
@@ -170,7 +172,9 @@ export function BusinessHubView({
       showToast(language === 'ar' ? 'تم تسجيل المزايدة وحجز المبلغ مؤقتاً.' : 'Bid placed and funds held in escrow.', 'success');
     } catch {
       showToast(language === 'ar' ? 'تعذر تسجيل المزايدة. تحقق من الرصيد والحد الأدنى.' : 'Could not place bid. Check balance and minimum bid.', 'error');
-    } finally { setBusyKey(null); }
+    } finally {
+      setBusyKey(null);
+    }
   }
 
   async function handleFoundCompany(e: React.FormEvent) {
@@ -661,8 +665,8 @@ export function BusinessHubView({
                       <div className="border-t border-white/8 pt-3 space-y-2">
                         {auctionFormCompanyId === c.id ? (
                           <form onSubmit={(event) => { event.preventDefault(); void handleCreateCompanyAuction(c.id); }} className="space-y-2">
-                            <label className="block text-xs text-[#9299A6]">{language === 'ar' ? 'سعر بداية المزاد (0 = مزاد مفتوح)' : 'Starting price (0 = open-start auction)'}</label>
-                            <input type="number" min={0} max={c.level * 100000} step={1} value={auctionStartPrice}
+                            <label className="block text-xs text-[#9299A6]">{language === 'ar' ? 'سعر بداية المزاد (0 = مفتوح)' : 'Starting price (0 = open start)'}</label>
+                            <input type="number" min={0} max={c.level * 100000} value={auctionStartPrice}
                               onChange={(event) => setAuctionStartPrice(event.target.value)}
                               className="w-full min-h-[42px] rounded-xl border border-white/10 bg-[#0B0D12] px-3 text-sm text-[#F4F5F7]" required />
                             <p className="text-[11px] text-[#9299A6]">
@@ -742,16 +746,16 @@ export function BusinessHubView({
       {subTab === 'auctions' && (
         <section className="space-y-4">
           <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4">
-            <h2 className="text-sm font-bold text-[#F4F5F7]">{language === 'ar' ? 'مزاد الشركات' : 'Company Exchange'}</h2>
+            <h2 className="text-sm font-bold text-[#F4F5F7]">{language === 'ar' ? 'مزاد الشركات' : 'Company auctions'}</h2>
             <p className="mt-1 text-xs text-[#B5BBC6]">
               {language === 'ar'
-                ? 'الشركات من المستوى 50 فما فوق فقط. مدة المزاد 24 ساعة. تُحجز قيمة المزايدة وتُعاد عند تجاوزك أو تعذر إتمام البيع.'
-                : 'Level 50+ companies only. Auctions last 24 hours. Bid funds are held in escrow and refunded when outbid or if settlement cannot complete.'}
+                ? 'الشركات من المستوى 50 فما فوق فقط. مدة المزاد 24 ساعة. تُحجز المزايدة وتُعاد عند تجاوزك أو تعذر البيع.'
+                : 'Level 50+ companies only. Auctions last 24 hours. Bids are held in escrow and refunded when outbid or if settlement fails.'}
             </p>
           </div>
           {companyAuctions.length === 0 ? (
             <div className="rounded-2xl border border-white/8 bg-[#141821] p-8 text-center text-sm text-[#9299A6]">
-              {language === 'ar' ? 'لا توجد مزادات نشطة حالياً.' : 'There are no active auctions right now.'}
+              {language === 'ar' ? 'لا توجد مزادات نشطة حالياً.' : 'No active auctions right now.'}
             </div>
           ) : companyAuctions.map((auction) => {
             const remaining = Math.max(0, auction.endsAt - nowMs);
@@ -759,9 +763,11 @@ export function BusinessHubView({
             const isMine = auction.sellerUid === profile.uid;
             const isHighest = auction.highestBidderUid === profile.uid;
             const total = Math.ceil(remaining / 1000);
-            const timeLabel = Math.floor(total / 86400) > 0
-              ? Math.floor(total / 86400) + 'd ' + Math.floor((total % 86400) / 3600) + 'h'
-              : Math.floor(total / 3600).toString().padStart(2, '0') + ':' + Math.floor((total % 3600) / 60).toString().padStart(2, '0') + ':' + (total % 60).toString().padStart(2, '0');
+            const days = Math.floor(total / 86400);
+            const hours = Math.floor((total % 86400) / 3600);
+            const minutes = Math.floor((total % 3600) / 60);
+            const seconds = total % 60;
+            const timeLabel = days > 0 ? days + 'd ' + hours + 'h' : hours.toString().padStart(2, '0') + ':' + minutes.toString().padStart(2, '0') + ':' + seconds.toString().padStart(2, '0');
             return (
               <article key={auction.id} className="rounded-2xl border border-white/8 bg-[#141821] p-4 sm:p-5 space-y-3">
                 <div className="flex items-start justify-between gap-3">
@@ -1130,7 +1136,7 @@ export function BusinessHubView({
     </div>
   );
 }
-}{auction.startingPrice.toLocaleString()}</p>
+ + auction.startingPrice.toLocaleString()}</p>
                   </div>
                   <div className="rounded-xl bg-[#0B0D12] p-3">
                     <p className="text-[11px] text-[#9299A6]">{language === 'ar' ? 'أعلى مزايدة' : 'Current bid'}</p>
@@ -1490,7 +1496,7 @@ export function BusinessHubView({
     </div>
   );
 }
-}{auction.currentBid.toLocaleString()}</p>
+ + auction.currentBid.toLocaleString()}</p>
                   </div>
                 </div>
                 {auction.highestBidderName && <p className="text-xs text-[#9299A6]">{language === 'ar' ? 'أعلى مزايد:' : 'Highest bidder:'} {auction.highestBidderName}</p>}
@@ -1865,7 +1871,7 @@ export function BusinessHubView({
     </div>
   );
 }
-}{minBid.toLocaleString()}</p>
+ + minBid.toLocaleString()}</p>
               </article>
             );
           })}
