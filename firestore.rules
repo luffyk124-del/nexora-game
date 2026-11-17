@@ -316,7 +316,10 @@ service cloud.firestore {
         && (!('vaultLevel' in data) || (data.vaultLevel is int && data.vaultLevel >= 1 && data.vaultLevel <= 25 && 'vaultBalance' in data && data.vaultBalance is number && data.vaultBalance >= 0 && data.vaultBalance <= 1000000000))
         && (!('vaultBalance' in data) || 'vaultLevel' in data)
         && (!('levelUpgradeEndsAt' in data) || (data.levelUpgradeEndsAt is number && data.levelUpgradeTargetLevel is int && data.levelUpgradeTargetLevel >= 2 && data.levelUpgradeTargetLevel <= 100 && data.levelUpgradeCost is number))
-        && (!('vaultUpgradeEndsAt' in data) || (data.vaultUpgradeEndsAt is number && data.vaultUpgradeTargetLevel is int && data.vaultUpgradeTargetLevel >= 2 && data.vaultUpgradeTargetLevel <= 25))\n        && (!('auctionId' in data) || (data.auctionId is string && data.auctionId.size() <= 128))\n        && (!('auctionEndsAt' in data) || data.auctionEndsAt is number)\n        && (!('auctionStatus' in data) || data.auctionStatus == 'active');
+        && (!('vaultUpgradeEndsAt' in data) || (data.vaultUpgradeEndsAt is number && data.vaultUpgradeTargetLevel is int && data.vaultUpgradeTargetLevel >= 2 && data.vaultUpgradeTargetLevel <= 25))
+        && (!('auctionId' in data) || (data.auctionId is string && data.auctionId.size() <= 128))
+        && (!('auctionEndsAt' in data) || data.auctionEndsAt is number)
+        && (!('auctionStatus' in data) || data.auctionStatus == 'active');
     }
 
     function isCanonicalCompanyCreate(data, txAmount) {
@@ -381,7 +384,8 @@ service cloud.firestore {
         && data.memberCount is int && data.memberCount >= 1 && data.memberCount <= 200
         && data.reputation is int && data.reputation >= 0
         && data.level is int && data.level >= 1 && data.level <= 50
-        && (!('memberCapacity' in data) || (data.memberCapacity is int && data.memberCapacity >= 20 && data.memberCapacity <= 80))\n        && (!('joinMode' in data) || data.joinMode in ['open', 'request', 'closed'])
+        && (!('memberCapacity' in data) || (data.memberCapacity is int && data.memberCapacity >= 20 && data.memberCapacity <= 80))
+        && (!('joinMode' in data) || data.joinMode in ['open', 'request', 'closed'])
         && (!('research' in data) || isValidOrgResearch(data.research))
         && (!('upgradeStartedAt' in data) || data.upgradeStartedAt is number)
         && (!('upgradeEndsAt' in data) || data.upgradeEndsAt == null || data.upgradeEndsAt is number)
