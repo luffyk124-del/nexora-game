@@ -402,7 +402,8 @@ async function completeVaultUpgrade(db: FirestoreRest, uid: string, companyId: s
     const [companyRaw]=await db.getMany(transaction,[`companies/${companyId}`]);
     if(!companyRaw) throw new VaultError('COMPANY_NOT_FOUND',404);
     const company=companyRaw as VaultCompany;
-    if(company.ownerUid!==uid) throw new VaultError('UNAUTHORIZED',403);
+
+    if (company.auctionId) throw new VaultError('COMPANY_IN_AUCTION', 409);
     const endsAt=numberOrZero(company.vaultUpgradeEndsAt),target=numberOrZero(company.vaultUpgradeTargetLevel);
     if(!endsAt||!target) throw new VaultError('NO_UPGRADE_IN_PROGRESS',409);
     if(Date.now()<endsAt) throw new VaultError('UPGRADE_NOT_FINISHED',409);
@@ -428,6 +429,7 @@ async function upgradeVault(db: FirestoreRest, uid: string, companyId: string) {
     const wallet = walletRaw as unknown as VaultWallet;
     const profile = profileRaw as unknown as VaultProfile;
     if (company.ownerUid !== uid) throw new VaultError('UNAUTHORIZED', 403);
+    if (company.auctionId) throw new VaultError('COMPANY_IN_AUCTION', 409);
     const orgRaw = profile.orgId ? (await db.getMany(transaction, [`organizations/${profile.orgId}`]))[0] : null;
     const incomeBonusLevel = orgRaw && orgRaw.research && typeof orgRaw.research === 'object' ? numberOrZero((orgRaw.research as Data).commerce) : 0;
 
@@ -499,7 +501,8 @@ async function collectVault(db: FirestoreRest, uid: string, companyId: string) {
     const company = companyRaw as VaultCompany;
     const wallet = walletRaw as unknown as VaultWallet;
     const profile = profileRaw as unknown as VaultProfile;
-    if (company.ownerUid !== uid) throw new VaultError('UNAUTHORIZED', 403);
+
+    if (company.auctionId) throw new VaultError('COMPANY_IN_AUCTION', 409);
     const orgRaw = profile.orgId ? (await db.getMany(transaction, [`organizations/${profile.orgId}`]))[0] : null;
     const incomeBonusLevel = orgRaw && orgRaw.research && typeof orgRaw.research === 'object' ? numberOrZero((orgRaw.research as Data).commerce) : 0;
 
