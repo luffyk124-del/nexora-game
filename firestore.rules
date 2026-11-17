@@ -1029,6 +1029,8 @@ false
         );
       allow delete: if isSignedIn() && isValidId(memberDocId)
         && existing().role != 'leader'
+        && existsAfter(/databases/$(database)/documents/profiles/$(existing().uid))
+        && getAfter(/databases/$(database)/documents/profiles/$(existing().uid)).data.orgId == null
         && (
           existing().uid == request.auth.uid ||
           (
