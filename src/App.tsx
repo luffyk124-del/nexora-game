@@ -103,6 +103,7 @@ function NexoraAppContent() {
           profile={game.profile}
           wallet={game.wallet}
           companies={game.companies}
+          companyAuctions={game.companyAuctions}
           companyLogs={game.companyLogs}
           properties={game.properties}
           inventory={game.inventory}
