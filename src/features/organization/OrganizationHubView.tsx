@@ -90,7 +90,7 @@ export function OrganizationHubView({
   const canManageOrg = myOrgMember?.role === 'leader' || myOrgMember?.role === 'deputy' || hasOrgPermission(myOrgMember, 'manage_org');
 
   useEffect(() => {
-    const clock = window.setInterval(() => setClockNow(Date.now()), 15_000);
+    const clock = window.setInterval(() => setClockNow(Date.now()), 1_000);
     return () => window.clearInterval(clock);
   }, []);
 
@@ -530,7 +530,11 @@ export function OrganizationHubView({
   const isOrgMaxLevel = currentOrg.level >= ORG_MAX_LEVEL;
   const upgradeInProgress = Boolean(currentOrg.upgradeEndsAt && currentOrg.upgradeEndsAt > clockNow);
   const memberCapacity = currentOrg.memberCapacity ?? getOrgMemberCapacity(currentOrg.level, currentOrg.research?.expansion ?? 0);
-  const upgradeHoursLeft = upgradeInProgress ? Math.ceil((currentOrg.upgradeEndsAt! - clockNow) / 3_600_000) : 0;
+  const upgradeRemainingMs = upgradeInProgress ? Math.max(0, currentOrg.upgradeEndsAt! - clockNow) : 0;
+  const upgradeHours = Math.floor(upgradeRemainingMs / 3_600_000).toString().padStart(2, '0');
+  const upgradeMinutes = Math.floor((upgradeRemainingMs % 3_600_000) / 60_000).toString().padStart(2, '0');
+  const upgradeSeconds = Math.floor((upgradeRemainingMs % 60_000) / 1_000).toString().padStart(2, '0');
+  const upgradeCountdown = `${upgradeHours}:${upgradeMinutes}:${upgradeSeconds}`;
 
   return (
     <>
@@ -561,7 +565,7 @@ export function OrganizationHubView({
             </p>
           </div>
           {upgradeInProgress && (
-            <p className="w-full text-xs text-amber-300">{language === 'ar' ? `ينتهي تطوير المنظمة خلال نحو ${upgradeHoursLeft} ساعة.` : `Organization upgrade completes in about ${upgradeHoursLeft} hours.`}</p>
+            <p className="w-full text-xs text-amber-300">{language === 'ar' ? `الوقت المتبقي لتطوير المنظمة: ${upgradeCountdown}` : `Organization upgrade time remaining: ${upgradeCountdown}`}</p>
           )}
           {canManageOrg && (
             <button
