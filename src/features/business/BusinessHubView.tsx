@@ -486,7 +486,7 @@ export function BusinessHubView({
                 const { netHourly, grossHourly, expenseHourly, sectorEventMultiplier } = breakdown;
                 const accrued = calculateCompanyVaultBalance(c, netHourly, nowMs);
                 const vaultLevel = getCompanyVaultLevel(c);
-                const vaultCapacity = getCompanyVaultCapacity(vaultLevel);
+                const vaultCapacity = getCompanyVaultCapacity(vaultLevel, netHourly);
                 const vaultUpgrade = COMPANY_VAULT_UPGRADES[vaultLevel - 1];
                 const vaultMaterialsAvailable = vaultUpgrade
                   ? Object.entries(vaultUpgrade.materials).every(([itemId, qty]) => (invMap.get(itemId) || 0) >= qty)
@@ -566,7 +566,7 @@ export function BusinessHubView({
                       <div className="flex items-center justify-between gap-2">
                         <div>
                           <p className="text-sm font-bold text-cyan-200">{language === 'ar' ? 'خزينة الأرباح' : 'Profit Vault'}</p>
-                          <p className="text-[11px] text-[#9299A6]">{language === 'ar' ? `المستوى ${vaultLevel} من ${COMPANY_VAULT_MAX_LEVEL}` : `Level ${vaultLevel} of ${COMPANY_VAULT_MAX_LEVEL}`}</p>
+                          <p className="text-[11px] text-[#9299A6]">{language === 'ar' ? `المستوى ${vaultLevel} من 25` : `Level ${vaultLevel} of 25`}</p>
                         </div>
                         <p className="font-mono-num text-sm font-bold text-[#F4F5F7]">
                           ${accrued.toLocaleString()} / ${vaultCapacity.toLocaleString()}
