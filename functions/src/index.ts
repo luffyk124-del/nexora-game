@@ -1416,3 +1416,25 @@ export const respondOrganizationInviteSecure = onCall(
     });
   }
 );
+
+export const getPublicPlayerProfileSecure = onCall(
+  { region: 'us-central1', maxInstances: 20 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+    const targetUid = typeof request.data?.targetUid === 'string' ? request.data.targetUid.trim() : '';
+    if (!targetUid || targetUid.length > 128) throw new HttpsError('invalid-argument', 'INVALID_TARGET');
+    const snap = await db.doc('profiles/' + targetUid).get();
+    if (!snap.exists) throw new HttpsError('not-found', 'PLAYER_NOT_FOUND');
+    const data = snap.data() as SocialProfile;
+    return {
+      uid: targetUid,
+      username: typeof data.username === 'string' ? data.username : 'Player',
+      avatarId: typeof data.avatarId === 'string' ? data.avatarId : 'default',
+      title: typeof data.title === 'string' ? data.title : '',
+      level: Math.max(1, Number(data.level) || 1),
+      reputation: Math.max(0, Number(data.reputation) || 0),
+      influence: Math.max(0, Number(data.influence) || 0),
+      orgId: typeof data.orgId === 'string' ? data.orgId : null,
+    };
+  }
+);
