@@ -1143,11 +1143,11 @@ async function settleCompanyAuction(auctionId: string): Promise<void> {
 export const settleExpiredCompanyAuctions = onSchedule(
   { schedule: 'every 1 minutes', timeZone: 'UTC', region: 'us-central1', maxInstances: 1 },
   async () => {
-    const snapshot = await db.collection('company_auctions').where('status', '==', 'active').limit(100).get();
     const now = Date.now();
+    const snapshot = await db.collection('company_auctions').where('endsAt', '<=', now).limit(100).get();
     for (const auctionDoc of snapshot.docs) {
       const auction = auctionDoc.data() as AuctionRecord;
-      if (auction.endsAt <= now) await settleCompanyAuction(auctionDoc.id);
+      if (auction.status === 'active') await settleCompanyAuction(auctionDoc.id);
     }
   }
 );
