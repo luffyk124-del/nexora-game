@@ -149,7 +149,7 @@ service cloud.firestore {
           'transfer', 'market_buy', 'mission_reward', 'daily_stipend',
           'company_create', 'company_upgrade', 'company_collect', 'company_vault_upgrade',
           'property_buy', 'property_upgrade', 'property_collect',
-          'manufacturing', 'org_create', 'org_deposit', 'org_withdraw', 'contract_deal'
+          'manufacturing', 'org_create', 'org_deposit', 'org_withdraw', 'contract_deal',\n          'company_auction_bid', 'company_auction_refund', 'company_auction_sale'
         ]
         && isValidId(data.referenceId)
         && data.description is string && data.description.size() >= 1 && data.description.size() <= 240
@@ -301,7 +301,7 @@ service cloud.firestore {
 
     function isValidCompany(data) {
       return data.keys().hasAll(['id', 'ownerUid', 'ownerName', 'name', 'sector', 'level', 'capital', 'baseRevenuePerHour', 'expensePerHour', 'totalRevenue', 'lastCollectedAt', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'ownerUid', 'ownerName', 'name', 'sector', 'level', 'capital', 'employeesCount', 'baseRevenuePerHour', 'expensePerHour', 'totalRevenue', 'vaultLevel', 'vaultBalance', 'levelUpgradeStartedAt', 'levelUpgradeEndsAt', 'levelUpgradeTargetLevel', 'levelUpgradeCost', 'vaultUpgradeStartedAt', 'vaultUpgradeEndsAt', 'vaultUpgradeTargetLevel', 'lastCollectedAt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerUid', 'ownerName', 'name', 'sector', 'level', 'capital', 'employeesCount', 'baseRevenuePerHour', 'expensePerHour', 'totalRevenue', 'vaultLevel', 'vaultBalance', 'levelUpgradeStartedAt', 'levelUpgradeEndsAt', 'levelUpgradeTargetLevel', 'levelUpgradeCost', 'vaultUpgradeStartedAt', 'vaultUpgradeEndsAt', 'vaultUpgradeTargetLevel', 'auctionId', 'auctionEndsAt', 'auctionStatus', 'lastCollectedAt', 'createdAt', 'updatedAt'])
         && isValidId(data.id)
         && isValidId(data.ownerUid)
         && data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 64
@@ -312,10 +312,10 @@ service cloud.firestore {
         && data.baseRevenuePerHour is number && data.baseRevenuePerHour >= 10 && data.baseRevenuePerHour <= 50000
         && data.expensePerHour is number && data.expensePerHour >= 0
         && data.totalRevenue is number && data.totalRevenue >= 0
-        && (!('vaultLevel' in data) || (data.vaultLevel is int && data.vaultLevel >= 1 && data.vaultLevel <= 5 && 'vaultBalance' in data && data.vaultBalance is number && data.vaultBalance >= 0 && data.vaultBalance <= (data.vaultLevel == 1 ? 3500 : data.vaultLevel == 2 ? 7000 : data.vaultLevel == 3 ? 14000 : data.vaultLevel == 4 ? 25000 : 40000)))
+        && (!('vaultLevel' in data) || (data.vaultLevel is int && data.vaultLevel >= 1 && data.vaultLevel <= 25 && 'vaultBalance' in data && data.vaultBalance is number && data.vaultBalance >= 0 && data.vaultBalance <= 1000000000))
         && (!('vaultBalance' in data) || 'vaultLevel' in data)
         && (!('levelUpgradeEndsAt' in data) || (data.levelUpgradeEndsAt is number && data.levelUpgradeTargetLevel is int && data.levelUpgradeTargetLevel >= 2 && data.levelUpgradeTargetLevel <= 100 && data.levelUpgradeCost is number))
-        && (!('vaultUpgradeEndsAt' in data) || (data.vaultUpgradeEndsAt is number && data.vaultUpgradeTargetLevel is int && data.vaultUpgradeTargetLevel >= 2 && data.vaultUpgradeTargetLevel <= 5));
+        && (!('vaultUpgradeEndsAt' in data) || (data.vaultUpgradeEndsAt is number && data.vaultUpgradeTargetLevel is int && data.vaultUpgradeTargetLevel >= 2 && data.vaultUpgradeTargetLevel <= 25))\n        && (!('auctionId' in data) || (data.auctionId is string && data.auctionId.size() <= 128))\n        && (!('auctionEndsAt' in data) || data.auctionEndsAt is number)\n        && (!('auctionStatus' in data) || data.auctionStatus == 'active');
     }
 
     function isCanonicalCompanyCreate(data, txAmount) {
@@ -369,7 +369,7 @@ service cloud.firestore {
 
     function isValidOrganization(data) {
       return data.keys().hasAll(['id', 'name', 'tag', 'description', 'leaderUid', 'leaderName', 'treasuryBalance', 'memberCount', 'reputation', 'level', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'name', 'tag', 'description', 'leaderUid', 'leaderName', 'treasuryBalance', 'memberCount', 'reputation', 'level', 'memberCapacity', 'research', 'upgradeStartedAt', 'upgradeEndsAt', 'upgradeTargetLevel', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'name', 'tag', 'description', 'leaderUid', 'leaderName', 'treasuryBalance', 'memberCount', 'reputation', 'level', 'memberCapacity', 'joinMode', 'research', 'upgradeStartedAt', 'upgradeEndsAt', 'upgradeTargetLevel', 'createdAt', 'updatedAt'])
         && isValidId(data.id)
         && data.name is string && data.name.size() >= 3 && data.name.size() <= 40
         && data.tag is string && data.tag.size() >= 2 && data.tag.size() <= 6
@@ -380,7 +380,7 @@ service cloud.firestore {
         && data.memberCount is int && data.memberCount >= 1 && data.memberCount <= 200
         && data.reputation is int && data.reputation >= 0
         && data.level is int && data.level >= 1 && data.level <= 50
-        && (!('memberCapacity' in data) || (data.memberCapacity is int && data.memberCapacity >= 20 && data.memberCapacity <= 80))
+        && (!('memberCapacity' in data) || (data.memberCapacity is int && data.memberCapacity >= 20 && data.memberCapacity <= 80))\n        && (!('joinMode' in data) || data.joinMode in ['open', 'request', 'closed'])
         && (!('research' in data) || isValidOrgResearch(data.research))
         && (!('upgradeStartedAt' in data) || data.upgradeStartedAt is number)
         && (!('upgradeEndsAt' in data) || data.upgradeEndsAt == null || data.upgradeEndsAt is number)
@@ -834,6 +834,13 @@ service cloud.firestore {
 false
         );
       allow delete: if false;
+    }
+
+    // Company auctions are server-managed; clients can only read active public listings.
+    match /company_auctions/{auctionId} {
+      allow get: if isSignedIn() && isValidId(auctionId);
+      allow list: if isSignedIn() && resource.data.status == 'active';
+      allow create, update, delete: if false;
     }
 
     // Company Operational Logs
