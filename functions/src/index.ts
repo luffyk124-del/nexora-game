@@ -816,6 +816,112 @@ export const joinOrganizationSecure = onCall(
   }
 );
 
+export const approveOrganizationJoinRequestSecure = onCall(
+  { region: 'us-central1', maxInstances: 20 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+    const orgId = typeof request.data?.orgId === 'string' ? request.data.orgId.trim() : '';
+    const reqId = typeof request.data?.reqId === 'string' ? request.data.reqId.trim() : '';
+    const applicantUid = typeof request.data?.applicantUid === 'string' ? request.data.applicantUid.trim() : '';
+    const decision = request.data?.decision;
+    if (!/^org_[a-zA-Z0-9_-]{8,128}$/.test(orgId) || !reqId || reqId.length > 160 ||
+        !applicantUid || applicantUid.length > 128 || !['approved', 'rejected'].includes(decision)) {
+      throw new HttpsError('invalid-argument', 'INVALID_ARGUMENT');
+    }
+
+    return db.runTransaction(async (tx) => {
+      const orgRef = db.doc('organizations/' + orgId);
+      const actorRef = db.doc('organization_members/' + orgId + '_' + uid);
+      const reqRef = db.doc('organization_requests/' + reqId);
+      const profileRef = db.doc('profiles/' + applicantUid);
+      const memberRef = db.doc('organization_members/' + orgId + '_' + applicantUid);
+      const [orgSnap, actorSnap, reqSnap, profileSnap, memberSnap] = await Promise.all([
+        tx.get(orgRef), tx.get(actorRef), tx.get(reqRef), tx.get(profileRef), tx.get(memberRef),
+      ]);
+      if (!orgSnap.exists || !actorSnap.exists || !reqSnap.exists) {
+        throw new HttpsError('not-found', 'NOT_FOUND');
+      }
+      const org = orgSnap.data()!;
+      const actor = actorSnap.data()!;
+      const canManage = org.leaderUid === uid || actor.role === 'deputy' ||
+        (Array.isArray(actor.permissions) && actor.permissions.includes('manage_members'));
+      if (!canManage) throw new HttpsError('permission-denied', 'UNAUTHORIZED');
+      const joinRequest = reqSnap.data()!;
+      if (joinRequest.status !== 'pending') throw new HttpsError('failed-precondition', 'REQUEST_ALREADY_HANDLED');
+      if (joinRequest.orgId !== orgId || joinRequest.uid !== applicantUid) {
+        throw new HttpsError('failed-precondition', 'REQUEST_MISMATCH');
+      }
+      if (decision === 'rejected') {
+        tx.update(reqRef, { status: 'rejected' });
+        return { ok: true, status: 'rejected' };
+      }
+      if (!profileSnap.exists) throw new HttpsError('not-found', 'APPLICANT_NOT_FOUND');
+      if (memberSnap.exists) throw new HttpsError('already-exists', 'ALREADY_ORG_MEMBER');
+      const profile = profileSnap.data()!;
+      if (profile.orgId) throw new HttpsError('failed-precondition', 'APPLICANT_IN_OTHER_ORG');
+      const memberCount = Math.max(0, Number(org.memberCount) || 0);
+      const level = Math.max(1, Number(org.level) || 1);
+      const capacity = typeof org.memberCapacity === 'number'
+        ? org.memberCapacity : Math.min(70, 20 + (level - 1) * 5);
+      if (memberCount >= capacity) throw new HttpsError('resource-exhausted', 'ORG_FULL');
+      tx.update(reqRef, { status: 'approved' });
+      tx.create(memberRef, {
+        orgId, uid: applicantUid,
+        username: typeof profile.username === 'string' ? profile.username : 'Player',
+        role: 'member', permissions: [], joinedAt: FieldValue.serverTimestamp(),
+      });
+      tx.update(profileRef, { orgId, updatedAt: FieldValue.serverTimestamp() });
+      tx.update(orgRef, { memberCount: memberCount + 1, updatedAt: FieldValue.serverTimestamp() });
+      return { ok: true, status: 'approved' };
+    });
+  }
+);
+
+export const kickOrganizationMemberSecure = onCall(
+  { region: 'us-central1', maxInstances: 20 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+    const orgId = typeof request.data?.orgId === 'string' ? request.data.orgId.trim() : '';
+    const targetUid = typeof request.data?.targetUid === 'string' ? request.data.targetUid.trim() : '';
+    if (!/^org_[a-zA-Z0-9_-]{8,128}$/.test(orgId) || !targetUid || targetUid.length > 128 || targetUid === uid) {
+      throw new HttpsError('invalid-argument', 'INVALID_ARGUMENT');
+    }
+    return db.runTransaction(async (tx) => {
+      const orgRef = db.doc('organizations/' + orgId);
+      const actorRef = db.doc('organization_members/' + orgId + '_' + uid);
+      const targetRef = db.doc('organization_members/' + orgId + '_' + targetUid);
+      const profileRef = db.doc('profiles/' + targetUid);
+      const [orgSnap, actorSnap, targetSnap, profileSnap] = await Promise.all([
+        tx.get(orgRef), tx.get(actorRef), tx.get(targetRef), tx.get(profileRef),
+      ]);
+      if (!orgSnap.exists || !actorSnap.exists || !targetSnap.exists || !profileSnap.exists) {
+        throw new HttpsError('not-found', 'NOT_FOUND');
+      }
+      const org = orgSnap.data()!;
+      const actor = actorSnap.data()!;
+      const target = targetSnap.data()!;
+      const canManage = org.leaderUid === uid || actor.role === 'deputy' ||
+        (Array.isArray(actor.permissions) && actor.permissions.includes('manage_members'));
+      if (!canManage) throw new HttpsError('permission-denied', 'UNAUTHORIZED');
+      const roleWeight: Record<string, number> = { leader: 4, deputy: 3, officer: 2, member: 1 };
+      if (target.role === 'leader' || (roleWeight[actor.role] || 0) <= (roleWeight[target.role] || 0)) {
+        throw new HttpsError('permission-denied', 'RANK_TOO_HIGH');
+      }
+      const profile = profileSnap.data()!;
+      if (profile.orgId !== orgId) throw new HttpsError('failed-precondition', 'PROFILE_MEMBERSHIP_MISMATCH');
+      tx.delete(targetRef);
+      tx.update(profileRef, { orgId: null, updatedAt: FieldValue.serverTimestamp() });
+      tx.update(orgRef, {
+        memberCount: Math.max(1, (Number(org.memberCount) || 1) - 1),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return { ok: true };
+    });
+  }
+);
+
 export const setOrganizationJoinModeSecure = onCall(
   { cors: true, maxInstances: 10 },
   async (request) => {
