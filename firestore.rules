@@ -1000,11 +1000,13 @@ false
             incoming().role == 'member' &&
             getAfter(/databases/$(database)/documents/organizations/$(incoming().orgId)).data.memberCount == get(/databases/$(database)/documents/organizations/$(incoming().orgId)).data.memberCount + 1 &&
             getAfter(/databases/$(database)/documents/organizations/$(incoming().orgId)).data.memberCount <= (('memberCapacity' in get(/databases/$(database)/documents/organizations/$(incoming().orgId)).data) ? get(/databases/$(database)/documents/organizations/$(incoming().orgId)).data.memberCapacity : (get(/databases/$(database)/documents/organizations/$(incoming().orgId)).data.level >= 11 ? 70 : 20 + ((get(/databases/$(database)/documents/organizations/$(incoming().orgId)).data.level - 1) * 5))) &&
-            (
-              !exists(/databases/$(database)/documents/profiles/$(incoming().uid)) ||
-              !('orgId' in get(/databases/$(database)/documents/profiles/$(incoming().uid)).data) ||
-              get(/databases/$(database)/documents/profiles/$(incoming().uid)).data.orgId == null
-            )
+            existsAfter(/databases/$(database)/documents/organization_requests/$('join_' + incoming().orgId + '_' + incoming().uid)) &&
+            getAfter(/databases/$(database)/documents/organization_requests/$('join_' + incoming().orgId + '_' + incoming().uid)).data.orgId == incoming().orgId &&
+            getAfter(/databases/$(database)/documents/organization_requests/$('join_' + incoming().orgId + '_' + incoming().uid)).data.uid == incoming().uid &&
+            getAfter(/databases/$(database)/documents/organization_requests/$('join_' + incoming().orgId + '_' + incoming().uid)).data.status == 'approved' &&
+            exists(/databases/$(database)/documents/profiles/$(incoming().uid)) &&
+            (!('orgId' in get(/databases/$(database)/documents/profiles/$(incoming().uid)).data) ||
+              get(/databases/$(database)/documents/profiles/$(incoming().uid)).data.orgId == null)
           )
         );
       allow update: if isSignedIn() && isValidId(memberDocId)
