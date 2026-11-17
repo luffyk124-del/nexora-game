@@ -1192,6 +1192,15 @@ false
       allow create, update, delete: if false;
     }
 
+    // Player blocks and reports are private server-managed safety records.
+    match /user_blocks/{blockId} {
+      allow read, write: if false;
+    }
+
+    match /player_reports/{reportId} {
+      allow read, write: if false;
+    }
+
     // Organization invitations are visible only to their target player.
     match /organization_invites/{inviteId} {
       allow get, list: if isSignedIn() && resource.data.targetUid == request.auth.uid;
