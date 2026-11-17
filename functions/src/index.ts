@@ -65,13 +65,17 @@ type VaultProfile = {
   skills: { management?: number; finance?: number; leadership?: number };
 };
 type VaultWallet = { balance: number; totalEarned: number; totalSpent: number };
-const VAULT_CAPACITIES = [3500, 7000, 14000, 25000, 40000] as const;
-const VAULT_UPGRADES = [
-  { cost: 1500, materials: { copper_wire: 20, crude_alloy: 10 } },
-  { cost: 4000, materials: { silicon_ore: 20, energy_cells: 15 } },
-  { cost: 10000, materials: { carbon_fiber: 15, precision_frame: 10 } },
-  { cost: 25000, materials: { rare_minerals: 20, quantum_server: 5 } },
+const VAULT_MAX_LEVEL = 25;
+const VAULT_MATERIAL_SETS = [
+  { copper_wire: 20, crude_alloy: 10 },
+  { silicon_ore: 20, energy_cells: 15 },
+  { carbon_fiber: 15, precision_frame: 10 },
+  { rare_minerals: 20, quantum_server: 5 },
 ] as const;
+const VAULT_UPGRADES = Array.from({ length: VAULT_MAX_LEVEL - 1 }, (_, index) => ({
+  cost: Math.round(1_500 * Math.pow(1.32, index)),
+  materials: Object.fromEntries(Object.entries(VAULT_MATERIAL_SETS[index % VAULT_MATERIAL_SETS.length]).map(([itemId, qty]) => [itemId, Math.round(qty * (1 + index * 0.12))])),
+}));
 const REPUTATION_YIELD_TIERS = [
   { min: 0, bonus: 0 }, { min: 60, bonus: 0.02 }, { min: 160, bonus: 0.04 },
   { min: 350, bonus: 0.06 }, { min: 700, bonus: 0.08 },
@@ -80,7 +84,7 @@ const REPUTATION_YIELD_TIERS = [
 function vaultLevelOf(company: VaultCompany): number {
   const level = typeof company.vaultLevel === 'number' && Number.isFinite(company.vaultLevel)
     ? Math.floor(company.vaultLevel) : 1;
-  return Math.max(1, Math.min(5, level));
+  return Math.max(1, Math.min(VAULT_MAX_LEVEL, level));
 }
 function timestampMillis(value: unknown, fallback: number): number {
   if (value instanceof Timestamp) return value.toMillis();
@@ -124,7 +128,7 @@ function companyNetHourly(company: VaultCompany, profile: VaultProfile, events: 
 }
 function calculatedVaultBalance(company: VaultCompany, netHourly: number, nowMs: number): number {
   const level = vaultLevelOf(company);
-  const capacity = VAULT_CAPACITIES[level - 1];
+  const capacity = Math.max(3_500, Math.floor((Math.max(0, netHourly) * 4 * level) / VAULT_MAX_LEVEL));
   const stored = typeof company.vaultBalance === 'number' && Number.isFinite(company.vaultBalance)
     ? Math.max(0, company.vaultBalance) : 0;
   const last = timestampMillis(company.lastCollectedAt, nowMs);
@@ -134,13 +138,13 @@ function calculatedVaultBalance(company: VaultCompany, netHourly: number, nowMs:
 function levelForXp(totalXp: number): number {
   let level = 1;
   let remaining = Math.max(0, Math.floor(totalXp));
-  while (level < 200) {
+  while (level < 100) {
     const step = 200 + Math.max(0, level - 1) * 120;
     if (remaining < step) return level;
     remaining -= step;
     level += 1;
   }
-  return 200;
+  return 100;
 }
 function vaultHttpsError(error: unknown): HttpsError {
   const message = error instanceof Error ? error.message : 'INTERNAL';
@@ -176,7 +180,7 @@ export const upgradeCompanyProfitVault = onCall(
         const profile = profileSnap.data() as VaultProfile;
         if (company.ownerUid !== uid) throw new Error('UNAUTHORIZED');
         const oldLevel = vaultLevelOf(company);
-        if (oldLevel >= 5) throw new Error('VAULT_MAX_LEVEL');
+        if (oldLevel >= VAULT_MAX_LEVEL) throw new Error('VAULT_MAX_LEVEL');
         const upgrade = VAULT_UPGRADES[oldLevel - 1];
         if (wallet.balance < upgrade.cost) throw new Error('INSUFFICIENT_FUNDS');
         const inventorySnaps = await Promise.all(Object.entries(upgrade.materials).map(([itemId]) => tx.get(db.doc(`inventory/${uid}_${itemId}`))));
@@ -221,7 +225,7 @@ export const upgradeCompanyProfitVault = onCall(
           details: `Profit vault upgraded to Lv.${oldLevel + 1}; preserved ${preserved}`,
           createdAt: FieldValue.serverTimestamp(),
         });
-        return { ok: true, vaultLevel: oldLevel + 1, vaultBalance: preserved, capacity: VAULT_CAPACITIES[oldLevel] };
+        return { ok: true, vaultLevel: oldLevel + 1, vaultBalance: preserved, capacity: Math.max(3_500, Math.floor((Math.max(0, netHourly) * 4 * (oldLevel + 1)) / VAULT_MAX_LEVEL)) };
       });
     } catch (error) { throw vaultHttpsError(error); }
   }
