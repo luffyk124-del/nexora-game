@@ -20,6 +20,7 @@ import {
 } from '../services/gameService';
 import type {
   Company,
+  CompanyAuction,
   CompanyLog,
   GameNotification,
   InventoryItem,
@@ -51,6 +52,7 @@ export interface GameDataState {
   marketListings: MarketListing[];
   marketOrders: MarketOrder[];
   companies: Company[];
+  companyAuctions: CompanyAuction[];
   companyLogs: CompanyLog[];
   properties: PropertyAsset[];
   organizations: Organization[];
@@ -93,6 +95,7 @@ export function useGameData(): GameDataState {
   const [marketListings, setMarketListings] = useState<MarketListing[]>([]);
   const [marketOrders, setMarketOrders] = useState<MarketOrder[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [companyAuctions, setCompanyAuctions] = useState<CompanyAuction[]>([]);
   const [companyLogs, setCompanyLogs] = useState<CompanyLog[]>([]);
   const [properties, setProperties] = useState<PropertyAsset[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -159,6 +162,7 @@ export function useGameData(): GameDataState {
     setMarketListings([]);
     setMarketOrders([]);
     setCompanies([]);
+    setCompanyAuctions([]);
     setCompanyLogs([]);
     setProperties([]);
     setOrganizations([]);
@@ -335,6 +339,16 @@ export function useGameData(): GameDataState {
           setCompanies(snap.docs.map((d) => d.data() as Company));
         },
         onSnapErr('companies')
+      )
+    );
+
+    unsubs.push(
+      onSnapshot(
+        query(collection(db, 'company_auctions'), where('status', '==', 'active'), limit(100)),
+        (snap) => {
+          setCompanyAuctions(snap.docs.map((d) => d.data() as CompanyAuction));
+        },
+        onSnapErr('company_auctions')
       )
     );
 
@@ -619,6 +633,7 @@ export function useGameData(): GameDataState {
     marketListings,
     marketOrders,
     companies,
+    companyAuctions,
     companyLogs,
     properties,
     organizations,
