@@ -918,6 +918,8 @@ export const createCompanyAuctionSecure = onCall(
       }
 
       const now = Date.now();
+      const netHourly = companyNetHourly(company, profile, eventsSnap.docs.map((item) => item.data()), now);
+      const preservedVaultBalance = calculatedVaultBalance(company, netHourly, now);
       const auctionId = `auc_${randomUUID()}`;
       const endsAt = now + 24 * 60 * 60 * 1000;
       const sellerName = typeof profile.username === 'string' ? profile.username : company.ownerName;
