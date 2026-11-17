@@ -45,7 +45,8 @@ import {
   timestampToMs as parseTimestampMs,
   validateTransfer,
 } from '../lib/economy';
-import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { auth, db, functions, handleFirestoreError, OperationType } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
 import type {
   Company,
   CompanySector,
@@ -1390,41 +1391,29 @@ export async function createOrganization(
 
 export async function requestJoinOrganization(
   uid: string,
-  username: string,
+  _username: string,
   orgId: string
-): Promise<void> {
-  const reqId = `${orgId}_${uid}_${Date.now()}`;
-  try {
-    const [profileSnap, existingReqsSnap] = await Promise.all([
-      getDoc(doc(db, 'profiles', uid)),
-      getDocs(query(collection(db, 'organization_requests'), where('uid', '==', uid))),
-    ]);
-    if (profileSnap.exists()) {
-      const p = profileSnap.data() as PlayerProfile;
-      if (p.orgId) throw new Error('ALREADY_IN_ORG');
-    }
-    const alreadyPending = existingReqsSnap.docs.some((d) => {
-      const data = d.data() as { orgId?: string; status?: string };
-      return data.orgId === orgId && data.status === 'pending';
-    });
-    if (alreadyPending) {
-      throw new Error('REQUEST_ALREADY_PENDING');
-    }
-
-    await setDoc(doc(db, 'organization_requests', reqId), {
-      id: reqId,
-      orgId,
-      uid,
-      username,
-      status: 'pending',
-      createdAt: serverTimestamp(),
-    });
-  } catch (error) {
-    if (error instanceof Error && ['ALREADY_IN_ORG', 'REQUEST_ALREADY_PENDING'].includes(error.message)) {
-      throw error;
-    }
-    handleFirestoreError(error, OperationType.CREATE, `organization_requests/${reqId}`);
+): Promise<'joined' | 'requested'> {
+  if (auth.currentUser?.uid !== uid) throw new Error('AUTH_SESSION_MISMATCH');
+  const join = httpsCallable<{ orgId: string }, { status: 'joined' | 'requested' }>(functions, 'joinOrganizationSecure');
+  const result = await join({ orgId });
+  if (result.data.status !== 'joined' && result.data.status !== 'requested') {
+    throw new Error('ORGANIZATION_JOIN_FAILED');
   }
+  return result.data.status;
+}
+
+export async function setOrganizationJoinMode(
+  uid: string,
+  orgId: string,
+  mode: 'open' | 'request' | 'closed'
+): Promise<void> {
+  if (auth.currentUser?.uid !== uid) throw new Error('AUTH_SESSION_MISMATCH');
+  const updateMode = httpsCallable<{ orgId: string; mode: 'open' | 'request' | 'closed' }, { ok: boolean }>(
+    functions,
+    'setOrganizationJoinModeSecure'
+  );
+  await updateMode({ orgId, mode });
 }
 
 export async function handleOrgJoinRequest(
