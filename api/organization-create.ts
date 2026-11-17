@@ -253,6 +253,7 @@ async function createOrganization(
         memberCount: 1,
         reputation: 15,
         level: 1,
+        joinMode: 'request',
       }, ['createdAt', 'updatedAt'], true),
       writeDocument(`organization_members/${orgId}_${uid}`, {
         orgId,
