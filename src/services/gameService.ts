@@ -1466,9 +1466,12 @@ export async function handleOrgJoinRequest(
       ]);
       if (!reqSnap.exists() || !orgSnap.exists()) throw new Error('NOT_FOUND');
 
-      const reqData = reqSnap.data() as { status: string };
+      const reqData = reqSnap.data() as { status: string; orgId?: string; uid?: string; username?: string };
       if (reqData.status !== 'pending') {
         throw new Error('REQUEST_ALREADY_HANDLED');
+      }
+      if (reqData.orgId !== orgId || reqData.uid !== applicantUid) {
+        throw new Error('REQUEST_MISMATCH');
       }
 
       if (decision === 'approved') {
@@ -1476,25 +1479,33 @@ export async function handleOrgJoinRequest(
         if (memberSnap.exists()) {
           throw new Error('ALREADY_ORG_MEMBER');
         }
-        if (applicantProfileSnap.exists()) {
-          const applicantProfile = applicantProfileSnap.data() as PlayerProfile;
-          if (applicantProfile.orgId && applicantProfile.orgId !== orgId) {
-            throw new Error('APPLICANT_IN_OTHER_ORG');
-          }
+        if (!applicantProfileSnap.exists()) {
+          throw new Error('APPLICANT_NOT_FOUND');
+        }
+        const applicantProfile = applicantProfileSnap.data() as PlayerProfile;
+        if (applicantProfile.orgId) {
+          throw new Error('APPLICANT_IN_OTHER_ORG');
         }
         const memberCapacity = typeof org.memberCapacity === 'number' ? org.memberCapacity : Math.min(70, 20 + (Math.max(1, org.level) - 1) * 5);
         if (org.memberCount >= memberCapacity) {
           throw new Error('ORG_FULL');
         }
 
+        const canonicalUsername = typeof applicantProfile.username === 'string'
+          ? applicantProfile.username
+          : (typeof reqData.username === 'string' ? reqData.username : 'Player');
         tx.update(reqRef, { status: decision });
         tx.set(memberRef, {
           orgId,
           uid: applicantUid,
-          username: applicantUsername,
+          username: canonicalUsername,
           role: 'member',
           permissions: ROLE_DEFAULT_PERMISSIONS.member,
           joinedAt: serverTimestamp(),
+        });
+        tx.update(applicantProfileRef, {
+          orgId,
+          updatedAt: serverTimestamp(),
         });
         tx.update(orgRef, {
           memberCount: org.memberCount + 1,
@@ -1512,6 +1523,8 @@ export async function handleOrgJoinRequest(
         'REQUEST_ALREADY_HANDLED',
         'ALREADY_ORG_MEMBER',
         'APPLICANT_IN_OTHER_ORG',
+        'APPLICANT_NOT_FOUND',
+        'REQUEST_MISMATCH',
         'ORG_FULL',
       ].includes(error.message)
     ) {
