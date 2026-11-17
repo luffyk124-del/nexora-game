@@ -753,3 +753,88 @@ export const rotateWorldEvents = onSchedule(
   }
 );
 
+
+
+type OrganizationJoinMode = 'open' | 'request' | 'closed';
+
+export const joinOrganizationSecure = onCall(
+  { cors: true, maxInstances: 20 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+    const orgId = typeof request.data?.orgId === 'string' ? request.data.orgId.trim() : '';
+    if (!/^org_[a-zA-Z0-9_-]{8,128}$/.test(orgId)) throw new HttpsError('invalid-argument', 'INVALID_ORG_ID');
+
+    try {
+      return await db.runTransaction(async (tx) => {
+        const orgRef = db.doc(`organizations/${orgId}`);
+        const profileRef = db.doc(`profiles/${uid}`);
+        const memberRef = db.doc(`organization_members/${orgId}_${uid}`);
+        const requestRef = db.doc(`organization_requests/join_${orgId}_${uid}`);
+        const [orgSnap, profileSnap, memberSnap, requestSnap] = await Promise.all([
+          tx.get(orgRef), tx.get(profileRef), tx.get(memberRef), tx.get(requestRef),
+        ]);
+        if (!orgSnap.exists || !profileSnap.exists) throw new HttpsError('not-found', 'NOT_FOUND');
+        const org = orgSnap.data()!;
+        const profile = profileSnap.data()!;
+        if (profile.orgId) throw new HttpsError('failed-precondition', 'ALREADY_IN_ORG');
+        if (memberSnap.exists) throw new HttpsError('already-exists', 'ALREADY_ORG_MEMBER');
+        const mode: OrganizationJoinMode = org.joinMode === 'open' || org.joinMode === 'closed' ? org.joinMode : 'request';
+        if (mode === 'closed') throw new HttpsError('failed-precondition', 'ORG_JOIN_CLOSED');
+        const memberCount = Math.max(0, Number(org.memberCount) || 0);
+        const orgLevel = Math.max(1, Number(org.level) || 1);
+        const capacity = typeof org.memberCapacity === 'number' ? org.memberCapacity : Math.min(70, 20 + (orgLevel - 1) * 5);
+        if (memberCount >= capacity) throw new HttpsError('resource-exhausted', 'ORG_FULL');
+
+        if (mode === 'request') {
+          if (requestSnap.exists && requestSnap.data()?.status === 'pending') {
+            throw new HttpsError('already-exists', 'REQUEST_ALREADY_PENDING');
+          }
+          tx.set(requestRef, {
+            id: requestRef.id, orgId, uid,
+            username: typeof profile.username === 'string' ? profile.username : 'Player',
+            status: 'pending', createdAt: FieldValue.serverTimestamp(),
+          });
+          return { status: 'requested' as const };
+        }
+
+        tx.set(memberRef, {
+          orgId, uid,
+          username: typeof profile.username === 'string' ? profile.username : 'Player',
+          role: 'member', permissions: [], joinedAt: FieldValue.serverTimestamp(),
+        });
+        tx.update(profileRef, { orgId, updatedAt: FieldValue.serverTimestamp() });
+        tx.update(orgRef, { memberCount: memberCount + 1, updatedAt: FieldValue.serverTimestamp() });
+        return { status: 'joined' as const };
+      });
+    } catch (error) {
+      if (error instanceof HttpsError) throw error;
+      throw new HttpsError('internal', 'ORGANIZATION_JOIN_FAILED');
+    }
+  }
+);
+
+export const setOrganizationJoinModeSecure = onCall(
+  { cors: true, maxInstances: 10 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+    const orgId = typeof request.data?.orgId === 'string' ? request.data.orgId.trim() : '';
+    const mode = request.data?.mode;
+    if (!/^org_[a-zA-Z0-9_-]{8,128}$/.test(orgId) || !['open', 'request', 'closed'].includes(mode)) {
+      throw new HttpsError('invalid-argument', 'INVALID_ARGUMENT');
+    }
+    const orgRef = db.doc(`organizations/${orgId}`);
+    const memberRef = db.doc(`organization_members/${orgId}_${uid}`);
+    await db.runTransaction(async (tx) => {
+      const [orgSnap, memberSnap] = await Promise.all([tx.get(orgRef), tx.get(memberRef)]);
+      if (!orgSnap.exists || !memberSnap.exists) throw new HttpsError('not-found', 'NOT_FOUND');
+      const org = orgSnap.data()!;
+      const member = memberSnap.data()!;
+      const canManage = org.leaderUid === uid || (Array.isArray(member.permissions) && member.permissions.includes('manage_org'));
+      if (!canManage) throw new HttpsError('permission-denied', 'PERMISSION_DENIED');
+      tx.update(orgRef, { joinMode: mode, updatedAt: FieldValue.serverTimestamp() });
+    });
+    return { ok: true, mode };
+  }
+);
