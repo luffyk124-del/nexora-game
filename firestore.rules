@@ -149,7 +149,8 @@ service cloud.firestore {
           'transfer', 'market_buy', 'mission_reward', 'daily_stipend',
           'company_create', 'company_upgrade', 'company_collect', 'company_vault_upgrade',
           'property_buy', 'property_upgrade', 'property_collect',
-          'manufacturing', 'org_create', 'org_deposit', 'org_withdraw', 'contract_deal',\n          'company_auction_bid', 'company_auction_refund', 'company_auction_sale'
+          'manufacturing', 'org_create', 'org_deposit', 'org_withdraw', 'contract_deal',
+          'company_auction_bid', 'company_auction_refund', 'company_auction_sale'
         ]
         && isValidId(data.referenceId)
         && data.description is string && data.description.size() >= 1 && data.description.size() <= 240
