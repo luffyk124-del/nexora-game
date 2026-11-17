@@ -56,7 +56,7 @@ function parseAllowlist(raw: string | undefined): string[] {
  */
 
 type VaultCompany = {
-  id: string; ownerUid: string; name: string; sector?: string; level: number;
+  id: string; ownerUid: string; name: string; sector?: string; level: number; auctionId?: string;
   employeesCount: number; baseRevenuePerHour: number; expensePerHour: number;
   totalRevenue: number; vaultLevel?: number; vaultBalance?: number; lastCollectedAt?: unknown;
 };
