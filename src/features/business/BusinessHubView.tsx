@@ -757,7 +757,7 @@ export function BusinessHubView({
             const remaining = Math.max(0, auction.endsAt - nowMs);
             const minBid = auction.currentBid > 0 ? auction.currentBid + Math.max(100, Math.ceil(auction.currentBid * 0.05)) : Math.max(1, auction.startingPrice);
             const isMine = auction.sellerUid === profile.uid;
-            const isHighest = auction.highestBidderName === profile.username && auction.highestBidderName != null;
+            const isHighest = auction.highestBidderUid === profile.uid;
             const total = Math.ceil(remaining / 1000);
             const timeLabel = Math.floor(total / 86400) > 0
               ? Math.floor(total / 86400) + 'd ' + Math.floor((total % 86400) / 3600) + 'h'
