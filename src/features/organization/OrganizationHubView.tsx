@@ -711,7 +711,7 @@ export function OrganizationHubView({
                 })
               )}
             </div>
-          </div>
+          </div>}
 
           {/* Role Permissions Matrix */}
           {activeOrgTab === 'overview' && <>
