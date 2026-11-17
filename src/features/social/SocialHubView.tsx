@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { collection, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { ArrowLeft, Globe2, MessageCircle, Search, Send, ShieldCheck, Users, UserRound } from 'lucide-react';
@@ -101,12 +101,12 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
     }
     const messagesQuery = query(
       collection(db, 'conversations', selectedConversation, 'messages'),
-      orderBy('createdAt', 'asc'),
+      orderBy('createdAt', 'desc'),
       limit(80)
     );
     return onSnapshot(
       messagesQuery,
-      (snapshot) => setDirectMessages(snapshot.docs.map((item) => item.data() as DirectMessage)),
+      (snapshot) => setDirectMessages(snapshot.docs.map((item) => item.data() as DirectMessage).reverse()),
       () => setError(ar ? 'تعذر تحميل الرسائل.' : 'Could not load messages.')
     );
   }, [selectedConversation, ar]);
