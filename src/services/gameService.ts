@@ -1448,90 +1448,11 @@ export async function handleOrgJoinRequest(
   orgId: string,
   reqId: string,
   applicantUid: string,
-  applicantUsername: string,
+  _applicantUsername: string,
   decision: 'approved' | 'rejected'
 ): Promise<void> {
-  try {
-    await runTransaction(db, async (tx) => {
-      const reqRef = doc(db, 'organization_requests', reqId);
-      const orgRef = doc(db, 'organizations', orgId);
-      const memberRef = doc(db, 'organization_members', `${orgId}_${applicantUid}`);
-      const applicantProfileRef = doc(db, 'profiles', applicantUid);
-
-      const [reqSnap, orgSnap, memberSnap, applicantProfileSnap] = await Promise.all([
-        tx.get(reqRef),
-        tx.get(orgRef),
-        tx.get(memberRef),
-        tx.get(applicantProfileRef),
-      ]);
-      if (!reqSnap.exists() || !orgSnap.exists()) throw new Error('NOT_FOUND');
-
-      const reqData = reqSnap.data() as { status: string; orgId?: string; uid?: string; username?: string };
-      if (reqData.status !== 'pending') {
-        throw new Error('REQUEST_ALREADY_HANDLED');
-      }
-      if (reqData.orgId !== orgId || reqData.uid !== applicantUid) {
-        throw new Error('REQUEST_MISMATCH');
-      }
-
-      if (decision === 'approved') {
-        const org = orgSnap.data() as Organization;
-        if (memberSnap.exists()) {
-          throw new Error('ALREADY_ORG_MEMBER');
-        }
-        if (!applicantProfileSnap.exists()) {
-          throw new Error('APPLICANT_NOT_FOUND');
-        }
-        const applicantProfile = applicantProfileSnap.data() as PlayerProfile;
-        if (applicantProfile.orgId) {
-          throw new Error('APPLICANT_IN_OTHER_ORG');
-        }
-        const memberCapacity = typeof org.memberCapacity === 'number' ? org.memberCapacity : Math.min(70, 20 + (Math.max(1, org.level) - 1) * 5);
-        if (org.memberCount >= memberCapacity) {
-          throw new Error('ORG_FULL');
-        }
-
-        const canonicalUsername = typeof applicantProfile.username === 'string'
-          ? applicantProfile.username
-          : (typeof reqData.username === 'string' ? reqData.username : 'Player');
-        tx.update(reqRef, { status: decision });
-        tx.set(memberRef, {
-          orgId,
-          uid: applicantUid,
-          username: canonicalUsername,
-          role: 'member',
-          permissions: ROLE_DEFAULT_PERMISSIONS.member,
-          joinedAt: serverTimestamp(),
-        });
-        tx.update(applicantProfileRef, {
-          orgId,
-          updatedAt: serverTimestamp(),
-        });
-        tx.update(orgRef, {
-          memberCount: org.memberCount + 1,
-          updatedAt: serverTimestamp(),
-        });
-      } else {
-        tx.update(reqRef, { status: decision });
-      }
-    });
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      [
-        'NOT_FOUND',
-        'REQUEST_ALREADY_HANDLED',
-        'ALREADY_ORG_MEMBER',
-        'APPLICANT_IN_OTHER_ORG',
-        'APPLICANT_NOT_FOUND',
-        'REQUEST_MISMATCH',
-        'ORG_FULL',
-      ].includes(error.message)
-    ) {
-      throw error;
-    }
-    handleFirestoreError(error, OperationType.UPDATE, `organization_requests/${reqId}`);
-  }
+  const handleRequest = httpsCallable(functions, 'approveOrganizationJoinRequestSecure');
+  await handleRequest({ orgId, reqId, applicantUid, decision });
 }
 
 export async function syncSelfOrgMembership(uid: string, orgId: string | null): Promise<void> {
@@ -1594,43 +1515,9 @@ export async function kickOrgMember(
   targetUid: string
 ): Promise<void> {
   if (!actorUid || actorUid === targetUid) throw new Error('CANNOT_KICK_SELF');
-
-  try {
-    await runTransaction(db, async (tx) => {
-      const orgRef = doc(db, 'organizations', orgId);
-      const actorRef = doc(db, 'organization_members', `${orgId}_${actorUid}`);
-      const targetRef = doc(db, 'organization_members', `${orgId}_${targetUid}`);
-      const [orgSnap, actorSnap, targetSnap] = await Promise.all([
-        tx.get(orgRef),
-        tx.get(actorRef),
-        tx.get(targetRef),
-      ]);
-
-      if (!orgSnap.exists() || !actorSnap.exists() || !targetSnap.exists()) {
-        throw new Error('NOT_FOUND');
-      }
-
-      const actor = actorSnap.data() as OrganizationMember;
-      const target = targetSnap.data() as OrganizationMember;
-      if (!hasOrgPermission(actor, 'manage_members')) throw new Error('UNAUTHORIZED');
-      if (!canManageOrgMember(actor.role, target.role)) throw new Error('RANK_TOO_HIGH');
-
-      const org = orgSnap.data() as Organization;
-      tx.delete(targetRef);
-      tx.update(orgRef, {
-        memberCount: Math.max(1, org.memberCount - 1),
-        updatedAt: serverTimestamp(),
-      });
-    });
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      ['CANNOT_KICK_SELF', 'NOT_FOUND', 'UNAUTHORIZED', 'RANK_TOO_HIGH'].includes(error.message)
-    ) {
-      throw error;
-    }
-    handleFirestoreError(error, OperationType.DELETE, `organization_members/${orgId}_${targetUid}`);
-  }
+  if (auth.currentUser?.uid !== actorUid) throw new Error('UNAUTHENTICATED');
+  const removeMember = httpsCallable(functions, 'kickOrganizationMemberSecure');
+  await removeMember({ orgId, targetUid });
 }
 
 async function callOrganizationUpgrade(orgId: string, action: 'start' | 'complete' | 'research', researchId?: string) {
