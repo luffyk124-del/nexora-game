@@ -588,6 +588,14 @@ service cloud.firestore {
             isProgressionTxType(newWalletTx(uid).type) &&
             incoming().skills == existing().skills &&
             isStatsStepValid(existing().stats, incoming().stats) &&
+            (
+              (newWalletTx(uid).type == 'company_create' &&
+                incoming().stats.companiesOwned == existing().stats.companiesOwned + 1 &&
+                incoming().stats.companiesOwned <= math.min(10, 1 + math.floor((existing().level - 1) * 9 / 49)) &&
+                getAfter(/databases/$(database)/documents/companies/$(newWalletTx(uid).referenceId)).data.ownerUid == uid) ||
+              (newWalletTx(uid).type != 'company_create' &&
+                incoming().stats.companiesOwned == existing().stats.companiesOwned)
+            ) &&
             incoming().xp >= existing().xp &&
             incoming().xp <= existing().xp + 350 &&
             incoming().level >= existing().level &&
