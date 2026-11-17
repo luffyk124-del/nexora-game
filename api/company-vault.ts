@@ -479,7 +479,7 @@ async function upgradeVault(db: FirestoreRest, uid: string, companyId: string) {
       }, ['createdAt'], true),
     ];
     return {
-      result: { ok: true, targetLevel: target, endsAt, vaultBalance: preserved, capacity: Math.max(3_500, Math.floor((Math.max(0, netHourly) * 4 * oldLevel) / VAULT_MAX_LEVEL)) },
+      result: { ok: true, targetLevel: target, endsAt, vaultBalance: preserved, capacity: Math.max(3_500, Math.floor((Math.max(0, netHourly) * 4 * target) / VAULT_MAX_LEVEL)) },
       writes,
     };
   });
