@@ -64,7 +64,7 @@ export function calculateLevelProgress(totalXp: number): {
 } {
   let level = 1;
   let remaining = Math.max(0, Math.floor(totalXp));
-  while (level < 200) {
+  while (level < 100) {
     const step = xpStepForLevel(level);
     if (remaining < step) {
       return {
@@ -77,7 +77,7 @@ export function calculateLevelProgress(totalXp: number): {
     remaining -= step;
     level += 1;
   }
-  return { level: 200, currentLevelXp: 0, nextLevelXp: 1, progressPercent: 100 };
+  return { level: 100, currentLevelXp: 0, nextLevelXp: 1, progressPercent: 100 };
 }
 
 /**
