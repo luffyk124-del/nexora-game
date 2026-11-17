@@ -838,3 +838,315 @@ export const setOrganizationJoinModeSecure = onCall(
     return { ok: true, mode };
   }
 );
+
+
+type AuctionCompany = {
+  id: string;
+  ownerUid: string;
+  ownerName: string;
+  name: string;
+  level: number;
+  auctionId?: string;
+  levelUpgradeEndsAt?: number;
+  vaultUpgradeEndsAt?: number;
+};
+type AuctionProfile = {
+  username?: string;
+  level: number;
+  stats?: Record<string, number>;
+};
+type AuctionWallet = { balance: number; totalEarned: number; totalSpent: number };
+type AuctionRecord = {
+  id: string;
+  companyId: string;
+  sellerUid: string;
+  sellerName: string;
+  companyName: string;
+  companyLevel: number;
+  startingPrice: number;
+  currentBid: number;
+  highestBidderUid?: string | null;
+  highestBidderName?: string | null;
+  endsAt: number;
+  status: string;
+};
+
+function companyOwnershipLimit(levelValue: number): number {
+  const level = Math.max(1, Math.min(100, Math.floor(Number(levelValue) || 1)));
+  return Math.min(10, 1 + Math.floor(((level - 1) * 9) / 49));
+}
+
+export const createCompanyAuctionSecure = onCall(
+  { region: 'us-central1', maxInstances: 20 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+    const companyId = typeof request.data?.companyId === 'string' ? request.data.companyId.trim() : '';
+    const rawPrice = request.data?.startingPrice;
+    if (!/^cmp_[a-zA-Z0-9_-]{6,128}$/.test(companyId) || typeof rawPrice !== 'number' || !Number.isSafeInteger(rawPrice)) {
+      throw new HttpsError('invalid-argument', 'INVALID_ARGUMENT');
+    }
+
+    return db.runTransaction(async (tx) => {
+      const companyRef = db.doc(`companies/${companyId}`);
+      const profileRef = db.doc(`profiles/${uid}`);
+      const [companySnap, profileSnap] = await Promise.all([tx.get(companyRef), tx.get(profileRef)]);
+      if (!companySnap.exists || !profileSnap.exists) throw new HttpsError('not-found', 'NOT_FOUND');
+      const company = companySnap.data() as AuctionCompany;
+      const profile = profileSnap.data() as AuctionProfile;
+      if (company.ownerUid !== uid) throw new HttpsError('permission-denied', 'NOT_COMPANY_OWNER');
+      if (company.level < 50) throw new HttpsError('failed-precondition', 'COMPANY_LEVEL_TOO_LOW');
+      if (company.auctionId) throw new HttpsError('already-exists', 'AUCTION_ALREADY_ACTIVE');
+      if ((company.levelUpgradeEndsAt || 0) > Date.now() || (company.vaultUpgradeEndsAt || 0) > Date.now()) {
+        throw new HttpsError('failed-precondition', 'COMPANY_UPGRADE_IN_PROGRESS');
+      }
+      const minPrice = company.level * 1_000;
+      const maxPrice = company.level * 100_000;
+      if (rawPrice !== 0 && (rawPrice < minPrice || rawPrice > maxPrice)) {
+        throw new HttpsError('invalid-argument', 'START_PRICE_OUT_OF_RANGE');
+      }
+
+      const now = Date.now();
+      const auctionId = `auc_${randomUUID()}`;
+      const endsAt = now + 24 * 60 * 60 * 1000;
+      const sellerName = typeof profile.username === 'string' ? profile.username : company.ownerName;
+      tx.create(db.doc(`company_auctions/${auctionId}`), {
+        id: auctionId,
+        companyId,
+        sellerUid: uid,
+        sellerName,
+        companyName: company.name,
+        companyLevel: company.level,
+        startingPrice: rawPrice,
+        currentBid: 0,
+        highestBidderUid: null,
+        highestBidderName: null,
+        endsAt,
+        status: 'active',
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      tx.update(companyRef, {
+        auctionId,
+        auctionEndsAt: endsAt,
+        auctionStatus: 'active',
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return { ok: true, auctionId, endsAt, minPrice, maxPrice };
+    });
+  }
+);
+
+export const placeCompanyAuctionBidSecure = onCall(
+  { region: 'us-central1', maxInstances: 30 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+    const auctionId = typeof request.data?.auctionId === 'string' ? request.data.auctionId.trim() : '';
+    const bidAmount = request.data?.bidAmount;
+    if (!/^auc_[a-zA-Z0-9_-]{8,128}$/.test(auctionId) || typeof bidAmount !== 'number' || !Number.isSafeInteger(bidAmount) || bidAmount < 1 || bidAmount > 10_000_000) {
+      throw new HttpsError('invalid-argument', 'INVALID_ARGUMENT');
+    }
+
+    return db.runTransaction(async (tx) => {
+      const auctionRef = db.doc(`company_auctions/${auctionId}`);
+      const auctionSnap = await tx.get(auctionRef);
+      if (!auctionSnap.exists) throw new HttpsError('not-found', 'AUCTION_NOT_FOUND');
+      const auction = auctionSnap.data() as AuctionRecord;
+      if (auction.status !== 'active' || auction.endsAt <= Date.now()) throw new HttpsError('failed-precondition', 'AUCTION_ENDED');
+      if (auction.sellerUid === uid) throw new HttpsError('permission-denied', 'CANNOT_BID_OWN_AUCTION');
+      if (auction.highestBidderUid === uid) throw new HttpsError('already-exists', 'ALREADY_HIGHEST_BIDDER');
+
+      const companyRef = db.doc(`companies/${auction.companyId}`);
+      const profileRef = db.doc(`profiles/${uid}`);
+      const walletRef = db.doc(`wallets/${uid}`);
+      const [companySnap, profileSnap, walletSnap] = await Promise.all([tx.get(companyRef), tx.get(profileRef), tx.get(walletRef)]);
+      if (!companySnap.exists || !profileSnap.exists || !walletSnap.exists) throw new HttpsError('not-found', 'ACCOUNT_OR_COMPANY_NOT_FOUND');
+      const company = companySnap.data() as AuctionCompany;
+      const profile = profileSnap.data() as AuctionProfile;
+      const wallet = walletSnap.data() as AuctionWallet;
+      if (company.ownerUid !== auction.sellerUid || company.auctionId !== auctionId) throw new HttpsError('failed-precondition', 'AUCTION_COMPANY_MISMATCH');
+      const owned = Math.max(0, Math.floor(profile.stats?.companiesOwned || 0));
+      if (owned >= companyOwnershipLimit(profile.level)) throw new HttpsError('failed-precondition', 'COMPANY_OWNERSHIP_LIMIT');
+
+      const minBid = auction.currentBid > 0
+        ? auction.currentBid + Math.max(100, Math.ceil(auction.currentBid * 0.05))
+        : Math.max(1, auction.startingPrice);
+      if (bidAmount < minBid) throw new HttpsError('invalid-argument', 'BID_TOO_LOW');
+      if (wallet.balance < bidAmount) throw new HttpsError('failed-precondition', 'INSUFFICIENT_FUNDS');
+
+      const oldUid = typeof auction.highestBidderUid === 'string' ? auction.highestBidderUid : null;
+      const oldBid = Math.max(0, Math.floor(auction.currentBid || 0));
+      const oldWalletRef = oldUid ? db.doc(`wallets/${oldUid}`) : null;
+      const oldWalletSnap = oldWalletRef ? await tx.get(oldWalletRef) : null;
+      if (oldUid && (!oldWalletSnap || !oldWalletSnap.exists)) throw new HttpsError('failed-precondition', 'PREVIOUS_ESCROW_ACCOUNT_MISSING');
+
+      const bidTxId = `tx_${randomUUID()}`;
+      tx.update(walletRef, {
+        balance: wallet.balance - bidAmount,
+        totalSpent: wallet.totalSpent + bidAmount,
+        lastTxId: bidTxId,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      tx.create(db.doc(`transactions/${bidTxId}`), {
+        id: bidTxId, fromUid: uid, toUid: 'SYSTEM', amount: bidAmount, fee: 0,
+        netAmount: bidAmount, type: 'company_auction_bid', referenceId: auctionId,
+        description: `Escrow bid for ${auction.companyName}`, status: 'completed',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+
+      if (oldUid && oldWalletRef && oldWalletSnap?.exists) {
+        const oldWallet = oldWalletSnap.data() as AuctionWallet;
+        const refundTxId = `tx_${randomUUID()}`;
+        tx.update(oldWalletRef, {
+          balance: oldWallet.balance + oldBid,
+          totalSpent: Math.max(0, oldWallet.totalSpent - oldBid),
+          totalEarned: oldWallet.totalEarned,
+          lastTxId: refundTxId,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        tx.create(db.doc(`transactions/${refundTxId}`), {
+          id: refundTxId, fromUid: 'SYSTEM', toUid: oldUid, amount: oldBid, fee: 0,
+          netAmount: oldBid, type: 'company_auction_refund', referenceId: auctionId,
+          description: `Outbid refund for ${auction.companyName}`, status: 'completed',
+          createdAt: FieldValue.serverTimestamp(),
+        });
+      }
+
+      tx.update(auctionRef, {
+        currentBid: bidAmount,
+        highestBidderUid: uid,
+        highestBidderName: typeof profile.username === 'string' ? profile.username : 'Player',
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return { ok: true, currentBid: bidAmount, nextMinimumBid: bidAmount + Math.max(100, Math.ceil(bidAmount * 0.05)) };
+    });
+  }
+);
+
+async function settleCompanyAuction(auctionId: string): Promise<void> {
+  await db.runTransaction(async (tx) => {
+    const auctionRef = db.doc(`company_auctions/${auctionId}`);
+    const auctionSnap = await tx.get(auctionRef);
+    if (!auctionSnap.exists) return;
+    const auction = auctionSnap.data() as AuctionRecord;
+    if (auction.status !== 'active' || auction.endsAt > Date.now()) return;
+
+    const companyRef = db.doc(`companies/${auction.companyId}`);
+    const sellerProfileRef = db.doc(`profiles/${auction.sellerUid}`);
+    const sellerWalletRef = db.doc(`wallets/${auction.sellerUid}`);
+    const winnerUid = typeof auction.highestBidderUid === 'string' ? auction.highestBidderUid : null;
+    const [companySnap, sellerProfileSnap, sellerWalletSnap] = await Promise.all([
+      tx.get(companyRef), tx.get(sellerProfileRef), tx.get(sellerWalletRef),
+    ]);
+    const company = companySnap.exists ? companySnap.data() as AuctionCompany : null;
+    const releaseCompany = () => {
+      if (company?.auctionId === auctionId) {
+        tx.update(companyRef, {
+          auctionId: FieldValue.delete(),
+          auctionEndsAt: FieldValue.delete(),
+          auctionStatus: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+    };
+
+    if (!winnerUid) {
+      releaseCompany();
+      tx.update(auctionRef, { status: 'ended_no_bids', updatedAt: FieldValue.serverTimestamp() });
+      return;
+    }
+
+    const winnerProfileRef = db.doc(`profiles/${winnerUid}`);
+    const winnerWalletRef = db.doc(`wallets/${winnerUid}`);
+    const [winnerProfileSnap, winnerWalletSnap] = await Promise.all([
+      tx.get(winnerProfileRef), tx.get(winnerWalletRef),
+    ]);
+    const winnerProfile = winnerProfileSnap.exists ? winnerProfileSnap.data() as AuctionProfile : null;
+    const winnerWallet = winnerWalletSnap.exists ? winnerWalletSnap.data() as AuctionWallet : null;
+    const sellerProfile = sellerProfileSnap.exists ? sellerProfileSnap.data() as AuctionProfile : null;
+    const sellerWallet = sellerWalletSnap.exists ? sellerWalletSnap.data() as AuctionWallet : null;
+    const winnerOwned = Math.max(0, Math.floor(winnerProfile?.stats?.companiesOwned || 0));
+    const canTransfer = Boolean(
+      company && company.auctionId === auctionId && company.ownerUid === auction.sellerUid &&
+      winnerProfile && winnerWallet && sellerProfile && sellerWallet &&
+      winnerOwned < companyOwnershipLimit(winnerProfile.level)
+    );
+
+    if (!canTransfer || !company || !winnerProfile || !winnerWallet || !sellerProfile || !sellerWallet) {
+      if (winnerWallet) {
+        const refundTxId = `tx_${randomUUID()}`;
+        tx.update(winnerWalletRef, {
+          balance: winnerWallet.balance + auction.currentBid,
+          totalSpent: Math.max(0, winnerWallet.totalSpent - auction.currentBid),
+          lastTxId: refundTxId,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        tx.create(db.doc(`transactions/${refundTxId}`), {
+          id: refundTxId, fromUid: 'SYSTEM', toUid: winnerUid, amount: auction.currentBid,
+          fee: 0, netAmount: auction.currentBid, type: 'company_auction_refund',
+          referenceId: auctionId, description: `Auction settlement refund for ${auction.companyName}`,
+          status: 'completed', createdAt: FieldValue.serverTimestamp(),
+        });
+      }
+      releaseCompany();
+      tx.update(auctionRef, { status: 'ended_refunded', updatedAt: FieldValue.serverTimestamp() });
+      return;
+    }
+
+    const sellerStats = { ...(sellerProfile.stats || {}) };
+    const winnerStats = { ...(winnerProfile.stats || {}) };
+    sellerStats.companiesOwned = Math.max(0, Math.floor(sellerStats.companiesOwned || 0) - 1);
+    winnerStats.companiesOwned = winnerOwned + 1;
+    const payoutTxId = `tx_${randomUUID()}`;
+    const logId = `clog_${randomUUID()}`;
+    tx.update(companyRef, {
+      ownerUid: winnerUid,
+      ownerName: typeof winnerProfile.username === 'string' ? winnerProfile.username : 'Player',
+      auctionId: FieldValue.delete(),
+      auctionEndsAt: FieldValue.delete(),
+      auctionStatus: FieldValue.delete(),
+      lastCollectedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    tx.update(sellerProfileRef, { stats: sellerStats, updatedAt: FieldValue.serverTimestamp() });
+    tx.update(winnerProfileRef, { stats: winnerStats, updatedAt: FieldValue.serverTimestamp() });
+    tx.update(sellerWalletRef, {
+      balance: sellerWallet.balance + auction.currentBid,
+      totalEarned: sellerWallet.totalEarned + auction.currentBid,
+      lastTxId: payoutTxId,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    tx.create(db.doc(`transactions/${payoutTxId}`), {
+      id: payoutTxId, fromUid: 'SYSTEM', toUid: auction.sellerUid, amount: auction.currentBid,
+      fee: 0, netAmount: auction.currentBid, type: 'company_auction_sale',
+      referenceId: auctionId, description: `Sold company ${auction.companyName}`,
+      status: 'completed', createdAt: FieldValue.serverTimestamp(),
+    });
+    tx.create(db.doc(`company_logs/${logId}`), {
+      id: logId, companyId: auction.companyId, ownerUid: winnerUid,
+      action: 'auction_purchase', amount: -auction.currentBid,
+      details: `Acquired ${auction.companyName} from auction`,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    tx.update(auctionRef, {
+      status: 'ended_sold',
+      winnerUid,
+      winnerName: typeof winnerProfile.username === 'string' ? winnerProfile.username : 'Player',
+      settledAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+}
+
+export const settleExpiredCompanyAuctions = onSchedule(
+  { schedule: 'every 1 minutes', timeZone: 'UTC', region: 'us-central1', maxInstances: 1 },
+  async () => {
+    const snapshot = await db.collection('company_auctions').where('status', '==', 'active').limit(100).get();
+    const now = Date.now();
+    for (const auctionDoc of snapshot.docs) {
+      const auction = auctionDoc.data() as AuctionRecord;
+      if (auction.endsAt <= now) await settleCompanyAuction(auctionDoc.id);
+    }
+  }
+);
