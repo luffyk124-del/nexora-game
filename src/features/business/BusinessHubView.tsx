@@ -22,6 +22,7 @@ import {
   calculateManufacturingCost,
   calculatePropertyHourlyNet,
   COMPANY_MAX_LEVEL,
+  getCompanyOwnershipLimit,
   COMPANY_VAULT_MAX_LEVEL,
   COMPANY_VAULT_UPGRADES,
   calculateCompanyVaultBalance,
@@ -134,10 +135,7 @@ export function BusinessHubView({
     return sum + netHourly;
   }, 0);
 
-  const totalPropNetHr = properties.reduce((sum, p) => {
-    const { netHourly } = calculatePropertyHourlyNet(p, profile.skills.negotiation || 0);
-    return sum + netHourly;
-  }, 0);
+  const totalPropNetHr = 0; // Property operations have been retired from the active business UI.
 
   async function handleFoundCompany(e: React.FormEvent) {
     e.preventDefault();
@@ -152,7 +150,11 @@ export function BusinessHubView({
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
       showToast(
-        code === 'INSUFFICIENT_FUNDS'
+        code === 'COMPANY_OWNERSHIP_LIMIT'
+          ? language === 'ar'
+            ? `وصلت إلى حد الشركات المسموح به (${companies.length}/${getCompanyOwnershipLimit(profile.level)}).`
+            : `Company ownership limit reached (${companies.length}/${getCompanyOwnershipLimit(profile.level)}).`
+          : code === 'INSUFFICIENT_FUNDS'
           ? language === 'ar'
             ? 'رصيدك غير كافٍ.'
             : 'Insufficient funds.'
@@ -368,7 +370,6 @@ export function BusinessHubView({
   const subTabs: { id: BusinessSubTab; label: string }[] = [
     { id: 'companies', label: t.subCompanies },
     { id: 'manufacturing', label: t.subManufacturing },
-    { id: 'properties', label: t.subProperties },
     { id: 'inventory', label: t.subInventory },
     { id: 'financials', label: t.subFinancials },
   ];
@@ -451,11 +452,11 @@ export function BusinessHubView({
 
             <button
               type="submit"
-              disabled={busyKey === 'found_company'}
+              disabled={busyKey === 'found_company' || companies.length >= getCompanyOwnershipLimit(profile.level)}
               className="w-full min-h-[44px] px-4 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
             >
               <Plus className="w-4 h-4" />
-              <span>{busyKey === 'found_company' ? '...' : t.foundCompany}</span>
+              <span>{busyKey === 'found_company' ? '...' : companies.length >= getCompanyOwnershipLimit(profile.level) ? (language === 'ar' ? 'اكتمل حد الشركات' : 'Company limit reached') : t.foundCompany}</span>
             </button>
           </form>
 
