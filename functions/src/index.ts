@@ -1689,3 +1689,80 @@ export const getPublicPlayerProfileSecure = onCall(
     };
   }
 );
+
+
+// Dedicated NEXORA Reports Center API. Access is restricted to verified report administrators.
+async function requireReportsAdmin(request: Parameters<Parameters<typeof onCall>[1]>[0]): Promise<string> {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
+  if (request.auth?.token.email_verified !== true) {
+    throw new HttpsError('permission-denied', 'VERIFIED_EMAIL_REQUIRED');
+  }
+  const claims = request.auth.token as Record<string, unknown>;
+  if (claims.reportsAdmin === true) return uid;
+  const adminSnap = await db.doc('reports_admins/' + uid).get();
+  if (adminSnap.exists && adminSnap.data()?.enabled === true) return uid;
+  throw new HttpsError('permission-denied', 'REPORTS_ADMIN_REQUIRED');
+}
+
+export const listPlayerReportsAdmin = onCall(
+  { region: 'us-central1', maxInstances: 10, timeoutSeconds: 30 },
+  async (request) => {
+    await requireReportsAdmin(request);
+    const status = typeof request.data?.status === 'string' ? request.data.status : 'all';
+    const allowed = ['all', 'open', 'reviewing', 'closed'];
+    if (!allowed.includes(status)) throw new HttpsError('invalid-argument', 'INVALID_STATUS');
+    const limit = Math.max(1, Math.min(100, Number(request.data?.limit) || 50));
+    let query: FirebaseFirestore.Query = db.collection('player_reports').orderBy('createdAt', 'desc').limit(limit);
+    if (status !== 'all') query = db.collection('player_reports').where('status', '==', status).orderBy('createdAt', 'desc').limit(limit);
+    const snapshot = await query.get();
+    return {
+      reports: snapshot.docs.map((item) => {
+        const data = item.data();
+        const createdAt = data.createdAt;
+        return {
+          id: item.id,
+          reporterUid: typeof data.reporterUid === 'string' ? data.reporterUid : '',
+          targetUid: typeof data.targetUid === 'string' ? data.targetUid : '',
+          reason: typeof data.reason === 'string' ? data.reason : 'other',
+          status: typeof data.status === 'string' ? data.status : 'open',
+          createdAt: createdAt && typeof createdAt.toMillis === 'function' ? createdAt.toMillis() : null,
+          reviewedAt: data.reviewedAt && typeof data.reviewedAt.toMillis === 'function' ? data.reviewedAt.toMillis() : null,
+          reviewedBy: typeof data.reviewedBy === 'string' ? data.reviewedBy : null,
+        };
+      }),
+    };
+  }
+);
+
+export const updatePlayerReportAdmin = onCall(
+  { region: 'us-central1', maxInstances: 10, timeoutSeconds: 30 },
+  async (request) => {
+    const adminUid = await requireReportsAdmin(request);
+    const reportId = typeof request.data?.reportId === 'string' ? request.data.reportId.trim() : '';
+    const status = request.data?.status;
+    if (!reportId || reportId.length > 180 || !['reviewing', 'closed', 'open'].includes(status)) {
+      throw new HttpsError('invalid-argument', 'INVALID_REPORT_UPDATE');
+    }
+    const reportRef = db.collection('player_reports').doc(reportId);
+    const auditRef = db.collection('player_report_audit').doc('audit_' + randomUUID());
+    await db.runTransaction(async (tx) => {
+      const reportSnap = await tx.get(reportRef);
+      if (!reportSnap.exists) throw new HttpsError('not-found', 'REPORT_NOT_FOUND');
+      tx.update(reportRef, {
+        status,
+        reviewedBy: adminUid,
+        reviewedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      tx.create(auditRef, {
+        reportId,
+        actorUid: adminUid,
+        action: 'status_changed',
+        newStatus: status,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    });
+    return { ok: true };
+  }
+);
