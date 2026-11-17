@@ -220,6 +220,7 @@ export interface Organization {
   reputation: number;
   level: number;
   memberCapacity?: number;
+  joinMode?: 'open' | 'request' | 'closed';
   research?: Partial<Record<OrganizationResearchId, number>>;
   upgradeStartedAt?: number;
   upgradeEndsAt?: number;
