@@ -499,7 +499,7 @@ export function OrganizationHubView({
                         [{org.tag}] {org.name}
                       </h3>
                       <p className="text-xs text-[#9299A6]">
-                        {language === 'ar' ? `المستوى ${org.level}` : `Level ${org.level}`} · {org.leaderName} · {t.members}:{' '}
+                        {language === 'ar' ? `المستوى ${org.level}` : `Level ${org.level}`} · {org.joinMode === 'open' ? (language === 'ar' ? 'مفتوح' : 'Open') : org.joinMode === 'closed' ? (language === 'ar' ? 'مغلق' : 'Closed') : (language === 'ar' ? 'بطلب' : 'Request')} · {org.leaderName} · {t.members}:{' '}
                         <span className="font-mono-num text-[#F4F5F7]">{org.memberCount}</span> ·{' '}
                         {t.reputation}:{' '}
                         <span className="font-mono-num text-[#F4F5F7]">{org.reputation}</span>
@@ -511,11 +511,11 @@ export function OrganizationHubView({
 
                     <button
                       type="button"
-                      disabled={isPending || busyKey === `join_${org.id}`}
+                      disabled={isPending || org.joinMode === 'closed' || busyKey === `join_${org.id}`}
                       onClick={() => handleRequestJoin(org.id)}
                       className="min-h-[42px] px-4 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white text-xs font-semibold whitespace-nowrap shrink-0 disabled:bg-[#1B2230] disabled:text-[#9299A6]"
                     >
-                      {isPending ? t.requestPending : busyKey === `join_${org.id}` ? '...' : t.joinOrg}
+                      {isPending ? t.requestPending : org.joinMode === 'closed' ? (language === 'ar' ? 'الانضمام مغلق' : 'Closed') : busyKey === `join_${org.id}` ? '...' : org.joinMode === 'open' ? (language === 'ar' ? 'انضمام مباشر' : 'Join now') : t.joinOrg}
                     </button>
                   </div>
                 );
