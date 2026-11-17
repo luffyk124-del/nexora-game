@@ -57,13 +57,17 @@ type RestWrite = {
   currentDocument?: { exists: boolean };
 };
 
-const VAULT_CAPACITIES = [3500, 7000, 14000, 25000, 40000] as const;
-const VAULT_UPGRADES = [
-  { cost: 1500, materials: { copper_wire: 20, crude_alloy: 10 } },
-  { cost: 4000, materials: { silicon_ore: 20, energy_cells: 15 } },
-  { cost: 10000, materials: { carbon_fiber: 15, precision_frame: 10 } },
-  { cost: 25000, materials: { rare_minerals: 20, quantum_server: 5 } },
+const VAULT_MAX_LEVEL = 25;
+const VAULT_MATERIAL_SETS = [
+  { copper_wire: 20, crude_alloy: 10 },
+  { silicon_ore: 20, energy_cells: 15 },
+  { carbon_fiber: 15, precision_frame: 10 },
+  { rare_minerals: 20, quantum_server: 5 },
 ] as const;
+const VAULT_UPGRADES = Array.from({ length: VAULT_MAX_LEVEL - 1 }, (_, index) => ({
+  cost: Math.round(1_500 * Math.pow(1.32, index)),
+  materials: Object.fromEntries(Object.entries(VAULT_MATERIAL_SETS[index % VAULT_MATERIAL_SETS.length]).map(([itemId, qty]) => [itemId, Math.round(qty * (1 + index * 0.12))])),
+}));
 const REPUTATION_YIELD_TIERS = [
   { min: 0, bonus: 0 },
   { min: 60, bonus: 0.02 },
@@ -84,7 +88,7 @@ function numberOrZero(value: unknown): number {
 
 function vaultLevelOf(company: VaultCompany): number {
   const raw = numberOrZero(company.vaultLevel);
-  return Math.max(1, Math.min(5, raw ? Math.floor(raw) : 1));
+  return Math.max(1, Math.min(VAULT_MAX_LEVEL, raw ? Math.floor(raw) : 1));
 }
 
 function timestampMillis(value: unknown, fallback: number): number {
@@ -292,7 +296,7 @@ function companyUpgradeDurationMs(targetLevel: number): number {
 
 function calculatedVaultBalance(company: VaultCompany, netHourly: number, nowMs: number): number {
   const level = vaultLevelOf(company);
-  const capacity = VAULT_CAPACITIES[level - 1];
+  const capacity = Math.max(3_500, Math.floor((Math.max(0, netHourly) * 4 * level) / VAULT_MAX_LEVEL));
   const stored = Math.max(0, numberOrZero(company.vaultBalance));
   const last = timestampMillis(company.lastCollectedAt, nowMs);
   const elapsed = Math.max(0, nowMs - last);
@@ -399,7 +403,7 @@ async function completeVaultUpgrade(db: FirestoreRest, uid: string, companyId: s
     const endsAt=numberOrZero(company.vaultUpgradeEndsAt),target=numberOrZero(company.vaultUpgradeTargetLevel);
     if(!endsAt||!target) throw new VaultError('NO_UPGRADE_IN_PROGRESS',409);
     if(Date.now()<endsAt) throw new VaultError('UPGRADE_NOT_FINISHED',409);
-    if(target!==vaultLevelOf(company)+1||target>5) throw new VaultError('INVALID_UPGRADE_STATE',409);
+    if(target!==vaultLevelOf(company)+1||target>VAULT_MAX_LEVEL) throw new VaultError('INVALID_UPGRADE_STATE',409);
     const logId=`clog_${randomUUID()}`;
     const writes:RestWrite[]=[
       updateWrite(`companies/${companyId}`,{vaultLevel:target},['updatedAt'],false,['vaultUpgradeStartedAt','vaultUpgradeEndsAt','vaultUpgradeTargetLevel']),
@@ -426,7 +430,7 @@ async function upgradeVault(db: FirestoreRest, uid: string, companyId: string) {
 
     const oldLevel = vaultLevelOf(company);
     if (numberOrZero(company.vaultUpgradeEndsAt) > Date.now()) throw new VaultError('UPGRADE_IN_PROGRESS',409);
-    if (oldLevel >= 5) throw new VaultError('VAULT_MAX_LEVEL', 409);
+    if (oldLevel >= VAULT_MAX_LEVEL) throw new VaultError('VAULT_MAX_LEVEL', 409);
     const upgrade = VAULT_UPGRADES[oldLevel - 1];
     if (numberOrZero(wallet.balance) < upgrade.cost) throw new VaultError('INSUFFICIENT_FUNDS', 409);
 
@@ -475,7 +479,7 @@ async function upgradeVault(db: FirestoreRest, uid: string, companyId: string) {
       }, ['createdAt'], true),
     ];
     return {
-      result: { ok: true, targetLevel: target, endsAt, vaultBalance: preserved, capacity: VAULT_CAPACITIES[oldLevel - 1] },
+      result: { ok: true, targetLevel: target, endsAt, vaultBalance: preserved, capacity: Math.max(3_500, Math.floor((Math.max(0, netHourly) * 4 * oldLevel) / VAULT_MAX_LEVEL)) },
       writes,
     };
   });
