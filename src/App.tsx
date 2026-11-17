@@ -15,6 +15,7 @@ import { HomeDashboardView } from './features/home/HomeDashboardView';
 import { MarketHubView } from './features/market/MarketHubView';
 import { OrganizationHubView } from './features/organization/OrganizationHubView';
 import { ProfileHubView } from './features/profile/ProfileHubView';
+import { SocialHubView } from './features/social/SocialHubView';
 import { useGameData } from './hooks/useGameData';
 import type { MainTab } from './types/game';
 
@@ -138,6 +139,14 @@ function NexoraAppContent() {
           orgRequests={game.orgRequests}
           myPendingOrgIds={game.myPendingOrgIds}
           orgTransactions={game.orgTransactions}
+          language={game.language}
+        />
+      )}
+
+      {activeTab === 'social' && (
+        <SocialHubView
+          profile={game.profile}
+          myOrgMember={game.myOrgMember}
           language={game.language}
         />
       )}
