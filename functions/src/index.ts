@@ -1713,11 +1713,9 @@ export const listPlayerReportsAdmin = onCall(
     const allowed = ['all', 'open', 'reviewing', 'closed'];
     if (!allowed.includes(status)) throw new HttpsError('invalid-argument', 'INVALID_STATUS');
     const limit = Math.max(1, Math.min(100, Number(request.data?.limit) || 50));
-    let query: Query = db.collection('player_reports').orderBy('createdAt', 'desc').limit(limit);
-    if (status !== 'all') query = db.collection('player_reports').where('status', '==', status).orderBy('createdAt', 'desc').limit(limit);
+    const query: Query = db.collection('player_reports').orderBy('createdAt', 'desc').limit(limit);
     const snapshot = await query.get();
-    return {
-      reports: snapshot.docs.map((item) => {
+    const reports = snapshot.docs.map((item) => {
         const data = item.data();
         const createdAt = data.createdAt;
         return {
@@ -1730,8 +1728,8 @@ export const listPlayerReportsAdmin = onCall(
           reviewedAt: data.reviewedAt && typeof data.reviewedAt.toMillis === 'function' ? data.reviewedAt.toMillis() : null,
           reviewedBy: typeof data.reviewedBy === 'string' ? data.reviewedBy : null,
         };
-      }),
-    };
+      });
+    return { reports: status === 'all' ? reports : reports.filter((report) => report.status === status) };
   }
 );
 
