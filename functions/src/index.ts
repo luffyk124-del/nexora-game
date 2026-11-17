@@ -254,6 +254,7 @@ export const collectCompanyRevenueSecure = onCall(
         const wallet = walletSnap.data() as VaultWallet;
         const profile = profileSnap.data() as VaultProfile;
         if (company.ownerUid !== uid) throw new Error('UNAUTHORIZED');
+        if (company.auctionId) throw new Error('COMPANY_IN_AUCTION');
         const now = Date.now();
         const lastCollected = timestampMillis(company.lastCollectedAt, now);
         if (now - lastCollected < 30_000) throw new Error('NOTHING_TO_COLLECT');
