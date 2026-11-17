@@ -3,6 +3,7 @@ import { collection, limit, onSnapshot, orderBy, query, where } from 'firebase/f
 import { httpsCallable } from 'firebase/functions';
 import { ArrowLeft, Globe2, MessageCircle, Search, Send, ShieldCheck, Users, UserRound } from 'lucide-react';
 import { db, functions } from '../../lib/firebase';
+import { AVATARS } from '../../data/catalog';
 import { timestampToMs } from '../../lib/economy';
 import type { Language, OrganizationMember, PlayerProfile } from '../../types/game';
 
@@ -20,6 +21,7 @@ type Conversation = {
   id: string;
   participants: string[];
   participantNames: Record<string, string>;
+  participantAvatars?: Record<string, string>;
   lastMessage: string;
   lastMessageAt: unknown;
   lastSenderUid: string;
@@ -48,6 +50,20 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
+
+  const avatarUrl = (avatarId: string | undefined) =>
+    AVATARS.find((avatar) => avatar.id === avatarId)?.src || AVATARS[0]?.src || '';
+
+  async function openPlayerProfile(targetUid: string) {
+    try {
+      const getProfile = httpsCallable<{ targetUid: string }, PublicPlayer>(functions, 'getPublicPlayerProfileSecure');
+      const result = await getProfile({ targetUid });
+      setSelectedPlayer(result.data);
+      setMode('players');
+    } catch {
+      setError(ar ? 'تعذر فتح الملف الشخصي.' : 'Could not open player profile.');
+    }
+  }
 
   const canInvite = Boolean(myOrgMember && (
     myOrgMember.role === 'leader' ||
@@ -242,9 +258,12 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
             {players.map((player) => (
               <button key={player.uid} type="button" onClick={() => setSelectedPlayer(player)}
                 className="w-full flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-[#141821] p-3 text-start hover:border-white/20">
-                <span className="min-w-0">
-                  <span className="block text-sm font-semibold text-[#F4F5F7] truncate">{player.username}</span>
+                <span className="flex min-w-0 items-center gap-3">
+                  <img src={avatarUrl(player.avatarId)} alt="" className="h-10 w-10 rounded-xl object-cover bg-[#252B36]" />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-[#F4F5F7] truncate">{player.username}</span>
                   <span className="block mt-1 text-[11px] text-[#9299A6]">{ar ? 'المستوى' : 'Level'} {player.level} · {player.title}</span>
+                  </span>
                 </span>
                 <span className="shrink-0 rounded-lg bg-[#0B0D12] px-2 py-1 text-xs font-mono-num text-amber-200">Lv.{player.level}</span>
               </button>
@@ -255,7 +274,7 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
             {selectedPlayer ? (
               <div className="space-y-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-14 h-14 rounded-2xl bg-[#252B36] flex items-center justify-center text-xl font-bold text-amber-200">{selectedPlayer.username.slice(0, 1).toUpperCase()}</div>
+                  <img src={avatarUrl(selectedPlayer.avatarId)} alt="" className="w-14 h-14 rounded-2xl object-cover bg-[#252B36]" />
                   <div>
                     <h2 className="text-base font-bold text-[#F4F5F7]">{selectedPlayer.username}</h2>
                     <p className="text-xs text-[#9299A6]">{selectedPlayer.title || (ar ? 'لا يوجد لقب' : 'No title')}</p>
@@ -298,7 +317,10 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
               return (
                 <button key={conversation.id} type="button" onClick={() => setSelectedConversation(conversation.id)}
                   className={'w-full rounded-xl p-3 text-start ' + (selectedConversation === conversation.id ? 'bg-[#252B36]' : 'hover:bg-[#1B2230]')}>
-                  <span className="block text-sm font-semibold text-[#F4F5F7]">{name}</span>
+                  <span className="flex items-center gap-2 text-sm font-semibold text-[#F4F5F7]">
+                    <img src={avatarUrl(conversation.participantAvatars?.[otherUid])} alt="" className="h-8 w-8 rounded-lg object-cover bg-[#252B36]" />
+                    {name}
+                  </span>
                   <span className="block mt-1 text-[11px] text-[#9299A6] truncate">{conversation.lastMessage || (ar ? 'ابدأ المحادثة' : 'Start conversation')}</span>
                 </button>
               );
@@ -310,7 +332,10 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
               <>
                 <div className="flex items-center gap-2 border-b border-white/8 pb-3">
                   <button type="button" onClick={() => setSelectedConversation(null)} className="lg:hidden min-h-[38px] min-w-[38px] rounded-lg bg-[#252B36] flex items-center justify-center"><ArrowLeft className="w-4 h-4" /></button>
-                  <h2 className="text-sm font-semibold">{selectedConversationData?.participantNames?.[targetUid] || (ar ? 'المحادثة' : 'Conversation')}</h2>
+                  <h2 className="text-sm font-semibold flex-1">{selectedConversationData?.participantNames?.[targetUid] || (ar ? 'المحادثة' : 'Conversation')}</h2>
+                  <button type="button" onClick={() => void openPlayerProfile(targetUid)} className="min-h-[36px] px-3 rounded-lg bg-[#252B36] text-[11px] text-[#F4F5F7]">
+                    {ar ? 'الملف الشخصي' : 'Profile'}
+                  </button>
                 </div>
                 <div className="flex-1 min-h-[280px] max-h-[55vh] overflow-y-auto py-3 space-y-2">
                   {directMessages.map((message) => (
@@ -339,7 +364,11 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
           <div className="flex-1 min-h-[360px] max-h-[60vh] overflow-y-auto py-3 space-y-2">
             {globalMessages.map((message) => (
               <div key={message.id} className="rounded-xl bg-[#0B0D12] p-3">
-                <div className="flex items-center justify-between gap-2 mb-1"><span className="text-xs font-semibold text-amber-200">{message.senderName}</span><span className="text-[10px] text-[#9299A6]">{dateLabel(message.createdAt)}</span></div>
+                <div className="flex items-center gap-2 mb-1">
+                  <img src={avatarUrl(message.avatarId)} alt="" className="h-7 w-7 rounded-lg object-cover bg-[#252B36]" />
+                  <span className="text-xs font-semibold text-amber-200 flex-1">{message.senderName}</span>
+                  <span className="text-[10px] text-[#9299A6]">{dateLabel(message.createdAt)}</span>
+                </div>
                 <p className="text-xs whitespace-pre-wrap break-words">{message.text}</p>
               </div>
             ))}
