@@ -22,6 +22,7 @@ import {
   kickOrgMember,
   leaveOrganization,
   requestJoinOrganization,
+  setOrganizationJoinMode,
   updateOrgMemberRole,
   upgradeOrganization,
   completeOrganizationUpgrade,
@@ -116,6 +117,19 @@ export function OrganizationHubView({
     }
   }
 
+  async function handleJoinModeChange(mode: 'open' | 'request' | 'closed') {
+    if (!currentOrg || !canManageOrg) return;
+    setBusyKey('join_mode');
+    try {
+      await setOrganizationJoinMode(profile.uid, currentOrg.id, mode);
+      showToast(language === 'ar' ? 'تم تحديث سياسة الانضمام.' : 'Join policy updated.', 'success');
+    } catch (error) {
+      showToast(language === 'ar' ? 'تعذر تحديث سياسة الانضمام.' : 'Could not update join policy.', 'error');
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
   async function handleCreateOrg(e: React.FormEvent) {
     e.preventDefault();
     setBusyKey('create_org');
@@ -164,9 +178,11 @@ export function OrganizationHubView({
   async function handleRequestJoin(orgId: string) {
     setBusyKey(`join_${orgId}`);
     try {
-      await requestJoinOrganization(profile.uid, profile.username, orgId);
+      const result = await requestJoinOrganization(profile.uid, profile.username, orgId);
       showToast(
-        language === 'ar' ? 'تم إرسال طلب الانضمام للإدارة.' : 'Join request sent to leadership.',
+        result === 'joined'
+          ? (language === 'ar' ? 'انضممت إلى المنظمة بنجاح.' : 'You joined the organization.')
+          : (language === 'ar' ? 'تم إرسال طلب الانضمام للإدارة.' : 'Join request sent to leadership.'),
         'success'
       );
     } catch (err) {
@@ -716,6 +732,26 @@ export function OrganizationHubView({
 
           {/* Role Permissions Matrix */}
           {activeOrgTab === 'overview' && <div className="space-y-5">
+          <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold text-[#F4F5F7]">{language === 'ar' ? 'سياسة الانضمام' : 'Join policy'}</h2>
+              <span className="text-[11px] text-[#9299A6]">{language === 'ar' ? 'للإدارة' : 'Leadership'}</span>
+            </div>
+            {canManageOrg ? (
+              <select
+                value={currentOrg.joinMode || 'request'}
+                disabled={busyKey === 'join_mode'}
+                onChange={(event) => void handleJoinModeChange(event.target.value as 'open' | 'request' | 'closed')}
+                className="w-full min-h-[44px] rounded-xl border border-white/10 bg-[#0B0D12] px-3 text-sm text-[#F4F5F7]"
+              >
+                <option value="open">{language === 'ar' ? 'مفتوح — انضمام مباشر' : 'Open — join immediately'}</option>
+                <option value="request">{language === 'ar' ? 'طلب — موافقة الإدارة' : 'Request — leadership approval'}</option>
+                <option value="closed">{language === 'ar' ? 'مغلق — منع الانضمام' : 'Closed — no new members'}</option>
+              </select>
+            ) : (
+              <p className="text-xs text-[#9299A6]">{currentOrg.joinMode === 'open' ? (language === 'ar' ? 'الانضمام مفتوح.' : 'Joining is open.') : currentOrg.joinMode === 'closed' ? (language === 'ar' ? 'الانضمام مغلق.' : 'Joining is closed.') : (language === 'ar' ? 'الانضمام بطلب وموافقة الإدارة.' : 'Joining requires leadership approval.')}</p>
+            )}
+          </div>
           <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-3">
             <h2 className="text-sm font-semibold text-[#F4F5F7]">{t.orgPerks}</h2>
             <div className="grid grid-cols-2 gap-2.5 text-xs">
