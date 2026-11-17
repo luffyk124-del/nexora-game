@@ -939,6 +939,10 @@ export async function foundCompany(
       if (!walletSnap.exists() || !profileSnap.exists()) throw new Error('ACCOUNT_NOT_FOUND');
       const wallet = walletSnap.data() as Wallet;
       const profile = profileSnap.data() as PlayerProfile;
+      const ownedCompaniesSnap = await tx.get(query(collection(db, 'companies'), where('ownerUid', '==', uid)));
+      const playerLevel = Math.max(1, Math.min(100, Math.floor(profile.level || 1)));
+      const ownershipLimit = Math.min(10, 1 + Math.floor(((playerLevel - 1) * 9) / 49));
+      if (ownedCompaniesSnap.size >= ownershipLimit) throw new Error('COMPANY_OWNERSHIP_LIMIT');
 
       if (wallet.balance < spec.foundingCost) throw new Error('INSUFFICIENT_FUNDS');
 
@@ -1002,7 +1006,7 @@ export async function foundCompany(
       });
     });
   } catch (error) {
-    if (error instanceof Error && ['INVALID_NAME', 'INVALID_SECTOR', 'INSUFFICIENT_FUNDS'].includes(error.message)) {
+    if (error instanceof Error && ['INVALID_NAME', 'INVALID_SECTOR', 'INSUFFICIENT_FUNDS', 'COMPANY_OWNERSHIP_LIMIT'].includes(error.message)) {
       throw error;
     }
     handleFirestoreError(error, OperationType.WRITE, `companies/${companyId}`);
