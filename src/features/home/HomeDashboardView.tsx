@@ -1,5 +1,5 @@
 import { ArrowDownLeft, ArrowUpRight, Award, CalendarCheck, Flame, TrendingUp } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { EconomicChart } from '../../components/ui/EconomicChart';
 import { useToast } from '../../components/ui/ToastProvider';
 import { AVATARS, CATALOG_ITEMS, ITEM_MAP, MISSIONS } from '../../data/catalog';
@@ -52,6 +52,22 @@ export function HomeDashboardView({
   const t = useTranslations(language);
   const { showToast } = useToast();
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [dailyResetCountdown, setDailyResetCountdown] = useState('');
+
+  useEffect(() => {
+    const updateCountdown = () => {
+      const now = new Date();
+      const nextReset = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+      const remaining = Math.max(0, nextReset - now.getTime());
+      const hours = Math.floor(remaining / 3_600_000).toString().padStart(2, '0');
+      const minutes = Math.floor((remaining % 3_600_000) / 60_000).toString().padStart(2, '0');
+      const seconds = Math.floor((remaining % 60_000) / 1_000).toString().padStart(2, '0');
+      setDailyResetCountdown(`${hours}:${minutes}:${seconds}`);
+    };
+    updateCountdown();
+    const timer = window.setInterval(updateCountdown, 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const xpProg = calculateLevelProgress(profile.xp);
   const avatar = AVATARS.find((a) => a.id === profile.avatarId) || AVATARS[0];
@@ -222,6 +238,13 @@ export function HomeDashboardView({
               +{'$'}{dailyAmount.toLocaleString()}
             </span>
           </div>
+
+          {claimedDailyToday && (
+            <p className="text-center text-xs text-[#9299A6]">
+              {language === 'ar' ? 'المكافأة التالية بعد' : 'Next reward in'}{' '}
+              <span className="font-mono-num font-semibold text-[#E04455]" dir="ltr">{dailyResetCountdown}</span>
+            </p>
+          )}
 
           <button
             type="button"
