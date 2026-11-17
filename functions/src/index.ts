@@ -178,7 +178,7 @@ export const upgradeCompanyProfitVault = onCall(
         const company = companySnap.data() as VaultCompany;
         const wallet = walletSnap.data() as VaultWallet;
         const profile = profileSnap.data() as VaultProfile;
-        if (company.ownerUid !== uid) throw new Error('UNAUTHORIZED');
+        if (company.ownerUid !== uid) throw new Error('UNAUTHORIZED');\n        if (company.auctionId) throw new Error('COMPANY_IN_AUCTION');
         const oldLevel = vaultLevelOf(company);
         if (oldLevel >= VAULT_MAX_LEVEL) throw new Error('VAULT_MAX_LEVEL');
         const upgrade = VAULT_UPGRADES[oldLevel - 1];
