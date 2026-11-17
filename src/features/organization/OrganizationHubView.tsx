@@ -77,6 +77,7 @@ export function OrganizationHubView({
   const [kickTarget, setKickTarget] = useState<{ uid: string; username: string } | null>(null);
   const [clockNow, setClockNow] = useState(Date.now());
   const [activeOrgTab, setActiveOrgTab] = useState<'overview' | 'research' | 'treasury' | 'members'>('overview');
+  const [activeJoinTab, setActiveJoinTab] = useState<'browse' | 'create'>('browse');
 
   const currentOrg = myOrgMember
     ? organizations.find((o) => o.id === myOrgMember.orgId) || null
@@ -375,9 +376,13 @@ export function OrganizationHubView({
 
   if (!myOrgMember || !currentOrg) {
     return (
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="space-y-4">
+        <nav className="grid grid-cols-2 gap-2" aria-label={language === 'ar' ? 'خيارات المنظمة' : 'Organization options'}>
+          <button type="button" onClick={() => setActiveJoinTab('browse')} aria-pressed={activeJoinTab === 'browse'} className={`min-h-[44px] rounded-xl border px-3 text-sm font-semibold ${activeJoinTab === 'browse' ? 'border-[#E04455] bg-[#B91C32] text-white' : 'border-white/10 bg-[#141821] text-[#9299A6]'}`}>{language === 'ar' ? 'الانضمام إلى منظمة' : 'Join an organization'}</button>
+          <button type="button" onClick={() => setActiveJoinTab('create')} aria-pressed={activeJoinTab === 'create'} className={`min-h-[44px] rounded-xl border px-3 text-sm font-semibold ${activeJoinTab === 'create' ? 'border-[#E04455] bg-[#B91C32] text-white' : 'border-white/10 bg-[#141821] text-[#9299A6]'}`}>{t.createOrg}</button>
+        </nav>
         {/* Create Organization */}
-        <form
+        {activeJoinTab === 'create' && <form
           onSubmit={handleCreateOrg}
           className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-4 h-fit"
         >
@@ -432,10 +437,10 @@ export function OrganizationHubView({
           >
             {t.createOrg} ({'$'}{ORG_CREATION_COST.toLocaleString()})
           </button>
-        </form>
+        </form>}
 
         {/* Browse Organizations */}
-        <div className="lg:col-span-2 space-y-3.5">
+        {activeJoinTab === 'browse' && <div className="space-y-3.5">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold text-[#F4F5F7]">
               {language === 'ar' ? 'المنظمات والتحالفات النشطة' : 'Active Syndicates & Organizations'}
@@ -478,7 +483,7 @@ export function OrganizationHubView({
                         [{org.tag}] {org.name}
                       </h3>
                       <p className="text-xs text-[#9299A6]">
-                        {org.leaderName} · {t.members}:{' '}
+                        {language === 'ar' ? `المستوى ${org.level}` : `Level ${org.level}`} · {org.leaderName} · {t.members}:{' '}
                         <span className="font-mono-num text-[#F4F5F7]">{org.memberCount}</span> ·{' '}
                         {t.reputation}:{' '}
                         <span className="font-mono-num text-[#F4F5F7]">{org.reputation}</span>
@@ -500,7 +505,7 @@ export function OrganizationHubView({
                 );
               })
           )}
-        </div>
+        </div>}
       </div>
     );
   }
