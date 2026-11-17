@@ -76,6 +76,7 @@ export function OrganizationHubView({
   const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
   const [kickTarget, setKickTarget] = useState<{ uid: string; username: string } | null>(null);
   const [clockNow, setClockNow] = useState(Date.now());
+  const [activeOrgTab, setActiveOrgTab] = useState<'overview' | 'research' | 'treasury' | 'members'>('overview');
 
   const currentOrg = myOrgMember
     ? organizations.find((o) => o.id === myOrgMember.orgId) || null
@@ -574,7 +575,21 @@ export function OrganizationHubView({
         </div>
       </div>
 
-      <section className="rounded-2xl border border-white/8 bg-[#141821] p-5 space-y-4">
+      <nav className="grid grid-cols-2 sm:grid-cols-4 gap-2" aria-label={language === 'ar' ? 'أقسام المنظمة' : 'Organization sections'}>
+        {([
+          ['overview', language === 'ar' ? 'المنظمة' : 'Overview'],
+          ['research', language === 'ar' ? 'الأبحاث' : 'Research'],
+          ['treasury', language === 'ar' ? 'الخزنة' : 'Treasury'],
+          ['members', language === 'ar' ? 'الأعضاء' : 'Members'],
+        ] as const).map(([tab, label]) => (
+          <button key={tab} type="button" onClick={() => setActiveOrgTab(tab)} aria-pressed={activeOrgTab === tab}
+            className={`min-h-[44px] rounded-xl border px-3 text-sm font-semibold transition-colors ${activeOrgTab === tab ? 'border-[#E04455] bg-[#B91C32] text-white' : 'border-white/10 bg-[#141821] text-[#9299A6] hover:text-white'}`}>
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {activeOrgTab === 'research' && <section className="rounded-2xl border border-white/8 bg-[#141821] p-5 space-y-4">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-bold text-[#F4F5F7]">{language === 'ar' ? 'أبحاث المنظمة' : 'Organization Research'}</h2>
@@ -615,12 +630,12 @@ export function OrganizationHubView({
           })}
         </div>
         {!canManageOrg && <p className="text-xs text-[#9299A6]">{language === 'ar' ? 'تطوير الأبحاث متاح للقائد والنائب.' : 'Research upgrades are available to the leader and deputy.'}</p>}
-      </section>
+      </section>}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Shared Treasury Operations & RBAC Matrix */}
         <div className="space-y-5">
-          <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-4">
+          {activeOrgTab === 'treasury' && <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-base font-semibold text-[#F4F5F7]">{language === 'ar' ? 'خزينة المنظمة والتبرعات' : 'Organization treasury & donations'}</h2>
               <Vault className="w-4 h-4 text-[#E04455]" />
@@ -694,6 +709,7 @@ export function OrganizationHubView({
           </div>
 
           {/* Role Permissions Matrix */}
+          {activeOrgTab === 'overview' && <>
           <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-3">
             <h2 className="text-sm font-semibold text-[#F4F5F7]">{t.orgPerks}</h2>
             <div className="grid grid-cols-2 gap-2.5 text-xs">
@@ -737,11 +753,12 @@ export function OrganizationHubView({
                 );
               })}
             </div>
+          </>}
           </div>
         </div>
 
         {/* Members & RBAC + Join Requests */}
-        <div className="space-y-5">
+        {activeOrgTab === 'members' && <div className="space-y-5">
           {canManageMembers && orgRequests.length > 0 && (
             <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-3">
               <h2 className="text-base font-semibold text-[#F4F5F7]">{t.joinRequests}</h2>
@@ -847,7 +864,7 @@ export function OrganizationHubView({
               })}
             </div>
           </div>
-        </div>
+        </div>}
       </div>
 
       <ConfirmDialog
