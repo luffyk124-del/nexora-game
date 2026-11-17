@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { collection, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { ArrowLeft, Globe2, MessageCircle, Search, Send, ShieldCheck, Users, UserRound } from 'lucide-react';
+import { ArrowLeft, Ban, Flag, Globe2, MessageCircle, Search, Send, ShieldCheck, Users, UserRound } from 'lucide-react';
 import { db, functions } from '../../lib/firebase';
 import { AVATARS } from '../../data/catalog';
 import { timestampToMs } from '../../lib/economy';
@@ -47,6 +47,7 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
   const [directMessages, setDirectMessages] = useState<DirectMessage[]>([]);
   const [globalMessages, setGlobalMessages] = useState<GlobalMessage[]>([]);
   const [invites, setInvites] = useState<OrgInvite[]>([]);
+  const [blockedUids, setBlockedUids] = useState<string[]>([]);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -73,6 +74,13 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
 
   const selectedConversationData = conversations.find((item) => item.id === selectedConversation) || null;
   const targetUid = selectedConversationData?.participants.find((uid) => uid !== profile.uid) || '';
+
+  useEffect(() => {
+    const listBlocked = httpsCallable<Record<string, never>, { blockedUids: string[] }>(functions, 'listBlockedPlayersSecure');
+    void listBlocked({}).then((result) => setBlockedUids(result.data.blockedUids)).catch(() => {
+      setError(ar ? 'تعذر تحميل قائمة الحظر.' : 'Could not load blocked players.');
+    });
+  }, [ar]);
 
   useEffect(() => {
     const prefix = search.trim().toLowerCase();
@@ -174,6 +182,42 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
       setDraft('');
     } catch {
       setError(ar ? 'تعذر إرسال الرسالة. الدردشة تحدّ الإرسال المتكرر.' : 'Message could not be sent. Chat has a short rate limit.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function togglePlayerBlock(player: PublicPlayer) {
+    const isBlocked = blockedUids.includes(player.uid);
+    setBusy('block');
+    setError('');
+    try {
+      const action = httpsCallable<{ targetUid: string }, { ok: boolean }>(
+        functions, isBlocked ? 'unblockPlayerSecure' : 'blockPlayerSecure'
+      );
+      await action({ targetUid: player.uid });
+      setBlockedUids((previous) => isBlocked
+        ? previous.filter((uid) => uid !== player.uid)
+        : [...previous, player.uid]);
+      setError(isBlocked
+        ? (ar ? 'تم إلغاء حظر اللاعب.' : 'Player unblocked.')
+        : (ar ? 'تم حظر اللاعب ولن يتمكن الطرفان من تبادل الرسائل الخاصة.' : 'Player blocked. Neither player can send the other direct messages.'));
+    } catch {
+      setError(ar ? 'تعذر تحديث الحظر.' : 'Could not update block settings.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function reportPlayer(player: PublicPlayer) {
+    setBusy('report');
+    setError('');
+    try {
+      const reportFn = httpsCallable<{ targetUid: string; reason: string }, { ok: boolean }>(functions, 'reportPlayerSecure');
+      await reportFn({ targetUid: player.uid, reason: 'other' });
+      setError(ar ? 'تم إرسال البلاغ للمراجعة.' : 'Report submitted for review.');
+    } catch {
+      setError(ar ? 'تعذر إرسال البلاغ. حاول لاحقاً.' : 'Could not submit report. Try again later.');
     } finally {
       setBusy(null);
     }
@@ -290,6 +334,16 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
                   className="w-full min-h-[44px] rounded-xl bg-[#B91C32] text-white text-sm font-semibold flex items-center justify-center gap-2">
                   <MessageCircle className="w-4 h-4" />{ar ? 'إرسال رسالة' : 'Send message'}
                 </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" disabled={busy === 'block'} onClick={() => void togglePlayerBlock(selectedPlayer)}
+                    className="min-h-[42px] rounded-xl bg-[#252B36] border border-white/10 text-xs font-semibold flex items-center justify-center gap-2">
+                    <Ban className="w-4 h-4" />{blockedUids.includes(selectedPlayer.uid) ? (ar ? 'إلغاء الحظر' : 'Unblock') : (ar ? 'حظر اللاعب' : 'Block player')}
+                  </button>
+                  <button type="button" disabled={busy === 'report'} onClick={() => void reportPlayer(selectedPlayer)}
+                    className="min-h-[42px] rounded-xl bg-[#252B36] border border-white/10 text-xs font-semibold flex items-center justify-center gap-2">
+                    <Flag className="w-4 h-4" />{ar ? 'إبلاغ' : 'Report'}
+                  </button>
+                </div>
                 {canInvite && !selectedPlayer.orgId && (
                   <button type="button" disabled={busy === 'invite'} onClick={() => void invitePlayer(selectedPlayer)}
                     className="w-full min-h-[44px] rounded-xl bg-[#1B2230] border border-white/10 text-[#F4F5F7] text-sm font-semibold flex items-center justify-center gap-2">
@@ -362,7 +416,7 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
         <section className="rounded-2xl border border-white/8 bg-[#141821] p-3 flex flex-col min-h-[520px]">
           <div className="flex items-center gap-2 border-b border-white/8 px-2 pb-3"><Globe2 className="w-4 h-4 text-amber-200" /><h2 className="text-sm font-semibold">{ar ? 'الدردشة العامة' : 'Global chat'}</h2><span className="ms-auto text-[10px] text-[#9299A6]">{ar ? 'حد الإرسال: رسالة كل 3 ثوانٍ' : 'Rate limit: one message every 3 seconds'}</span></div>
           <div className="flex-1 min-h-[360px] max-h-[60vh] overflow-y-auto py-3 space-y-2">
-            {globalMessages.map((message) => (
+            {globalMessages.filter((message) => !blockedUids.includes(message.senderUid)).map((message) => (
               <div key={message.id} className="rounded-xl bg-[#0B0D12] p-3">
                 <div className="flex items-center gap-2 mb-1">
                   <img src={avatarUrl(message.avatarId)} alt="" className="h-7 w-7 rounded-lg object-cover bg-[#252B36]" />
