@@ -1,4 +1,4 @@
-import { randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { FieldValue, getFirestore, Timestamp, type DocumentData, type Query } from 'firebase-admin/firestore';
 import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/https';
@@ -1696,20 +1696,22 @@ export const getPublicPlayerProfileSecure = onCall(
 // Dedicated NEXORA Reports Center API. Exactly one fixed Firebase UID is allowed.
 const REPORTS_ADMIN_UID = 'nexora-reports-mjnon-admin';
 const reportsAdminPasswordHash = defineSecret('REPORTS_ADMIN_PASSWORD_HASH');
-const reportsLoginAttempts = new Map<string, { count: number; resetAt: number }>();
-
 export const loginReportsAdmin = onCall(
   { region: 'us-central1', maxInstances: 5, timeoutSeconds: 15, secrets: [reportsAdminPasswordHash] },
   async (request) => {
     const username = typeof request.data?.username === 'string' ? request.data.username.trim() : '';
     const password = typeof request.data?.password === 'string' ? request.data.password : '';
-    const ip = request.rawRequest.ip || 'unknown';
+    const ipDigest = createHash('sha256').update(request.rawRequest.ip || 'unknown').digest('hex');
+    const attemptRef = db.doc('reports_login_attempts/' + ipDigest);
     const now = Date.now();
-    const attempt = reportsLoginAttempts.get(ip);
-    if (attempt && attempt.resetAt > now && attempt.count >= 5) {
-      throw new HttpsError('resource-exhausted', 'TRY_LATER');
-    }
-    if (!attempt || attempt.resetAt <= now) reportsLoginAttempts.set(ip, { count: 0, resetAt: now + 10 * 60_000 });
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(attemptRef);
+      const data = snap.data();
+      const resetAt = typeof data?.resetAt === 'number' ? data.resetAt : 0;
+      const count = resetAt > now ? Math.max(0, Number(data?.count) || 0) : 0;
+      if (count >= 5) throw new HttpsError('resource-exhausted', 'TRY_LATER');
+      tx.set(attemptRef, { count: count + 1, resetAt: resetAt > now ? resetAt : now + 10 * 60_000, updatedAt: FieldValue.serverTimestamp() });
+    });
     const encoded = reportsAdminPasswordHash.value();
     const [saltHex, expectedHex] = encoded.split(':');
     let valid = false;
@@ -1718,13 +1720,8 @@ export const loginReportsAdmin = onCall(
       const expected = Buffer.from(expectedHex, 'hex');
       valid = timingSafeEqual(actual, expected);
     }
-    if (!valid) {
-      const current = reportsLoginAttempts.get(ip) || { count: 0, resetAt: now + 10 * 60_000 };
-      current.count += 1;
-      reportsLoginAttempts.set(ip, current);
-      throw new HttpsError('unauthenticated', 'INVALID_CREDENTIALS');
-    }
-    reportsLoginAttempts.delete(ip);
+    if (!valid) throw new HttpsError('unauthenticated', 'INVALID_CREDENTIALS');
+    await attemptRef.delete();
     const token = await getAuth(adminApp).createCustomToken(REPORTS_ADMIN_UID, { reportsAdmin: true });
     return { token };
   }
