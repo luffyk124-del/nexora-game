@@ -152,6 +152,15 @@ async function main(req: Request): Promise<Response> {
       const column = spec.aliases?.[key] ?? camelToSnake(key);
       if (spec.columns.includes(column) && value !== undefined) row[column] = value;
     }
+    // company_logs.details is constrained to a JSON object in NEXORA.
+    // Older Firestore records sometimes store it as plain text; preserve that text.
+    if (collection === "company_logs") {
+      const details = row.details;
+      if (typeof details === "string") row.details = { message: details };
+      else if (details === undefined || details === null) row.details = {};
+      else if (typeof details !== "object" || Array.isArray(details)) row.details = { value: details };
+    }
+
     if (spec.columns.includes("id") && row.id === undefined) row.id = doc.id;
     if (collection === "profiles" || collection === "users_private" || collection === "wallets") {
       if (row.user_id === undefined) row.user_id = doc.id;
