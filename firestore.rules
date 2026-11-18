@@ -1201,6 +1201,14 @@ false
       allow read, write: if false;
     }
 
+    match /reports_admins/{uid} {
+      allow read, write: if false;
+    }
+
+    match /player_report_audit/{auditId} {
+      allow read, write: if false;
+    }
+
     // Organization invitations are visible only to their target player.
     match /organization_invites/{inviteId} {
       allow get, list: if isSignedIn() && resource.data.targetUid == request.auth.uid;
