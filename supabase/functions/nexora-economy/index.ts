@@ -88,6 +88,24 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  if (action === "create_organization") {
+    const name = typeof body.name === "string" ? body.name : "";
+    const tag = typeof body.tag === "string" ? body.tag : "";
+    const description = typeof body.description === "string" ? body.description.slice(0,240) : "";
+    const requestId = typeof body.requestId === "string" ? body.requestId : "";
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) return json({ error: "INVALID_REQUEST" }, 400, origin);
+    const { data, error } = await admin.schema("nexora").rpc("create_organization", {
+      p_user_id: uid, p_name: name, p_tag: tag, p_description: description, p_request_id: requestId,
+    });
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      if (["INVALID_REQUEST","INVALID_NAME","INVALID_TAG","ACCOUNT_NOT_FOUND","ALREADY_IN_ORG","INSUFFICIENT_FUNDS","TAG_TAKEN"].includes(message)) return json({ error: message }, 400, origin);
+      console.error("NEXORA organization creation RPC failed:", error.message);
+      return json({ error: "ORGANIZATION_CREATE_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
   if (action === "sync_org_membership") {
     const orgId = body.orgId === null ? null : typeof body.orgId === "string" ? body.orgId : undefined;
     if (orgId === undefined || (typeof orgId === "string" && orgId.length>160)) return json({ error: "INVALID_ARGUMENT" }, 400, origin);
