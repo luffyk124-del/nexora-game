@@ -42,8 +42,19 @@ const SPECS: Record<string, MapSpec> = {
   organization_invites: { table: "organization_invites", conflict: "id", columns: ["id","org_id","org_name","org_tag","target_uid","inviter_uid","inviter_name","status","created_at","responded_at"] },
 };
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "https://nexora-game-git-feature-nexora-social-economy-mo-add6d8-manus24.vercel.app",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Max-Age": "86400",
+  "Vary": "Origin",
+};
+
 const reply = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "no-store" },
+  });
 
 function camelToSnake(key: string): string {
   return key.replace(/[A-Z]/g, (letter) => "_" + letter.toLowerCase());
@@ -59,6 +70,9 @@ function safeId(value: unknown): value is string {
 }
 
 async function main(req: Request): Promise<Response> {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
   if (req.method !== "POST") return reply({ error: "METHOD_NOT_ALLOWED" }, 405);
 
   const url = Deno.env.get("SUPABASE_URL");
