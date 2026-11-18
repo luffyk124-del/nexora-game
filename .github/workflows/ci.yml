@@ -45,6 +45,14 @@ jobs:
       - name: TypeScript typecheck
         run: npx tsc --noEmit
 
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Typecheck Supabase Edge Functions
+        run: deno check supabase/functions/nexora-migration-import/index.ts
+
       - name: Unit tests
         run: npm test
 
