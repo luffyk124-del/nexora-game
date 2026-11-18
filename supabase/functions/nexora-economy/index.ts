@@ -88,6 +88,27 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  if (action === "start_org_upgrade" || action === "complete_org_upgrade" || action === "research_org") {
+    const orgId = typeof body.orgId === "string" ? body.orgId : "";
+    if (!orgId || orgId.length > 160) return json({ error: "NOT_FOUND" }, 400, origin);
+    const rpcName = action === "start_org_upgrade" ? "start_organization_upgrade"
+      : action === "complete_org_upgrade" ? "complete_organization_upgrade" : "research_organization";
+    const args: Record<string, unknown> = { p_user_id: uid, p_org_id: orgId };
+    if (action === "research_org") {
+      const researchId = typeof body.researchId === "string" ? body.researchId : "";
+      args.p_research_id = researchId;
+    }
+    const { data, error } = await admin.schema("nexora").rpc(rpcName, args);
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      if (["NOT_FOUND","UNAUTHORIZED","UPGRADE_IN_PROGRESS","MAX_LEVEL","INSUFFICIENT_TREASURY",
+        "UPGRADE_NOT_READY","INVALID_RESEARCH","RESEARCH_MAX_LEVEL"].includes(message)) return json({ error: message }, 400, origin);
+      console.error("NEXORA organization upgrade RPC failed:", error.message);
+      return json({ error: "ORGANIZATION_UPGRADE_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
   if (action === "company_upgrade" || action === "company_complete" || action === "company_collect" ||
       action === "company_vault_upgrade" || action === "company_vault_complete") {
     const companyId = typeof body.companyId === "string" ? body.companyId : "";
