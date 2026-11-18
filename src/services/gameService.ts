@@ -1240,6 +1240,20 @@ export async function buyProperty(
   const spec = PROPERTY_SPECS.find((p) => p.type === type);
   if (!spec) throw new Error('INVALID_PROPERTY_TYPE');
 
+  if (import.meta.env.VITE_NEXORA_SUPABASE_PROPERTIES === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'buy_property', name: cleanName, propertyType: type, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'PROPERTY_PURCHASE_FAILED');
+    return;
+  }
+
   const propId = genId('prop');
   const txId = genId('tx');
 
@@ -1312,6 +1326,19 @@ export async function buyProperty(
 }
 
 export async function togglePropertyLease(uid: string, propertyId: string, nextState: boolean): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_PROPERTIES === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'toggle_property_lease', propertyId, isRented: nextState }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'PROPERTY_OPERATION_FAILED');
+    return;
+  }
   try {
     await updateDoc(doc(db, 'properties', propertyId), {
       isRented: nextState,
@@ -1323,6 +1350,19 @@ export async function togglePropertyLease(uid: string, propertyId: string, nextS
 }
 
 export async function upgradeProperty(uid: string, propertyId: string): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_PROPERTIES === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'upgrade_property', propertyId, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'PROPERTY_OPERATION_FAILED');
+    return;
+  }
   const txId = genId('tx');
   try {
     await runTransaction(db, async (tx) => {
@@ -1373,6 +1413,21 @@ export async function upgradeProperty(uid: string, propertyId: string): Promise<
 }
 
 export async function collectPropertyRent(uid: string, propertyId: string): Promise<number> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_PROPERTIES === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'collect_property_rent', propertyId, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok || !Number.isFinite(payload.payout)) {
+      throw new Error(payload?.error || 'PROPERTY_OPERATION_FAILED');
+    }
+    return Number(payload.payout);
+  }
   const txId = genId('tx');
   try {
     let payout = 0;
