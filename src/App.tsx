@@ -179,7 +179,8 @@ function NexoraAppContent() {
 }
 
 export default function App() {
-  if (window.location.pathname === '/migration') {
+  const migrationRoute = window.location.pathname === '/migration' || new URLSearchParams(window.location.search).get('migration') === '1';
+  if (migrationRoute) {
     return <MigrationConsole />;
   }
 
