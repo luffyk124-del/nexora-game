@@ -673,7 +673,8 @@ export function useGameData(): GameDataState {
 
   // Auto-unlock eligible achievements (deduplicated per session)
   useEffect(() => {
-    if (import.meta.env.VITE_NEXORA_SUPABASE_READS === 'true' || import.meta.env.VITE_NEXORA_SUPABASE_PLAYER_READS === 'true') return;
+    if (import.meta.env.VITE_NEXORA_SUPABASE_READS === 'true') return;
+    if (import.meta.env.VITE_NEXORA_SUPABASE_PLAYER_READS === 'true' && import.meta.env.VITE_NEXORA_SUPABASE_ACHIEVEMENTS !== 'true') return;
     if (!authUser || !profile) return;
     const alreadySkipped = new Set([
       ...unlockedAchievements,
@@ -685,8 +686,13 @@ export function useGameData(): GameDataState {
     checkAndUnlockAchievements(authUser.uid, profile, alreadySkipped, pendingToAttempt).then(
       (unlockedNow) => {
         unlockedNow.forEach((id) => attemptedAchievementsRef.current.add(id));
+        if (unlockedNow.length > 0) {
+          setUnlockedAchievements((previous) => new Set([...previous, ...unlockedNow]));
+        }
       }
-    );
+    ).catch((error) => {
+      console.warn('NEXORA achievement unlock check failed:', error);
+    });
   }, [authUser, profile, unlockedAchievements]);
 
   const loginWithGoogle = useCallback(async () => {
