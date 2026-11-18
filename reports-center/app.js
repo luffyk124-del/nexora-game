@@ -1,19 +1,99 @@
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js';
-import { getAuth, signInWithCustomToken, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
-import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-functions.js';
-const config={apiKey:"AIzaSyD8lDEEHIeMIC4E96Zebn_rTtVjwONfSSM",authDomain:"gen-lang-client-0074900177.firebaseapp.com",projectId:"gen-lang-client-0074900177",appId:"1:145581837596:web:bab5dd8eabfb597b4d7ed9"};
-const app=initializeApp(config),auth=getAuth(app),functions=getFunctions(app,'us-central1');
-const loginAdmin=httpsCallable(functions,'loginReportsAdmin'),callList=httpsCallable(functions,'listPlayerReportsAdmin'),callUpdate=httpsCallable(functions,'updatePlayerReportAdmin'),callAudit=httpsCallable(functions,'listPlayerReportAuditAdmin');
-const $=id=>document.getElementById(id);let currentStatus='all',reports=[],auditEntries=[],view='reports',searchTerm='';
-$('loginBtn').onclick=async()=>{const username=$('username').value.trim(),password=$('password').value;$('loginError').textContent='';$('loginBtn').disabled=true;try{const result=await loginAdmin({username,password});$('password').value='';await signInWithCustomToken(auth,result.data.token)}catch(e){$('loginError').textContent=e.code==='functions/resource-exhausted'?'محاولات كثيرة. انتظر قليلاً ثم حاول مجدداً.':'بيانات الدخول غير صحيحة أو تعذر التحقق.';$('password').value=''}finally{$('loginBtn').disabled=false}};
-$('password').addEventListener('keydown',e=>{if(e.key==='Enter')$('loginBtn').click()});
-$('logoutBtn').onclick=()=>signOut(auth);
-onAuthStateChanged(auth,async user=>{if(!user){$('login').hidden=false;$('dashboard').hidden=true;return}$('login').hidden=true;$('dashboard').hidden=false;await loadReports()});
-async function loadReports(){view='reports';$('auditBtn').textContent='سجل إجراءات المشرفين';$('search').hidden=false;$('filters').hidden=false;$('notice').textContent='جارٍ تحميل البلاغات…';try{const result=await callList({status:currentStatus,limit:100});reports=result.data.reports||[];render();$('notice').textContent='تم تحميل '+reports.length+' بلاغ.'}catch(e){if(e.code==='functions/permission-denied'||e.code==='functions/unauthenticated'){await signOut(auth);$('loginError').textContent='هذا الحساب غير مصرح له.';return}$('notice').textContent='تعذر تحميل البلاغات: '+(e.code||'SERVER_ERROR')}}
-async function loadAudit(){view='audit';$('auditBtn').textContent='العودة إلى البلاغات';$('search').hidden=true;$('filters').hidden=true;$('notice').textContent='جارٍ تحميل سجل الإجراءات…';try{const result=await callAudit({limit:100});auditEntries=result.data.entries||[];renderAudit();$('notice').textContent='تم تحميل '+auditEntries.length+' إجراء.'}catch(e){$('notice').textContent='تعذر تحميل سجل الإجراءات: '+(e.code||'SERVER_ERROR')}}
-function render(){const visible=reports.filter(r=>[r.id,r.reporterUid,r.targetUid,r.reason].join(' ').toLowerCase().includes(searchTerm));const count=s=>reports.filter(r=>r.status===s).length;$('summary').innerHTML=[['المفتوحة',count('open')],['قيد المراجعة',count('reviewing')],['المغلقة',count('closed')]].map(([n,v])=>'<div class="stat"><b>'+v+'</b><span>'+n+'</span></div>').join('');$('reports').innerHTML=visible.map(r=>{const reason={harassment:'مضايقة أو إساءة',spam:'رسائل مزعجة',inappropriate:'محتوى غير مناسب',impersonation:'انتحال شخصية',other:'سبب آخر'}[r.reason]||r.reason;const date=r.createdAt?new Date(r.createdAt).toLocaleString('ar'):'غير معروف';return '<article class="report"><div class="reporttop"><b>بلاغ #'+escapeHtml(r.id.slice(-10))+'</b><span class="tag">'+({open:'مفتوح',reviewing:'قيد المراجعة',closed:'مغلق'}[r.status]||r.status)+'</span></div><div>'+escapeHtml(reason)+'</div><div class="meta">المبلّغ: '+escapeHtml(r.reporterUid)+'<br>اللاعب المبلّغ عنه: '+escapeHtml(r.targetUid)+'<br>التاريخ: '+escapeHtml(date)+'</div><div class="actions">'+(r.status!=='reviewing'?'<button class="action" data-id="'+escapeHtml(r.id)+'" data-next="reviewing">قيد المراجعة</button>':'')+(r.status!=='closed'?'<button class="action" data-id="'+escapeHtml(r.id)+'" data-next="closed">إغلاق البلاغ</button>':'')+(r.status!=='open'?'<button class="action" data-id="'+escapeHtml(r.id)+'" data-next="open">إعادة فتح</button>':'')+'</div></article>'}).join('')||'<div class="panel">لا توجد بلاغات في هذا التصنيف.</div>';document.querySelectorAll('[data-next]').forEach(b=>b.onclick=()=>updateReport(b.dataset.id,b.dataset.next))}
-function renderAudit(){$('summary').innerHTML='';$('reports').innerHTML=auditEntries.map(e=>'<article class="audit-entry"><b>تغيير حالة بلاغ</b><div class="meta">البلاغ: '+escapeHtml(e.reportId)+'<br>المشرف: '+escapeHtml(e.actorUid)+'<br>الحالة الجديدة: '+escapeHtml(e.newStatus)+'<br>التاريخ: '+escapeHtml(e.createdAt?new Date(e.createdAt).toLocaleString('ar'):'غير معروف')+'</div></article>').join('')||'<div class="panel">لا توجد إجراءات مسجلة بعد.</div>'}
-async function updateReport(reportId,status){$('notice').textContent='جارٍ حفظ التغيير…';try{await callUpdate({reportId,status});await loadReports()}catch(e){$('notice').textContent='تعذر تحديث البلاغ: '+(e.code||'SERVER_ERROR')}}
-document.querySelectorAll('#filters button').forEach(b=>b.onclick=()=>{currentStatus=b.dataset.status;document.querySelectorAll('#filters button').forEach(x=>x.classList.toggle('active',x===b));loadReports()});
-$('auditBtn').onclick=()=>view==='audit'?loadReports():loadAudit();$('search').oninput=e=>{searchTerm=e.target.value.toLowerCase();if(view==='reports')render()};
-function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.95.0';
+
+const SUPABASE_URL = 'https://dmeupqmhsyojxlgalxrc.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PCsjX_kcS-D8FY4PobPl4w_2BwpeilC';
+const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+const $ = (id) => document.getElementById(id);
+let currentStatus = 'all', reports = [], auditEntries = [], view = 'reports', searchTerm = '';
+
+$('loginBtn').onclick = async () => {
+  $('loginError').textContent = '';
+  $('loginBtn').disabled = true;
+  try {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin + window.location.pathname, queryParams: { prompt: 'select_account' } }
+    });
+    if (error) throw error;
+  } catch (error) {
+    $('loginError').textContent = 'تعذر بدء تسجيل الدخول عبر Google. تحقق من تفعيل مزود Google في إعدادات Supabase.';
+    $('loginBtn').disabled = false;
+  }
+};
+
+$('logoutBtn').onclick = async () => { await supabase.auth.signOut(); };
+supabase.auth.onAuthStateChange((_event, session) => {
+  if (!session) {
+    $('login').hidden = false; $('dashboard').hidden = true; $('loginBtn').disabled = false; return;
+  }
+  $('login').hidden = true; $('dashboard').hidden = false;
+  loadReports();
+});
+
+async function adminCall(payload) {
+  const { data, error } = await supabase.functions.invoke('nexora-reports-admin', { body: payload });
+  if (error) {
+    const context = error.context;
+    if (context && typeof context.json === 'function') {
+      const detail = await context.json().catch(() => ({}));
+      if (detail.error === 'REPORTS_ADMIN_REQUIRED') throw new Error('REPORTS_ADMIN_REQUIRED');
+    }
+    throw error;
+  }
+  return data;
+}
+
+async function loadReports() {
+  view = 'reports'; $('auditBtn').textContent = 'سجل إجراءات المشرفين';
+  $('search').hidden = false; $('filters').hidden = false; $('notice').textContent = 'جارٍ تحميل البلاغات…';
+  try {
+    const result = await adminCall({ action: 'list', status: currentStatus, limit: 100 });
+    reports = result.reports || []; render();
+    $('notice').textContent = 'تم تحميل ' + reports.length + ' بلاغ.';
+  } catch (error) {
+    if (String(error.message).includes('REPORTS_ADMIN_REQUIRED')) {
+      $('notice').textContent = 'تم تسجيل الدخول، لكن هذا الحساب غير مضاف إلى قائمة مشرفي NEXORA بعد.';
+      return;
+    }
+    $('notice').textContent = 'تعذر تحميل البلاغات. تحقق من إعدادات Google Auth والاتصال.';
+  }
+}
+async function loadAudit() {
+  view = 'audit'; $('auditBtn').textContent = 'العودة إلى البلاغات';
+  $('search').hidden = true; $('filters').hidden = true; $('notice').textContent = 'جارٍ تحميل سجل الإجراءات…';
+  try {
+    const result = await adminCall({ action: 'audit', limit: 100 });
+    auditEntries = result.entries || []; renderAudit();
+    $('notice').textContent = 'تم تحميل ' + auditEntries.length + ' إجراء.';
+  } catch { $('notice').textContent = 'تعذر تحميل سجل الإجراءات.'; }
+}
+function render() {
+  const visible = reports.filter(r => [r.id, r.reporterUid, r.targetUid, r.reason].join(' ').toLowerCase().includes(searchTerm));
+  const count = status => reports.filter(r => r.status === status).length;
+  $('summary').innerHTML = [['المفتوحة',count('open')],['قيد المراجعة',count('reviewing')],['المغلقة',count('closed')]].map(([name,value]) => '<div class="stat"><b>'+value+'</b><span>'+name+'</span></div>').join('');
+  $('reports').innerHTML = visible.map(r => {
+    const reason = {harassment:'مضايقة أو إساءة',spam:'رسائل مزعجة',inappropriate:'محتوى غير مناسب',impersonation:'انتحال شخصية',other:'سبب آخر'}[r.reason] || r.reason;
+    const date = r.createdAt ? new Date(r.createdAt).toLocaleString('ar') : 'غير معروف';
+    return '<article class="report"><div class="reporttop"><b>بلاغ #'+escapeHtml(String(r.id).slice(-10))+'</b><span class="tag">'+({open:'مفتوح',reviewing:'قيد المراجعة',closed:'مغلق'}[r.status]||r.status)+'</span></div><div>'+escapeHtml(reason)+'</div><div class="meta">المبلّغ: '+escapeHtml(r.reporterUid)+'<br>اللاعب المبلّغ عنه: '+escapeHtml(r.targetUid)+'<br>التاريخ: '+escapeHtml(date)+'</div><div class="actions">'+(r.status!=='reviewing'?'<button class="action" data-id="'+escapeHtml(r.id)+'" data-next="reviewing">قيد المراجعة</button>':'')+(r.status!=='closed'?'<button class="action" data-id="'+escapeHtml(r.id)+'" data-next="closed">إغلاق البلاغ</button>':'')+(r.status!=='open'?'<button class="action" data-id="'+escapeHtml(r.id)+'" data-next="open">إعادة فتح</button>':'')+'</div></article>';
+  }).join('') || '<div class="panel">لا توجد بلاغات في هذا التصنيف.</div>';
+  document.querySelectorAll('[data-next]').forEach(button => button.onclick = () => updateReport(button.dataset.id, button.dataset.next));
+}
+function renderAudit() {
+  $('summary').innerHTML = '';
+  $('reports').innerHTML = auditEntries.map(entry => '<article class="audit-entry"><b>'+escapeHtml(entry.action || 'إجراء إداري')+'</b><div class="meta">البلاغ: '+escapeHtml(entry.reportId)+'<br>المشرف: '+escapeHtml(entry.actorUid)+'<br>الحالة الجديدة: '+escapeHtml(entry.newStatus || '—')+'<br>التاريخ: '+escapeHtml(entry.createdAt ? new Date(entry.createdAt).toLocaleString('ar') : 'غير معروف')+'</div></article>').join('') || '<div class="panel">لا توجد إجراءات مسجلة بعد.</div>';
+}
+async function updateReport(reportId, status) {
+  $('notice').textContent = 'جارٍ حفظ التغيير…';
+  try { await adminCall({ action: 'update', reportId, status }); await loadReports(); }
+  catch { $('notice').textContent = 'تعذر تحديث البلاغ.'; }
+}
+document.querySelectorAll('#filters button').forEach(button => button.onclick = () => {
+  currentStatus = button.dataset.status;
+  document.querySelectorAll('#filters button').forEach(item => item.classList.toggle('active', item === button));
+  loadReports();
+});
+$('auditBtn').onclick = () => view === 'audit' ? loadReports() : loadAudit();
+$('search').oninput = event => { searchTerm = event.target.value.toLowerCase(); if (view === 'reports') render(); };
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+}
