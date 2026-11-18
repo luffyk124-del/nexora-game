@@ -1125,6 +1125,20 @@ export async function foundCompany(
   const spec = COMPANY_SECTORS.find((s) => s.sector === sector);
   if (!spec) throw new Error('INVALID_SECTOR');
 
+  if (import.meta.env.VITE_NEXORA_SUPABASE_COMPANIES === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'found_company', name: cleanName, sector, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'COMPANY_FOUNDING_FAILED');
+    return;
+  }
+
   const companyId = genId('cmp');
   const txId = genId('tx');
   const logId = genId('clog');
