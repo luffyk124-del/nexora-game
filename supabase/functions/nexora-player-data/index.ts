@@ -168,6 +168,17 @@ Deno.serve(async (req: Request) => {
     const transactions = [...txMap.values()].sort((a, b) =>
       String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")),
     ).slice(0, 40);
+    const companyLogsForUi = (companyLogs as Record<string, unknown>[]).map((row) => {
+      const details = row.details;
+      const message = details && typeof details === "object" && !Array.isArray(details)
+        ? (details as Record<string, unknown>).message : undefined;
+      return {
+        ...row,
+        details: typeof details === "string" ? details
+          : typeof message === "string" ? message
+          : JSON.stringify(details ?? {}),
+      };
+    });
 
     return json({
       ok: true,
@@ -181,7 +192,7 @@ Deno.serve(async (req: Request) => {
         marketOrders: orders,
         companies,
         companyAuctions: auctions,
-        companyLogs,
+        companyLogs: companyLogsForUi,
         properties,
         organizations,
         myOrgMember: membership,
