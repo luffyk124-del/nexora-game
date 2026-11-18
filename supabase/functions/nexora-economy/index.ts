@@ -108,6 +108,18 @@ Deno.serve(async (req: Request) => {
     return json(data, 200, origin);
   }
 
+  if (action === "check_username") {
+    const username = typeof body.username === "string" ? body.username.trim() : "";
+    if (!/^[A-Za-z0-9_]{3,24}$/.test(username)) return json({ error: "INVALID_USERNAME" }, 400, origin);
+    const { data, error } = await admin.schema("nexora").from("usernames")
+      .select("username_lower").eq("username_lower", username.toLowerCase()).maybeSingle();
+    if (error) {
+      console.error("NEXORA username availability query failed:", error.message);
+      return json({ error: "USERNAME_CHECK_FAILED" }, 500, origin);
+    }
+    return json({ ok: true, available: !data }, 200, origin);
+  }
+
   if (action === "found_company") {
     const name = typeof body.name === "string" ? body.name : "";
     const sector = typeof body.sector === "string" ? body.sector : "";
