@@ -2324,6 +2324,20 @@ export async function fetchLeaderboards(): Promise<{
   companies: Company[];
   organizations: Organization[];
 }> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_PLAYER_READS === 'true' && auth.currentUser && !auth.currentUser.isAnonymous) {
+    const idToken = await auth.currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'fetch_leaderboards' }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.players || !payload?.companies || !payload?.organizations) {
+      throw new Error(payload?.error || 'LEADERBOARD_READ_FAILED');
+    }
+    return payload as { players: PlayerProfile[]; companies: Company[]; organizations: Organization[] };
+  }
   const [pSnap, cSnap, oSnap] = await Promise.all([
     getDocs(query(collection(db, 'profiles'), where('influence', '>=', 0), orderBy('influence', 'desc'), limit(20))),
     getDocs(query(collection(db, 'companies'), where('totalRevenue', '>=', 0), orderBy('totalRevenue', 'desc'), limit(20))),
@@ -2386,6 +2400,22 @@ export async function checkAndUnlockAchievements(
 }
 
 export async function fetchOrgPendingRequests(orgId: string) {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'fetch_org_pending_requests', orgId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !Array.isArray(payload?.requests)) {
+      throw new Error(payload?.error || 'ORG_REQUESTS_READ_FAILED');
+    }
+    return payload.requests;
+  }
   const q = query(
     collection(db, 'organization_requests'),
     where('orgId', '==', orgId),
