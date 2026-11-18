@@ -88,6 +88,23 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  if (action === "found_company") {
+    const name = typeof body.name === "string" ? body.name : "";
+    const sector = typeof body.sector === "string" ? body.sector : "";
+    const requestId = typeof body.requestId === "string" ? body.requestId : "";
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) return json({ error: "INVALID_REQUEST_ID" }, 400, origin);
+    const { data, error } = await admin.schema("nexora").rpc("found_company", {
+      p_user_id: uid, p_name: name, p_sector: sector, p_request_id: requestId,
+    });
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      if (["INVALID_REQUEST","INVALID_NAME","INVALID_SECTOR","ACCOUNT_NOT_FOUND","COMPANY_OWNERSHIP_LIMIT","INSUFFICIENT_FUNDS"].includes(message)) return json({ error: message }, 400, origin);
+      console.error("NEXORA company founding RPC failed:", error.message);
+      return json({ error: "COMPANY_FOUNDING_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
   if (action === "create_player_character") {
     const username = typeof body.username === "string" ? body.username : "";
     const avatarId = typeof body.avatarId === "string" ? body.avatarId : "";
