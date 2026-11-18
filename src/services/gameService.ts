@@ -1852,6 +1852,20 @@ export async function upgradeOrganization(
   _username: string,
   orgId: string
 ): Promise<{ targetLevel: number; endsAt: number; cost: number }> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'start_org_upgrade', orgId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'ORGANIZATION_UPGRADE_FAILED');
+    return { targetLevel: Number(payload.targetLevel), endsAt: Number(payload.endsAt), cost: Number(payload.cost) };
+  }
+
   const result = await callOrganizationUpgrade(orgId, 'start');
   return {
     targetLevel: Number(result.targetLevel),
@@ -1861,10 +1875,38 @@ export async function upgradeOrganization(
 }
 
 export async function completeOrganizationUpgrade(orgId: string): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'complete_org_upgrade', orgId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'ORGANIZATION_UPGRADE_FAILED');
+    return;
+  }
+
   await callOrganizationUpgrade(orgId, 'complete');
 }
 
 export async function researchOrganization(orgId: string, researchId: 'commerce' | 'engineering' | 'expansion' | 'finance' | 'diplomacy'): Promise<{ level: number; cost: number }> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'research_org', orgId, researchId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'ORGANIZATION_UPGRADE_FAILED');
+    return { level: Number(payload.level), cost: Number(payload.cost) };
+  }
+
   const result = await callOrganizationUpgrade(orgId, 'research', researchId);
   return { level: Number(result.level), cost: Number(result.cost) };
 }
