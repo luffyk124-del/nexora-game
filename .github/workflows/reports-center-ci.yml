@@ -1,18 +1,11 @@
 name: NEXORA Reports Center CI
 
 on:
-  push:
-    branches:
-      - "feature/nexora-social-economy-mobile-overhaul"
-    paths:
-      - "reports-center/**"
-      - ".github/workflows/reports-center-ci.yml"
   pull_request:
     branches:
       - "feature/nexora-social-economy-mobile-overhaul"
     paths:
       - "reports-center/**"
-      - ".github/workflows/reports-center-ci.yml"
 
 permissions:
   contents: read
