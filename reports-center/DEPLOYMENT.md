@@ -18,20 +18,20 @@ The Edge Function uses the Supabase Data API with `.schema("nexora")`. In Supaba
 
 Exposing a schema makes it addressable through the Data API; it does not grant table access by itself. Do not add client grants or public RLS policies.
 
-## Required Supabase Auth setup
-1. In Supabase Dashboard, open Authentication → Providers → Google and enable Google.
-2. Configure the Google OAuth Web client ID and client secret in the Google provider settings.
-3. In Authentication → URL Configuration, set the Site URL to the eventual Reports Center origin and add that exact origin/path to the Redirect URLs allow-list.
-4. In Google Cloud OAuth client settings, add the Reports Center origin as an authorized JavaScript origin and the Supabase Auth callback URL shown on the Supabase Google provider page as an authorized redirect URI.
-5. The front end uses `signInWithOAuth({ provider: 'google' })` and redirects back to the Reports Center page.
-
-Google OAuth cannot be activated from the repository alone: the provider's client secret must be configured in the Supabase project dashboard or through the Supabase Management API. Never commit the Google client secret.
+## Required Supabase Auth setup — username and password
+- Google OAuth is not used by the Reports Center.
+- The only accepted username in the front end is `MJNON` (case-insensitive).
+- The front end maps that fixed username to the internal Supabase Auth email `mjn.admin@nexora.invalid` and calls `signInWithPassword`.
+- Do not expose public sign-up. In Supabase Authentication settings, disable new user signups.
+- In Authentication → Users, create exactly one administrator user with email `mjn.admin@nexora.invalid`, set a strong password, and mark the email as confirmed if the dashboard requires it. Do not send the password through ChatGPT or commit it to GitHub.
+- The internal `.invalid` address is a login identifier only; it is not intended to receive email. Password reset by email is therefore not available. If the password is lost, reset it from the trusted Supabase dashboard.
+- The username check in the browser is only a user-interface restriction. Actual authorization is enforced server-side by the Edge Function's enabled `nexora.diagnostics_admins` record. Keep this allowlist check; never trust the username field alone.
 
 ## Authorize the first administrator
-After Google OAuth is enabled and the Reports Center is deployed to a private preview:
-1. Sign in with the intended owner Google account.
-2. Retrieve that account's Supabase Auth user UUID from Authentication → Users.
-3. Insert that UUID into `nexora.diagnostics_admins` with `enabled = true` and `role = 'owner'` using a trusted project-owner database session.
+After creating the single `mjn.admin@nexora.invalid` Auth user:
+1. Retrieve that user's Supabase Auth UUID from Authentication → Users.
+2. Insert that UUID into `nexora.diagnostics_admins` with `enabled = true` and `role = 'owner'` using a trusted project-owner database session.
+3. Verify that no other Auth user has an enabled row in `nexora.diagnostics_admins`.
 4. Do not create an open registration endpoint or allow the first visitor to claim admin access.
 
 Example SQL for a trusted project owner session (replace the placeholder with the verified Auth user UUID):
@@ -46,12 +46,12 @@ set enabled = true, role = 'owner', updated_at = now();
 - Vercel project root: `reports-center`.
 - Build command: `npm run build`.
 - Output directory: `dist`.
-- Keep the preview private until Google OAuth, administrator authorization, and the list/update/audit flows have been tested.
+- Keep the preview private until the single username/password account, administrator authorization, and the list/update/audit flows have been tested.
 
 ## Migration status
 - The Supabase Edge Function `nexora-reports-admin` is deployed as version 2 with JWT verification enabled.
 - The status update path uses the atomic RPC `nexora.set_player_report_status`; the SQL migration is tracked at `supabase/migrations/20261118051500_nexora_reports_atomic_status_audit.sql`.
 - The function source is tracked at `supabase/functions/nexora-reports-admin/index.ts`.
 - Reports tables exist in schema `nexora`; RLS is enabled and client grants remain revoked.
-- The Google provider credentials, first administrator record, `nexora` API schema exposure, Firestore data import, and final deployment are still pending.
+- The single Auth user and first administrator record, `nexora` API schema exposure, Firestore data import, and final deployment are still pending.
 - Do not delete or disable the original Firebase project until migration and data reconciliation are complete.
