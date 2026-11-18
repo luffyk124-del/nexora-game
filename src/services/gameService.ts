@@ -139,6 +139,19 @@ export async function ensureBootstrapWorldData(): Promise<void> {
 export async function isUsernameAvailable(username: string): Promise<boolean> {
   const clean = username.trim().toLowerCase();
   if (!isValidUsername(username)) return false;
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ACCOUNT === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'check_username', username: clean }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || typeof payload?.available !== 'boolean') throw new Error(payload?.error || 'USERNAME_CHECK_FAILED');
+    return payload.available;
+  }
   const snap = await getDoc(doc(db, 'usernames', clean));
   return !snap.exists();
 }
