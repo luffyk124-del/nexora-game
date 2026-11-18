@@ -42,7 +42,7 @@ Verification confirmed:
 ### Remaining known schema mismatch
 - `nexora.company_logs.details` is JSONB, while the TypeScript model currently treats it as a string. This needs a deliberate adapter or a separately reviewed type migration before imports; it was not silently changed.
 
-## Server-side Firebase functions that must be migrated
+## Additional social/messaging schema work completed\nMigration `20261118054000_nexora_social_messaging_schema_v1.sql` was applied and committed. It adds locked tables for `user_blocks`, `chat_rate_limits`, `conversations`, `conversation_messages`, `global_chat_messages`, and `organization_invites`. RLS is enabled and client grants are revoked. Direct-message subcollections map to `nexora.conversation_messages` with `conversation_id`.\n\n## Server-side Firebase functions that must be migrated
 The current Functions source exports:
 - `upgradeCompanyProfitVault`
 - `collectCompanyRevenueSecure`
@@ -75,7 +75,7 @@ Firebase UIDs and Supabase Auth user IDs are different identity namespaces. The 
 
 ## Owner-gated Firestore export endpoint added
 
-- Added `api/migration-export.ts` on the unpublished game branch.
+- Added `api/migration-export.ts` on the unpublished game branch. Its fixed collection allowlist now covers the social/messaging collections, including bounded per-conversation pages for the nested Firestore `conversations/{id}/messages` subcollection.
 - Uses the existing Vercel OIDC → Google Workload Identity Federation → NEXORA runtime service-account path; no static Google service-account private key is introduced.
 - Requires a verified, non-anonymous Firebase ID token and an existing owner authorization source: `diagnosticsOwner` custom claim, the existing server-side diagnostics UID/email allowlist, or `diagnostics_admins/{uid}` with `enabled=true` and `role='owner'`.
 - Collection names are fixed to the audited NEXORA allowlist; the client cannot provide arbitrary Firestore paths or queries.
