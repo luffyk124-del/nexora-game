@@ -68,6 +68,21 @@ function canonicalParityValue(value: unknown): unknown {
   return value;
 }
 
+function parityTimestampMillis(value: unknown): number {
+  if (value && typeof value === 'object' && 'toMillis' in value && typeof (value as { toMillis?: unknown }).toMillis === 'function') {
+    return (value as { toMillis: () => number }).toMillis();
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  if (value && typeof value === 'object' && 'seconds' in value && typeof (value as { seconds?: unknown }).seconds === 'number') {
+    return Number((value as { seconds: number }).seconds) * 1000;
+  }
+  return 0;
+}
+
 function projectParityRows(rows: unknown, keys: string[]): unknown[] {
   if (!Array.isArray(rows)) return [];
   return rows.map((row) => {
@@ -340,13 +355,13 @@ export function MigrationConsole() {
         getDoc(doc(db, 'users_private', uid)),
         getDoc(doc(db, 'wallets', uid)),
         getDocs(query(collection(db, 'inventory'), where('uid', '==', uid), limit(200))),
-        getDocs(query(collection(db, 'transactions'), where('fromUid', '==', uid), limit(30))),
-        getDocs(query(collection(db, 'transactions'), where('toUid', '==', uid), limit(30))),
-        getDocs(query(collection(db, 'market_listings'), where('status', '==', 'active'), limit(100))),
-        getDocs(query(collection(db, 'market_orders'), where('buyerUid', '==', uid), limit(25))),
+        getDocs(query(collection(db, 'transactions'), where('fromUid', '==', uid), orderBy('createdAt', 'desc'), limit(30))),
+        getDocs(query(collection(db, 'transactions'), where('toUid', '==', uid), orderBy('createdAt', 'desc'), limit(30))),
+        getDocs(query(collection(db, 'market_listings'), where('status', '==', 'active'), orderBy('createdAt', 'desc'), limit(100))),
+        getDocs(query(collection(db, 'market_orders'), where('buyerUid', '==', uid), orderBy('createdAt', 'desc'), limit(25))),
         getDocs(query(collection(db, 'companies'), where('ownerUid', '==', uid), limit(50))),
         getDocs(query(collection(db, 'company_auctions'), where('status', '==', 'active'), limit(100))),
-        getDocs(query(collection(db, 'company_logs'), where('ownerUid', '==', uid), limit(25))),
+        getDocs(query(collection(db, 'company_logs'), where('ownerUid', '==', uid), orderBy('createdAt', 'desc'), limit(25))),
         getDocs(query(collection(db, 'properties'), where('ownerUid', '==', uid), limit(100))),
         getDocs(query(collection(db, 'organizations'), where('reputation', '>=', 0), orderBy('reputation', 'desc'), limit(40))),
         getDocs(query(collection(db, 'organization_members'), where('uid', '==', uid), limit(1))),
@@ -355,7 +370,7 @@ export function MigrationConsole() {
         getDoc(doc(db, 'daily_claims', uid + '_' + dateKey)),
         getDocs(query(collection(db, 'contract_claims'), where('uid', '==', uid))),
         getDocs(query(collection(db, 'player_achievements'), where('uid', '==', uid))),
-        getDocs(query(collection(db, 'notifications'), where('uid', '==', uid), limit(30))),
+        getDocs(query(collection(db, 'notifications'), where('uid', '==', uid), orderBy('createdAt', 'desc'), limit(30))),
         getDocs(query(collection(db, 'world_events'), where('active', '==', true))),
       ]);
       const membership = membershipSnap.docs[0]?.data() ?? null;
@@ -363,8 +378,8 @@ export function MigrationConsole() {
       const [orgMembersSnap, orgRequestsSnap, orgTransactionsSnap] = orgId
         ? await Promise.all([
             getDocs(query(collection(db, 'organization_members'), where('orgId', '==', orgId), limit(200))),
-            getDocs(query(collection(db, 'organization_requests'), where('orgId', '==', orgId), where('status', '==', 'pending'), limit(100))),
-            getDocs(query(collection(db, 'organization_transactions'), where('orgId', '==', orgId), limit(40))),
+            getDocs(query(collection(db, 'organization_requests'), where('orgId', '==', orgId), where('status', '==', 'pending'), orderBy('createdAt', 'asc'), limit(100))),
+            getDocs(query(collection(db, 'organization_transactions'), where('orgId', '==', orgId), orderBy('createdAt', 'desc'), limit(40))),
           ])
         : [null, null, null];
       const txMap = new Map<string, ParityRow>();
@@ -374,7 +389,9 @@ export function MigrationConsole() {
         privateData: privateSnap.exists() ? privateSnap.data() : null,
         wallet: walletSnap.exists() ? walletSnap.data() : null,
         inventory: inventorySnap.docs.map((item) => item.data()),
-        transactions: [...txMap.values()],
+        transactions: [...txMap.values()]
+          .sort((a, b) => parityTimestampMillis(b.createdAt) - parityTimestampMillis(a.createdAt))
+          .slice(0, 40),
         marketListings: listingsSnap.docs.map((item) => item.data()),
         marketOrders: ordersSnap.docs.map((item) => item.data()),
         companies: companiesSnap.docs.map((item) => item.data()),
