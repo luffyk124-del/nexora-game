@@ -1,6 +1,15 @@
-import { auth } from '../lib/firebase';
+import { auth, db, functions } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 
 const ECONOMY_URL = 'https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy';
+const useSupabaseSocial = () => import.meta.env.VITE_NEXORA_SUPABASE_SOCIAL === 'true';
+
+async function firebaseCallable<T>(name: string, payload: Record<string, unknown> = {}): Promise<T> {
+  const callable = httpsCallable<Record<string, unknown>, T>(functions, name);
+  const result = await callable(payload);
+  return result.data;
+}
 
 async function socialRequest<T>(action: string, payload: Record<string, unknown> = {}): Promise<T> {
   const user = auth.currentUser;
@@ -62,33 +71,71 @@ export type SocialOrgInvite = {
 };
 
 export const getPublicPlayerProfile = (targetUid: string) =>
-  socialRequest<PublicPlayer>('get_public_player_profile', { targetUid });
+  useSupabaseSocial()
+    ? socialRequest<PublicPlayer>('get_public_player_profile', { targetUid })
+    : firebaseCallable<PublicPlayer>('getPublicPlayerProfileSecure', { targetUid });
 export const searchPlayers = async (prefix: string) =>
-  (await socialRequest<{ players: PublicPlayer[] }>('search_players', { prefix })).players;
+  useSupabaseSocial()
+    ? (await socialRequest<{ players: PublicPlayer[] }>('search_players', { prefix })).players
+    : (await firebaseCallable<{ players: PublicPlayer[] }>('searchPlayersSecure', { prefix })).players;
 export const listBlockedPlayers = async () =>
-  (await socialRequest<{ blockedUids: string[] }>('list_blocked_players')).blockedUids;
-export const listDirectConversations = async () =>
-  (await socialRequest<{ conversations: SocialConversation[] }>('list_direct_conversations')).conversations;
-export const listDirectMessages = async (conversationId: string) =>
-  (await socialRequest<{ messages: SocialDirectMessage[] }>('list_direct_messages', { conversationId })).messages;
-export const listGlobalChatMessages = async () =>
-  (await socialRequest<{ messages: SocialGlobalMessage[] }>('list_global_chat_messages')).messages;
-export const listOrganizationInvites = async () =>
-  (await socialRequest<{ invites: SocialOrgInvite[] }>('list_organization_invites')).invites;
+  useSupabaseSocial()
+    ? (await socialRequest<{ blockedUids: string[] }>('list_blocked_players')).blockedUids
+    : (await firebaseCallable<{ blockedUids: string[] }>('listBlockedPlayersSecure')).blockedUids;
+export const listDirectConversations = async () => {
+  if (useSupabaseSocial()) return (await socialRequest<{ conversations: SocialConversation[] }>('list_direct_conversations')).conversations;
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error('UNAUTHENTICATED');
+  const snap = await getDocs(query(collection(db, 'conversations'), where('participants', 'array-contains', uid), limit(50)));
+  return snap.docs.map((item) => item.data() as SocialConversation);
+};
+export const listDirectMessages = async (conversationId: string) => {
+  if (useSupabaseSocial()) return (await socialRequest<{ messages: SocialDirectMessage[] }>('list_direct_messages', { conversationId })).messages;
+  const snap = await getDocs(query(collection(db, 'conversations', conversationId, 'messages'), orderBy('createdAt', 'desc'), limit(80)));
+  return snap.docs.map((item) => item.data() as SocialDirectMessage).reverse();
+};
+export const listGlobalChatMessages = async () => {
+  if (useSupabaseSocial()) return (await socialRequest<{ messages: SocialGlobalMessage[] }>('list_global_chat_messages')).messages;
+  const snap = await getDocs(query(collection(db, 'global_chat_messages'), orderBy('createdAt', 'desc'), limit(60)));
+  return snap.docs.map((item) => item.data() as SocialGlobalMessage).reverse();
+};
+export const listOrganizationInvites = async () => {
+  if (useSupabaseSocial()) return (await socialRequest<{ invites: SocialOrgInvite[] }>('list_organization_invites')).invites;
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error('UNAUTHENTICATED');
+  const snap = await getDocs(query(collection(db, 'organization_invites'), where('targetUid', '==', uid), limit(20)));
+  return snap.docs.map((item) => item.data() as SocialOrgInvite).filter((item) => item.status === 'pending');
+};
 
 export const openDirectConversation = (targetUid: string) =>
-  socialRequest<{ conversationId: string }>('open_direct_conversation', { targetUid });
+  useSupabaseSocial()
+    ? socialRequest<{ conversationId: string }>('open_direct_conversation', { targetUid })
+    : firebaseCallable<{ conversationId: string }>('openDirectConversationSecure', { targetUid });
 export const sendDirectMessage = (targetUid: string, text: string) =>
-  socialRequest<{ ok: boolean }>('send_direct_message', { targetUid, text, requestId: crypto.randomUUID() });
+  useSupabaseSocial()
+    ? socialRequest<{ ok: boolean }>('send_direct_message', { targetUid, text, requestId: crypto.randomUUID() })
+    : firebaseCallable<{ ok: boolean }>('sendDirectMessageSecure', { targetUid, text });
 export const sendGlobalChatMessage = (text: string) =>
-  socialRequest<{ ok: boolean }>('send_global_chat_message', { text, requestId: crypto.randomUUID() });
+  useSupabaseSocial()
+    ? socialRequest<{ ok: boolean }>('send_global_chat_message', { text, requestId: crypto.randomUUID() })
+    : firebaseCallable<{ ok: boolean }>('sendGlobalChatMessageSecure', { text });
 export const blockPlayer = (targetUid: string) =>
-  socialRequest<{ ok: boolean }>('block_player', { targetUid });
+  useSupabaseSocial()
+    ? socialRequest<{ ok: boolean }>('block_player', { targetUid })
+    : firebaseCallable<{ ok: boolean }>('blockPlayerSecure', { targetUid });
 export const unblockPlayer = (targetUid: string) =>
-  socialRequest<{ ok: boolean }>('unblock_player', { targetUid });
+  useSupabaseSocial()
+    ? socialRequest<{ ok: boolean }>('unblock_player', { targetUid })
+    : firebaseCallable<{ ok: boolean }>('unblockPlayerSecure', { targetUid });
 export const reportPlayer = (targetUid: string, reason: string) =>
-  socialRequest<{ ok: boolean }>('submit_player_report', { targetUid, reason, requestId: crypto.randomUUID() });
+  useSupabaseSocial()
+    ? socialRequest<{ ok: boolean }>('submit_player_report', { targetUid, reason, requestId: crypto.randomUUID() })
+    : firebaseCallable<{ ok: boolean }>('reportPlayerSecure', { targetUid, reason });
 export const invitePlayerToOrganization = (targetUid: string) =>
-  socialRequest<{ ok: boolean }>('invite_player_to_organization', { targetUid });
+  useSupabaseSocial()
+    ? socialRequest<{ ok: boolean }>('invite_player_to_organization', { targetUid })
+    : firebaseCallable<{ ok: boolean }>('invitePlayerToOrganizationSecure', { targetUid });
 export const respondOrganizationInvite = (inviteId: string, response: 'accept' | 'decline') =>
-  socialRequest<{ ok: boolean; status: string }>('respond_organization_invite', { inviteId, response });
+  useSupabaseSocial()
+    ? socialRequest<{ ok: boolean; status: string }>('respond_organization_invite', { inviteId, response })
+    : firebaseCallable<{ ok: boolean; status: string }>('respondOrganizationInviteSecure', { inviteId, response });
