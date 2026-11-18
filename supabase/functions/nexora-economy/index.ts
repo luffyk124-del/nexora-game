@@ -86,6 +86,23 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  if (action === "claim_mission_reward") {
+    const missionId = typeof body.missionId === "string" ? body.missionId : "";
+    if (!missionId || missionId.length > 80) return json({ error: "INVALID_MISSION" }, 400, origin);
+    const { data, error } = await admin.schema("nexora").rpc("claim_mission_reward", {
+      p_user_id: uid, p_mission_id: missionId,
+    });
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      if (["INVALID_MISSION","MISSION_ALREADY_CLAIMED","MISSION_NOT_COMPLETE","ACCOUNT_NOT_FOUND"].includes(message)) {
+        return json({ error: message }, 400, origin);
+      }
+      console.error("NEXORA mission reward RPC failed:", error.message);
+      return json({ error: "MISSION_REWARD_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
   if (action === "cancel_market_listing") {
     const listingId = typeof body.listingId === "string" ? body.listingId : "";
     if (!listingId || listingId.length > 160) return json({ error: "LISTING_NOT_FOUND" }, 400, origin);
