@@ -1,6 +1,6 @@
 # NEXORA Firebase → Supabase migration audit
 
-Updated: 2026-11-18
+Updated: 2026-11-18 (owner provisioning, exporter preview deployment, and mobile migration console)
 
 ## Scope and safety boundary
 - Firebase project: `gen-lang-client-0074900177`.
@@ -44,11 +44,11 @@ Verification confirmed:
 
 ## Additional social/messaging schema work completed\nMigration `20261118054000_nexora_social_messaging_schema_v1.sql` was applied and committed. It adds locked tables for `user_blocks`, `chat_rate_limits`, `conversations`, `conversation_messages`, `global_chat_messages`, and `organization_invites`. RLS is enabled and client grants are revoked. Direct-message subcollections map to `nexora.conversation_messages` with `conversation_id`.\n\n## Import control plane added
 
-- Deployed Supabase Edge Function `nexora-migration-import` (version 1). It verifies Firebase ID tokens itself, requires a verified non-anonymous account, and then checks `nexora.migration_operators` for an enabled `owner` record. Supabase gateway JWT verification is disabled only because the function validates Firebase JWTs directly.
+- Deployed Supabase Edge Function `nexora-migration-import` (version 2). It verifies Firebase ID tokens itself, requires a verified non-anonymous account, and then checks `nexora.migration_operators` for an enabled `owner` record. Supabase gateway JWT verification is disabled only because the function validates Firebase JWTs directly.
 - The function accepts only an allowlisted source collection and batches of at most 100 documents. It maps known fields into the destination tables, uses upserts for retry safety, and archives every raw source document in `nexora.firestore_import_payloads` so unrecognized fields are not discarded.
 - Added locked `nexora.migration_operators`, `nexora.migration_batches`, and `nexora.firestore_import_payloads` tables. RLS is enabled and direct client grants are revoked.
-- The operator table is intentionally empty until the verified owner Firebase UID is provisioned. The deployed importer now also accepts the existing Firebase-signed `diagnosticsOwner=true` custom claim, matching the existing diagnostics authorization model; this claim is trusted only after Firebase JWT signature, issuer, audience, verified-email, and non-anonymous checks. If the owner account does not carry that claim, an enabled `migration_operators` row is still required. No import has been run and no player data has been copied.
-- The importer uses `.schema("nexora")`; the `nexora` schema must be enabled in Supabase Project Settings → API → Exposed schemas before the Data API path will work. Exposing the schema does not grant direct client table access.
+- One enabled `owner` row has now been provisioned in `nexora.migration_operators` for the verified owner Firebase UID. The importer checks this row after validating the Firebase ID token. The deployed importer now also accepts the existing Firebase-signed `diagnosticsOwner=true` custom claim, matching the existing diagnostics authorization model; this claim is trusted only after Firebase JWT signature, issuer, audience, verified-email, and non-anonymous checks. If the owner account does not carry that claim, an enabled `migration_operators` row is still required. No import has been run and no player data has been copied.
+- The importer uses `.schema("nexora")`; the `nexora` schema is now enabled in Supabase Project Settings → API → Exposed schemas. This makes the schema addressable through the Data API but does not grant direct client table access; verified checks still show zero table grants to `anon` and `authenticated`.
 
 ## Server-side Firebase functions that must be migrated
 The current Functions source exports:
@@ -88,10 +88,10 @@ Firebase UIDs and Supabase Auth user IDs are different identity namespaces. The 
 - Requires a verified, non-anonymous Firebase ID token and an existing owner authorization source: `diagnosticsOwner` custom claim, the existing server-side diagnostics UID/email allowlist, or `diagnostics_admins/{uid}` with `enabled=true` and `role='owner'`.
 - Collection names are fixed to the audited NEXORA allowlist; the client cannot provide arbitrary Firestore paths or queries.
 - Exports one bounded page (maximum 100 documents) at a time and returns an opaque continuation token. Responses are marked no-store.
-- The endpoint has been committed but is not deployed; CI is still validating it. It must remain behind the draft PR until owner authorization and pagination tests pass.
+- The export endpoint is deployed in a Vercel preview deployment at commit `17a9b225f9c12e1b3c784f44e36deba60a5aecd5`. The `nexora-game` Vercel project now has a sensitive `DIAGNOSTICS_ALLOWED_UIDS` environment variable scoped to preview and production, containing the owner UID. The endpoint still requires a verified, non-anonymous Firebase ID token and Vercel OIDC/WIF for Firestore access.
 - This endpoint only exports; it does not write to Firestore or Supabase and does not itself complete migration.
-- The Firebase bearer-token parser was corrected in commit `837ee52faf1e136db48d8a5a47dcf3f328a0f680`. The corrected route is committed but is not deployed to Vercel because the current account has hit the daily deployment/build limit.
-- The latest CI run before the Deno-aware CI adjustment failed because the root browser TypeScript check included `supabase/functions/**`, which imports Deno `npm:` modules and the `Deno` global. `tsconfig.json` now excludes those runtime files, and `.github/workflows/ci.yml` now runs a dedicated `deno check` for the migration Edge Function. A fresh CI result for this update is still pending.
+- The Firebase bearer-token parser fix is included in the deployed preview. A mobile migration console is now committed on this branch at route `/migration`; it supports source-only scanning and paginated import into `nexora`, including nested conversation messages. Its latest commit is not deployed: Vercel returned HTTP 402 `api-deployments-free-per-day` (more than 100 deployments in 24 hours). No plan or billing change was made.
+- The latest CI run before the Deno-aware CI adjustment failed because the root browser TypeScript check included `supabase/functions/**`, which imports Deno `npm:` modules and the `Deno` global. `tsconfig.json` now excludes those runtime files, and `.github/workflows/ci.yml` now runs a dedicated `deno check` for the migration Edge Function. The latest Deno-aware CI rerun has not yet produced a verified successful result for the newest migration-console commit. Do not treat the console build as validated until CI or an equivalent build check passes.
 
 ## Import mapping and dependency verification (2026-11-18)
 - The exporter and importer allowlists were compared: all 30 collection names match exactly, with no missing importer or exporter entry.
@@ -115,7 +115,7 @@ No Firestore documents have been copied yet. A controlled export/import bridge m
 1. Finalize source collection/type contracts, including the company-log details mismatch.
 2. Implement and test the trusted identity-linking flow.
 3. Migrate Firebase callable/scheduled functions to Edge Functions/RPCs and test economy invariants.
-4. Configure the `nexora` schema as an exposed Data API schema while keeping client table grants revoked.
+4. Keep the `nexora` schema exposed in Data API settings while keeping client table grants revoked.
 5. Export Firestore through an authorized Admin path and import only into `nexora`.
 6. Reconcile collection counts, ownership, wallet totals, ledger entries, auctions, organization membership, and moderation records.
 7. Run isolated integration tests and mobile QA against the Supabase-backed game branch.
