@@ -1802,6 +1802,19 @@ export async function depositToOrgTreasury(
   const txId = genId('tx');
   const orgTxId = genId('otx');
 
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORG_TREASURY === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'deposit_org_treasury', orgId, amount, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'ORG_TREASURY_OPERATION_FAILED');
+    return;
+  }
   try {
     await runTransaction(db, async (tx) => {
       const walletRef = doc(db, 'wallets', uid);
@@ -1872,6 +1885,19 @@ export async function withdrawFromOrgTreasury(
   const txId = genId('tx');
   const orgTxId = genId('otx');
 
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORG_TREASURY === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'withdraw_org_treasury', orgId, amount, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'ORG_TREASURY_OPERATION_FAILED');
+    return;
+  }
   try {
     await runTransaction(db, async (tx) => {
       const walletRef = doc(db, 'wallets', uid);
