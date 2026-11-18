@@ -34,12 +34,29 @@ After creating the single `mjn.admin@nexora.invalid` Auth user:
 3. Verify that no other Auth user has an enabled row in `nexora.diagnostics_admins`.
 4. Do not create an open registration endpoint or allow the first visitor to claim admin access.
 
-Example SQL for a trusted project owner session (replace the placeholder with the verified Auth user UUID):
+Run this once in the trusted Supabase SQL Editor after creating the Auth user. It finds the account by its fixed internal login email and disables any other enabled reports administrator:
 ```sql
-insert into nexora.diagnostics_admins (user_id, enabled, role)
-values ('<VERIFIED_SUPABASE_AUTH_USER_UUID>', true, 'owner')
-on conflict (user_id) do update
-set enabled = true, role = 'owner', updated_at = now();
+do $
+declare
+  admin_id uuid;
+begin
+  select id into admin_id
+  from auth.users
+  where lower(email) = lower('mjn.admin@nexora.invalid');
+
+  if admin_id is null then
+    raise exception 'Create the MJNON Auth user before enabling Reports Center access';
+  end if;
+
+  update nexora.diagnostics_admins
+  set enabled = false, updated_at = now()
+  where user_id <> admin_id and enabled = true;
+
+  insert into nexora.diagnostics_admins (user_id, enabled, role)
+  values (admin_id, true, 'owner')
+  on conflict (user_id) do update
+  set enabled = true, role = 'owner', updated_at = now();
+end $;
 ```
 
 ## Frontend deployment
