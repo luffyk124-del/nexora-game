@@ -1,74 +1,48 @@
-# NEXORA Reports Center — Supabase setup
+# NEXORA Reports Center — Supabase setup and release gates
 
-## Current architecture
-- The browser uses Supabase Auth with Google OAuth.
-- The browser calls the `nexora-reports-admin` Edge Function; it does not access report tables directly.
-- The Edge Function verifies the Supabase access token, then checks `nexora.diagnostics_admins` for the signed-in user's enabled admin record.
-- Reports and audit data stay in the `nexora` schema. RLS remains enabled and direct client grants remain revoked.
-- Trusted server access is granted to `service_role` only. Do not grant `anon` or `authenticated` access to the NEXORA tables.
-- Status changes and audit insertion are committed atomically through `nexora.set_player_report_status`.
-- The RPC is executable only by `service_role`; `anon` and `authenticated` have no execute permission.
-- There is no public admin registration or first-user auto-promotion.
+## Architecture
+- Static Arabic frontend is built with Vite from `reports-center/`.
+- Sign-in is username/password only. The UI accepts `MJNON` (case-insensitive), maps it to the internal Supabase Auth login `mjn.admin@nexora.invalid`, and calls `signInWithPassword`.
+- Google OAuth is not used.
+- The browser invokes `nexora-reports-admin`; it never reads or writes report tables directly.
+- The Edge Function verifies the Supabase access token and requires an enabled row in `nexora.diagnostics_admins`.
+- Report status changes and audit insertion use `nexora.set_player_report_status` atomically.
+- Report tables remain in the isolated `nexora` schema with RLS enabled. Do not grant direct table access to `anon` or `authenticated`.
+- The Edge Function uses the server-side Supabase secret only. Never put a service-role/secret key in frontend code or Git.
+
+## Administrator provisioning — completed
+- Auth user: `mjn.admin@nexora.invalid`.
+- The account has a confirmed email.
+- Its UUID is enabled in `nexora.diagnostics_admins` with role `owner`.
+- The password is owned by the administrator and must never be committed or shared in chat.
+- The `.invalid` address cannot receive email; password recovery must be performed by a trusted project owner in Supabase Dashboard.
+- Keep public signups disabled in Supabase Authentication settings. There must be only one enabled Reports Center administrator.
+- The username check in the browser is a UI restriction; actual authorization is enforced by the Edge Function allowlist.
 
 ## Supabase API schema exposure
-The Edge Function uses the Supabase Data API with `.schema("nexora")`. In Supabase Dashboard:
-1. Open Project Settings → API.
-2. Add `nexora` to the exposed schemas list and save.
-3. Keep table privileges restricted: only `service_role` has access; `anon` and `authenticated` remain revoked.
+The Edge Function queries the `nexora` schema through the Supabase Data API. In Project Settings → API, ensure `nexora` is listed under exposed schemas. Schema exposure does not grant table privileges. Keep grants and RLS restrictive.
 
-Exposing a schema makes it addressable through the Data API; it does not grant table access by itself. Do not add client grants or public RLS policies.
+## Current deployment and data status
+- Supabase Edge Function `nexora-reports-admin`: active, version 2, JWT verification enabled.
+- The atomic status/audit RPC migration is applied.
+- The Auth user and enabled owner record are provisioned.
+- Current counts at verification: `nexora.player_reports = 0`, `nexora.player_report_audit = 0`.
+- No Firestore reports have been imported yet. An empty dashboard is expected until the migration is completed or the game starts writing reports to the new backend.
+- The Reports Center frontend has not been published.
+- Do not delete, disable, or modify the original Firebase project until the full game migration and data reconciliation are complete.
 
-## Required Supabase Auth setup — username and password
-- Google OAuth is not used by the Reports Center.
-- The only accepted username in the front end is `MJNON` (case-insensitive).
-- The front end maps that fixed username to the internal Supabase Auth email `mjn.admin@nexora.invalid` and calls `signInWithPassword`.
-- Do not expose public sign-up. In Supabase Authentication settings, disable new user signups.
-- In Authentication → Users, create exactly one administrator user with email `mjn.admin@nexora.invalid`, set a strong password, and mark the email as confirmed if the dashboard requires it. Do not send the password through ChatGPT or commit it to GitHub.
-- The internal `.invalid` address is a login identifier only; it is not intended to receive email. Password reset by email is therefore not available. If the password is lost, reset it from the trusted Supabase dashboard.
-- The username check in the browser is only a user-interface restriction. Actual authorization is enforced server-side by the Edge Function's enabled `nexora.diagnostics_admins` record. Keep this allowlist check; never trust the username field alone.
+## Build
+From `reports-center/`:
+- Install: `npm install`
+- Build: `npm run build`
+- Output: `dist/`
+- Vite uses relative asset paths so the app can be hosted under a repository subpath.
 
-## Authorize the first administrator
-After creating the single `mjn.admin@nexora.invalid` Auth user:
-1. Retrieve that user's Supabase Auth UUID from Authentication → Users.
-2. Insert that UUID into `nexora.diagnostics_admins` with `enabled = true` and `role = 'owner'` using a trusted project-owner database session.
-3. Verify that no other Auth user has an enabled row in `nexora.diagnostics_admins`.
-4. Do not create an open registration endpoint or allow the first visitor to claim admin access.
-
-Run this once in the trusted Supabase SQL Editor after creating the Auth user. It finds the account by its fixed internal login email and disables any other enabled reports administrator:
-```sql
-do $
-declare
-  admin_id uuid;
-begin
-  select id into admin_id
-  from auth.users
-  where lower(email) = lower('mjn.admin@nexora.invalid');
-
-  if admin_id is null then
-    raise exception 'Create the MJNON Auth user before enabling Reports Center access';
-  end if;
-
-  update nexora.diagnostics_admins
-  set enabled = false, updated_at = now()
-  where user_id <> admin_id and enabled = true;
-
-  insert into nexora.diagnostics_admins (user_id, enabled, role)
-  values (admin_id, true, 'owner')
-  on conflict (user_id) do update
-  set enabled = true, role = 'owner', updated_at = now();
-end $;
-```
-
-## Frontend deployment
-- Vercel project root: `reports-center`.
-- Build command: `npm run build`.
-- Output directory: `dist`.
-- Keep the preview private until the single username/password account, administrator authorization, and the list/update/audit flows have been tested.
-
-## Migration status
-- The Supabase Edge Function `nexora-reports-admin` is deployed as version 2 with JWT verification enabled.
-- The status update path uses the atomic RPC `nexora.set_player_report_status`; the SQL migration is tracked at `supabase/migrations/20261118051500_nexora_reports_atomic_status_audit.sql`.
-- The function source is tracked at `supabase/functions/nexora-reports-admin/index.ts`.
-- Reports tables exist in schema `nexora`; RLS is enabled and client grants remain revoked.
-- The single Auth user and first administrator record, `nexora` API schema exposure, Firestore data import, and final deployment are still pending.
-- Do not delete or disable the original Firebase project until migration and data reconciliation are complete.
+## Release checklist
+1. Confirm Supabase Auth public signups are disabled.
+2. Verify the `nexora` schema is exposed to the Edge Function Data API while direct client grants remain revoked.
+3. Restrict Edge Function CORS to the final hosting origin before publishing.
+4. Publish the static frontend only after the hosting target and Pages settings are verified.
+5. Test valid MJNON login, invalid password, denied non-admin access, report list, status update, and audit history.
+6. Import/reconcile any historical Firestore report records and verify the game writes new reports to the intended backend.
+7. Keep PRs open and Firebase intact until the above release gates pass.
