@@ -1774,6 +1774,20 @@ export async function requestJoinOrganization(
   orgId: string
 ): Promise<'joined' | 'requested'> {
   if (auth.currentUser?.uid !== uid) throw new Error('AUTH_SESSION_MISMATCH');
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'join_organization', orgId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || (!payload?.ok && !payload?.status)) throw new Error(payload?.error || 'ORG_MEMBERSHIP_OPERATION_FAILED');
+    if (payload.status !== 'joined' && payload.status !== 'requested') throw new Error('ORGANIZATION_JOIN_FAILED'); return payload.status as 'joined' | 'requested';
+  }
+
   const join = httpsCallable<{ orgId: string }, { status: 'joined' | 'requested' }>(functions, 'joinOrganizationSecure');
   const result = await join({ orgId });
   if (result.data.status !== 'joined' && result.data.status !== 'requested') {
@@ -1788,6 +1802,20 @@ export async function setOrganizationJoinMode(
   mode: 'open' | 'request' | 'closed'
 ): Promise<void> {
   if (auth.currentUser?.uid !== uid) throw new Error('AUTH_SESSION_MISMATCH');
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'set_org_join_mode', orgId, mode }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || (!payload?.ok && !payload?.status)) throw new Error(payload?.error || 'ORG_MEMBERSHIP_OPERATION_FAILED');
+    return;
+  }
+
   const updateMode = httpsCallable<{ orgId: string; mode: 'open' | 'request' | 'closed' }, { ok: boolean }>(
     functions,
     'setOrganizationJoinModeSecure'
@@ -1802,6 +1830,20 @@ export async function handleOrgJoinRequest(
   _applicantUsername: string,
   decision: 'approved' | 'rejected'
 ): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'handle_org_join_request', orgId, reqId, applicantUid, decision }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || (!payload?.ok && !payload?.status)) throw new Error(payload?.error || 'ORG_MEMBERSHIP_OPERATION_FAILED');
+    return;
+  }
+
   const handleRequest = httpsCallable(functions, 'approveOrganizationJoinRequestSecure');
   await handleRequest({ orgId, reqId, applicantUid, decision });
 }
@@ -1860,6 +1902,20 @@ export async function updateOrgMemberRole(
 
 export async function leaveOrganization(uid: string, orgId: string): Promise<void> {
   if (!uid || auth.currentUser?.uid !== uid) throw new Error('UNAUTHENTICATED');
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'leave_organization', orgId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || (!payload?.ok && !payload?.status)) throw new Error(payload?.error || 'ORG_MEMBERSHIP_OPERATION_FAILED');
+    return;
+  }
+
   const leave = httpsCallable(functions, 'leaveOrganizationSecure');
   await leave({ orgId });
 }
@@ -1871,6 +1927,20 @@ export async function kickOrgMember(
 ): Promise<void> {
   if (!actorUid || actorUid === targetUid) throw new Error('CANNOT_KICK_SELF');
   if (auth.currentUser?.uid !== actorUid) throw new Error('UNAUTHENTICATED');
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'kick_org_member', orgId, targetUid }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || (!payload?.ok && !payload?.status)) throw new Error(payload?.error || 'ORG_MEMBERSHIP_OPERATION_FAILED');
+    return;
+  }
+
   const removeMember = httpsCallable(functions, 'kickOrganizationMemberSecure');
   await removeMember({ orgId, targetUid });
 }
