@@ -1958,7 +1958,7 @@ export async function updatePlayerAvatar(uid: string, avatarId: string): Promise
 export async function markNotificationRead(notifId: string): Promise<void> {
   if (import.meta.env.VITE_NEXORA_SUPABASE_PROFILE === 'true') {
     const currentUser = auth.currentUser;
-    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
     const idToken = await currentUser.getIdToken();
     const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
       method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
