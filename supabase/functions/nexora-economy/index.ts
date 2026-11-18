@@ -86,6 +86,26 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  if (action === "upgrade_skill") {
+    const skillKey = typeof body.skillKey === "string" ? body.skillKey : "";
+    if (!["trade","management","industry","negotiation","finance","leadership"].includes(skillKey)) {
+      return json({ error: "INVALID_SKILL" }, 400, origin);
+    }
+    const { data, error } = await admin.schema("nexora").rpc("upgrade_player_skill", {
+      p_user_id: uid,
+      p_skill_key: skillKey,
+    });
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      if (["INVALID_SKILL","NO_SKILL_POINTS","SKILL_MAXED","ACCOUNT_NOT_FOUND"].includes(message)) {
+        return json({ error: message }, 400, origin);
+      }
+      console.error("NEXORA skill upgrade RPC failed:", error.message);
+      return json({ error: "SKILL_UPGRADE_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
   if (action === "claim_daily_stipend") {
     const { data, error } = await admin.schema("nexora").rpc("claim_daily_stipend", {
       p_user_id: uid,
