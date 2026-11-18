@@ -86,6 +86,53 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  if (action === "buy_property") {
+    const name = typeof body.name === "string" ? body.name : "";
+    const propertyType = typeof body.propertyType === "string" ? body.propertyType : "";
+    const requestId = typeof body.requestId === "string" ? body.requestId : "";
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+      return json({ error: "INVALID_REQUEST_ID" }, 400, origin);
+    }
+    const { data, error } = await admin.schema("nexora").rpc("buy_property", {
+      p_user_id: uid, p_name: name, p_type: propertyType, p_request_id: requestId,
+    });
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      if (["INVALID_REQUEST_ID","INVALID_NAME","INVALID_PROPERTY_TYPE","ACCOUNT_NOT_FOUND","INSUFFICIENT_FUNDS"].includes(message)) return json({ error: message }, 400, origin);
+      console.error("NEXORA property purchase RPC failed:", error.message);
+      return json({ error: "PROPERTY_PURCHASE_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
+  if (action === "upgrade_property" || action === "collect_property_rent" || action === "toggle_property_lease") {
+    const propertyId = typeof body.propertyId === "string" ? body.propertyId : "";
+    if (!propertyId || propertyId.length > 160) return json({ error: "PROPERTY_NOT_FOUND" }, 400, origin);
+    let rpcName: string;
+    let rpcArgs: Record<string, unknown>;
+    if (action === "upgrade_property" || action === "collect_property_rent") {
+      const requestId = typeof body.requestId === "string" ? body.requestId : "";
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) return json({ error: "INVALID_REQUEST_ID" }, 400, origin);
+      rpcName = action;
+      rpcArgs = action === "upgrade_property"
+        ? { p_user_id: uid, p_property_id: propertyId, p_request_id: requestId }
+        : { p_user_id: uid, p_property_id: propertyId, p_request_id: requestId };
+    } else {
+      if (typeof body.isRented !== "boolean") return json({ error: "INVALID_ARGUMENT" }, 400, origin);
+      rpcName = "toggle_property_lease";
+      rpcArgs = { p_user_id: uid, p_property_id: propertyId, p_is_rented: body.isRented };
+    }
+    const { data, error } = await admin.schema("nexora").rpc(rpcName, rpcArgs);
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      const allowed = ["PROPERTY_NOT_FOUND","UNAUTHORIZED","MAX_LEVEL","INSUFFICIENT_FUNDS","NOTHING_TO_COLLECT","PROPERTY_VACANT","ACCOUNT_NOT_FOUND"];
+      if (allowed.includes(message)) return json({ error: message }, 400, origin);
+      console.error("NEXORA property RPC failed:", error.message);
+      return json({ error: "PROPERTY_OPERATION_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
   if (action === "fulfill_trade_contract") {
     const contractId = typeof body.contractId === "string" ? body.contractId : "";
     if (!contractId || contractId.length > 80) return json({ error: "INVALID_CONTRACT" }, 400, origin);
