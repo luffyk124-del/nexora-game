@@ -194,7 +194,8 @@ async function main(req: Request): Promise<Response> {
   if (priorBatch) return send({ ok: true, alreadyImported: true, imported: priorBatch.row_count, checksum });
 
   if (rows.length) {
-    const { error } = collection === "transactions"
+    const immutableCollections = new Set(["transactions", "player_missions"]);
+    const { error } = immutableCollections.has(collection)
       ? await db.from(spec.table).upsert(rows, { onConflict: spec.conflict, ignoreDuplicates: true })
       : await db.from(spec.table).upsert(rows, { onConflict: spec.conflict });
     if (error) return send({ error: "MAPPED_IMPORT_FAILED", table: spec.table, detail: error.message.slice(0, 180) }, 500);
