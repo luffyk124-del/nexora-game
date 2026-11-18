@@ -16,6 +16,7 @@ import { MarketHubView } from './features/market/MarketHubView';
 import { OrganizationHubView } from './features/organization/OrganizationHubView';
 import { ProfileHubView } from './features/profile/ProfileHubView';
 import { SocialHubView } from './features/social/SocialHubView';
+import { MigrationConsole } from './features/migration/MigrationConsole';
 import { useGameData } from './hooks/useGameData';
 import type { MainTab } from './types/game';
 
@@ -178,6 +179,10 @@ function NexoraAppContent() {
 }
 
 export default function App() {
+  if (window.location.pathname === '/migration') {
+    return <MigrationConsole />;
+  }
+
   return (
     <ToastProvider>
       <GameAudioFeedback />
