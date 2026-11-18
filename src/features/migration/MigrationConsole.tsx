@@ -317,10 +317,26 @@ export function MigrationConsole() {
               {!user.emailVerified && <p className="rounded-lg bg-amber-500/10 p-3 text-sm text-amber-200">يجب توثيق البريد الإلكتروني لهذا الحساب أولاً.</p>}
             </section>
 
-            <section className="rounded-2xl border border-slate-700 bg-[#141821] p-5 space-y-4">
+            <section className="rounded-2xl border border-cyan-500/40 bg-[#141821] p-5 space-y-3">
+              <h2 className="text-lg font-semibold text-cyan-200">المصدّر الجديد عبر GitHub Actions</h2>
+              <p className="text-sm leading-7 text-slate-300">
+                أُضيف مسار تصدير جديد يستخدم GitHub OIDC بدل اعتماد تشغيل التصدير على Vercel.
+                يحتاج إعداد Workload Identity Federation في Google Cloud ومتغير المستودع الموضحين في دليل الإعداد.
+                شغّل وضع scan أولاً، ولا تشغّل المسارين بالتوازي.
+              </p>
+              <div className="flex flex-wrap gap-3 text-sm">
+                <a className="underline text-cyan-200" href="https://github.com/luffyk124-del/nexora-game/blob/feature/nexora-social-economy-mobile-overhaul/docs/GITHUB_OIDC_SETUP.md" target="_blank" rel="noreferrer">دليل إعداد GitHub OIDC</a>
+                <a className="underline text-cyan-200" href="https://github.com/luffyk124-del/nexora-game/blob/feature/nexora-social-economy-mobile-overhaul/.github/workflows/nexora-firestore-export.yml" target="_blank" rel="noreferrer">ملف مهمة التصدير الجديدة</a>
+              </div>
+              <p className="text-xs leading-6 text-slate-400">
+                ستظهر إمكانية تشغيل المهمة من تبويب Actions بعد وصول ملف workflow إلى الفرع الافتراضي. يبقى المصدّر الحالي احتياطياً فقط حتى نجاح أول فحص واستيراد عبر GitHub.
+              </p>
+            </section>
+
+            <section className="rounded-2xl border border-amber-500/30 bg-[#141821] p-5 space-y-4">
               <div>
-                <h2 className="text-lg font-semibold">مراحل النقل</h2>
-                <p className="mt-1 text-sm leading-6 text-slate-300">ابدأ بالفحص أولاً. الفحص يقرأ المصدر فقط. بعد نجاحه يمكنك تشغيل الاستيراد؛ الدفعات قابلة لإعادة المحاولة باستخدام checksum وupsert.</p>
+                <h2 className="text-lg font-semibold">المصدّر الاحتياطي القديم (Vercel)</h2>
+                <p className="mt-1 text-sm leading-6 text-slate-300">هذا المسار مؤقت للرجوع فقط. استخدمه فقط عند تعذر مسار GitHub الجديد، ولا تشغّل التصديرين معاً. الفحص يقرأ المصدر فقط، والاستيراد يستخدم checksum وupsert.</p>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <button
