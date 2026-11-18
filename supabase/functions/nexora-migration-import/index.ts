@@ -102,7 +102,6 @@ async function main(req: Request): Promise<Response> {
 
   let uid = "";
   let claimedOwner = false;
-  let githubActor = "";
   try {
     const { payload } = await jwtVerify(token, FIREBASE_KEYS, {
       issuer: FIREBASE_ISSUER, audience: PROJECT_ID, algorithms: ["RS256"],
@@ -128,7 +127,6 @@ async function main(req: Request): Promise<Response> {
           !["workflow_dispatch","schedule"].includes(String(payload.event_name)) || actor !== "luffyk124-del") {
         return send({ error: "GITHUB_EXPORTER_NOT_AUTHORIZED" }, 403);
       }
-      githubActor = actor;
       uid = `github-actions:${actor}`;
       claimedOwner = true;
     } catch {
