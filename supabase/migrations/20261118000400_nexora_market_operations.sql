@@ -77,6 +77,10 @@ begin
 
   select * into v_listing from market_listings where id=p_listing_id for update;
   if not found then raise exception 'LISTING_NOT_FOUND'; end if;
+  -- Recheck after the listing lock so concurrent retries return the committed order.
+  if exists(select 1 from transactions where id=v_tx_id and from_uid=p_buyer_uid and type='market_buy') then
+    return jsonb_build_object('ok',true,'transactionId',v_tx_id,'replayed',true);
+  end if;
   if v_listing.status<>'active' or v_listing.remaining_qty<p_quantity then raise exception 'INSUFFICIENT_LISTING_QTY'; end if;
   if v_listing.seller_uid=p_buyer_uid then raise exception 'CANNOT_BUY_OWN_LISTING'; end if;
 
