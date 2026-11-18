@@ -4,9 +4,11 @@ The new Firestore exporter runs from GitHub Actions and imports through the `nex
 
 ## One-time Google Cloud setup
 
-Run these commands as a Google Cloud project administrator. The existing runtime service account is reused; the new GitHub identity pool is separate from the Vercel pool.
+Run these commands as a Google Cloud project administrator. The existing runtime service account is reused; the new GitHub identity pool is separate from the Vercel pool. The commands discover the numeric project number instead of assuming it.
 
 ```bash
+PROJECT_NUMBER="$(gcloud projects describe gen-lang-client-0074900177 --format='value(projectNumber)')"
+
 gcloud iam workload-identity-pools create nexora-github-pool \
   --project=gen-lang-client-0074900177 \
   --location=global \
@@ -24,7 +26,7 @@ gcloud iam service-accounts add-iam-policy-binding \
   nexora-vercel-runtime@gen-lang-client-0074900177.iam.gserviceaccount.com \
   --project=gen-lang-client-0074900177 \
   --role=roles/iam.workloadIdentityUser \
-  --member="principalSet://iam.googleapis.com/projects/145581837596/locations/global/workloadIdentityPools/nexora-github-pool/attribute.repository/luffyk124-del/nexora-game"
+  --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/nexora-github-pool/attribute.repository/luffyk124-del/nexora-game"
 ```
 
 The service account must retain Firestore read access (`roles/datastore.viewer`) on project `gen-lang-client-0074900177`. Do not grant broader Firestore write permissions.
