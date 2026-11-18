@@ -80,6 +80,28 @@ Deno.serve(async (req: Request) => {
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error();
   } catch { return json({ error: "INVALID_JSON" }, 400, origin); }
 
+  const action = typeof body.action === "string" ? body.action : "transfer";
+  const url = Deno.env.get("SUPABASE_URL");
+  const key = getServiceKey();
+  if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
+  const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+
+  if (action === "claim_daily_stipend") {
+    const { data, error } = await admin.schema("nexora").rpc("claim_daily_stipend", {
+      p_user_id: uid,
+    });
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      if (["ALREADY_CLAIMED_TODAY", "ACCOUNT_NOT_FOUND"].includes(message)) {
+        return json({ error: message }, 400, origin);
+      }
+      console.error("NEXORA daily stipend RPC failed:", error.message);
+      return json({ error: "DAILY_STIPEND_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+  if (action !== "transfer") return json({ error: "UNKNOWN_ACTION" }, 400, origin);
+
   const recipientUsername = typeof body.recipientUsername === "string" ? body.recipientUsername.trim() : "";
   const amount = body.amount;
   const note = typeof body.note === "string" ? body.note.slice(0, 180) : "";
@@ -92,10 +114,6 @@ Deno.serve(async (req: Request) => {
     return json({ error: "INVALID_REQUEST_ID" }, 400, origin);
   }
 
-  const url = Deno.env.get("SUPABASE_URL");
-  const key = getServiceKey();
-  if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
-  const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
   const { data, error } = await admin.schema("nexora").rpc("transfer_credits", {
     p_sender_uid: uid,
     p_recipient_username: recipientUsername,
