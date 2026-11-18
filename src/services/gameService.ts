@@ -1726,6 +1726,22 @@ export async function createOrganization(
   if (!currentUser || currentUser.uid !== uid) throw new Error('AUTH_SESSION_MISMATCH');
   if (!currentUser.emailVerified) throw new Error('EMAIL_NOT_VERIFIED');
 
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const idToken = await currentUser.getIdToken(true);
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create_organization', name: cleanName, tag: cleanTag,
+        description: description.trim().slice(0, 240), requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json().catch(() => ({})) as { error?: unknown; orgId?: unknown; ok?: boolean };
+    if (!response.ok || payload.ok !== true || typeof payload.orgId !== 'string' || !payload.orgId) {
+      throw new Error(typeof payload.error === 'string' ? payload.error : 'ORGANIZATION_CREATE_FAILED');
+    }
+    return payload.orgId;
+  }
+
   const idToken = await currentUser.getIdToken(true);
   const response = await fetch('/api/organization-create', {
     method: 'POST',
