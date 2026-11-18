@@ -290,7 +290,7 @@ export function useGameData(): GameDataState {
 
     // Shadow-read only: Supabase is queried for parity diagnostics while Firebase remains authoritative.
     // Do not switch UI state to Supabase until all game mutations have migrated to server-side functions.
-    if (import.meta.env.VITE_NEXORA_SUPABASE_SHADOW_READS === 'true' && !authUser.isAnonymous) {
+    if (import.meta.env.VITE_NEXORA_SUPABASE_SHADOW_READS === 'true' && import.meta.env.VITE_NEXORA_SUPABASE_PLAYER_READS !== 'true' && !authUser.isAnonymous) {
       void (async () => {
         try {
           const idToken = await authUser.getIdToken();
