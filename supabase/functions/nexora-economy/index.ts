@@ -86,6 +86,24 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  if (action === "manufacture_recipe") {
+    const recipeId = typeof body.recipeId === "string" ? body.recipeId : "";
+    const batchQuantity = body.batchQuantity;
+    const requestId = typeof body.requestId === "string" ? body.requestId : "";
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) return json({ error: "INVALID_REQUEST_ID" }, 400, origin);
+    if (!Number.isSafeInteger(batchQuantity) || (batchQuantity as number)<1 || (batchQuantity as number)>999) return json({ error: "INVALID_QUANTITY" }, 400, origin);
+    const { data, error } = await admin.schema("nexora").rpc("manufacture_recipe", {
+      p_user_id: uid, p_recipe_id: recipeId, p_batch_quantity: batchQuantity, p_request_id: requestId,
+    });
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      if (["INVALID_RECIPE","INVALID_QUANTITY","INDUSTRY_SKILL_TOO_LOW","INSUFFICIENT_FUNDS","MISSING_INPUTS","ACCOUNT_NOT_FOUND","INVALID_TOTAL"].includes(message)) return json({ error: message }, 400, origin);
+      console.error("NEXORA manufacturing RPC failed:", error.message);
+      return json({ error: "MANUFACTURING_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
   if (action === "buy_property") {
     const name = typeof body.name === "string" ? body.name : "";
     const propertyType = typeof body.propertyType === "string" ? body.propertyType : "";
