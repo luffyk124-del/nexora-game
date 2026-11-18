@@ -366,12 +366,12 @@ export function MigrationConsole() {
         getDocs(query(collection(db, 'organizations'), where('reputation', '>=', 0), orderBy('reputation', 'desc'), limit(40))),
         getDocs(query(collection(db, 'organization_members'), where('uid', '==', uid), limit(1))),
         getDocs(query(collection(db, 'organization_requests'), where('uid', '==', uid))),
-        getDocs(query(collection(db, 'player_missions'), where('uid', '==', uid))),
+        getDocs(query(collection(db, 'player_missions'), where('uid', '==', uid), limit(200))),
         getDoc(doc(db, 'daily_claims', uid + '_' + dateKey)),
-        getDocs(query(collection(db, 'contract_claims'), where('uid', '==', uid))),
-        getDocs(query(collection(db, 'player_achievements'), where('uid', '==', uid))),
+        getDocs(query(collection(db, 'contract_claims'), where('uid', '==', uid), limit(200))),
+        getDocs(query(collection(db, 'player_achievements'), where('uid', '==', uid), limit(200))),
         getDocs(query(collection(db, 'notifications'), where('uid', '==', uid), orderBy('createdAt', 'desc'), limit(30))),
-        getDocs(query(collection(db, 'world_events'), where('active', '==', true))),
+        getDocs(query(collection(db, 'world_events'), where('active', '==', true), limit(100))),
       ]);
       const membership = membershipSnap.docs[0]?.data() ?? null;
       const orgId = typeof membership?.orgId === 'string' ? membership.orgId : '';
