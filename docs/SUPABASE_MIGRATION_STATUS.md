@@ -97,3 +97,14 @@ All are disabled unless explicitly set to the string `true`:
 - Added matching Firestore composite indexes in `firestore.indexes.json`; the Firebase rules deployment workflow now deploys those indexes alongside rules.
 - Added a read-only **real-player parity check** to the Migration Console. It uses the signed-in Firebase player's own session to compare profile/private data, wallet, inventory, transactions, market, companies, auctions, properties, organizations, missions, claims, achievements, notifications, and world events against the Supabase player-data endpoint. It does not mutate player data.
 - The parity check is implemented but has not yet been run with the owner's live signed-in player session. It must report zero differences before the read switch is enabled.
+
+
+## Parallel wallet transfer QA (2026-11-18)
+
+- Ran two simultaneous transfers of 80 credits from a synthetic 100-credit sender. Exactly one committed; the other returned `INSUFFICIENT_FUNDS`. Final balances were sender 20 / recipient 80, with one transfer ledger row.
+- Ran two simultaneous calls with the same request UUID and 5-credit payload. One committed and one returned `replayed: true`; only one additional debit and one additional transaction were recorded.
+- Reused that request UUID with a different amount; the RPC rejected it with `REQUEST_ID_CONFLICT`.
+- The wallet conservation check passed: sender + recipient balance remained 100 credits through all cases.
+- The database's immutable ledger trigger prevents deletion of committed transaction/audit rows. Two synthetic QA profiles and their wallets/usernames remain, marked with `QA TEST` titles and `QAConc...` usernames; their two immutable transfer rows and two immutable audit rows are intentionally retained as an audit trail. Test notifications were removed. These QA records must be excluded from Firestore source reconciliation and must never be imported back into Firebase.
+- Post-test integrity checks: zero negative wallets, zero orphan wallets/inventory/companies/properties/organization members, and zero organization member-count mismatches.
+- This is a synthetic concurrent database test, not a real-player authenticated session test. The Migration Console now includes a read-only real-player parity check for the owner to run after Pages is enabled.
