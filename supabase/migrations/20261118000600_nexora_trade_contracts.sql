@@ -28,6 +28,10 @@ begin
     into v_level,v_xp,v_points,v_rep,v_influence,v_skills,v_stats
     from player_profiles where user_id=p_user_id for update;
   if not found then raise exception 'ACCOUNT_NOT_FOUND'; end if;
+  -- Recheck after serializing on the player row to prevent concurrent double fulfillment.
+  if exists(select 1 from contract_claims where user_id=p_user_id and contract_id=v_claim_key) then
+    raise exception 'CONTRACT_ALREADY_FULFILLED';
+  end if;
   select quantity into v_inventory_qty from inventory where user_id=p_user_id and item_id=v_item for update;
   if not found or v_inventory_qty<v_required then raise exception 'MISSING_INPUTS'; end if;
   perform 1 from wallets where user_id=p_user_id for update;
