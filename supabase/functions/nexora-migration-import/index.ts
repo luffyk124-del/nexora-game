@@ -42,18 +42,24 @@ const SPECS: Record<string, MapSpec> = {
   organization_invites: { table: "organization_invites", conflict: "id", columns: ["id","org_id","org_name","org_tag","target_uid","inviter_uid","inviter_name","status","created_at","responded_at"] },
 };
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "https://nexora-game-git-feature-nexora-social-economy-mo-add6d8-manus24.vercel.app",
+const allowedOrigins = new Set([
+  "https://nexora-game-git-feature-nexora-social-economy-mo-add6d8-manus24.vercel.app",
+  "https://nexora-game-wkbi2g3f9-manus24.vercel.app",
+]);
+const corsHeadersFor = (origin: string | null) => ({
+  "Access-Control-Allow-Origin": origin && allowedOrigins.has(origin)
+    ? origin
+    : "https://nexora-game-git-feature-nexora-social-economy-mo-add6d8-manus24.vercel.app",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Max-Age": "86400",
   "Vary": "Origin",
-};
+});
 
-const reply = (body: unknown, status = 200) =>
+const reply = (body: unknown, status = 200, origin: string | null = null) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "no-store" },
+    headers: { ...corsHeadersFor(origin), "Content-Type": "application/json", "Cache-Control": "no-store" },
   });
 
 function camelToSnake(key: string): string {
@@ -70,22 +76,25 @@ function safeId(value: unknown): value is string {
 }
 
 async function main(req: Request): Promise<Response> {
+  const origin = req.headers.get("Origin");
+  if (origin && !allowedOrigins.has(origin)) return new Response("Forbidden origin", { status: 403 });
+  const send = (body: unknown, status = 200) => reply(body, status, origin);
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: corsHeaders });
+    return new Response(null, { status: 204, headers: corsHeadersFor(origin) });
   }
-  if (req.method !== "POST") return reply({ error: "METHOD_NOT_ALLOWED" }, 405);
+  if (req.method !== "POST") return send({ error: "METHOD_NOT_ALLOWED" }, 405);
 
   const url = Deno.env.get("SUPABASE_URL");
   const secretRaw = Deno.env.get("SUPABASE_SECRET_KEYS");
-  if (!url || !secretRaw) return reply({ error: "SERVER_CONFIGURATION_ERROR" }, 500);
+  if (!url || !secretRaw) return send({ error: "SERVER_CONFIGURATION_ERROR" }, 500);
 
   let serviceKey = "";
-  try { serviceKey = JSON.parse(secretRaw).default ?? ""; } catch { return reply({ error: "SERVER_CONFIGURATION_ERROR" }, 500); }
-  if (!serviceKey) return reply({ error: "SERVER_CONFIGURATION_ERROR" }, 500);
+  try { serviceKey = JSON.parse(secretRaw).default ?? ""; } catch { return send({ error: "SERVER_CONFIGURATION_ERROR" }, 500); }
+  if (!serviceKey) return send({ error: "SERVER_CONFIGURATION_ERROR" }, 500);
 
   const bearer = req.headers.get("Authorization") ?? "";
   const token = bearer.startsWith("Bearer ") ? bearer.slice(7) : "";
-  if (!token) return reply({ error: "UNAUTHENTICATED" }, 401);
+  if (!token) return send({ error: "UNAUTHENTICATED" }, 401);
 
   let uid = "";
   let claimedOwner = false;
@@ -95,12 +104,12 @@ async function main(req: Request): Promise<Response> {
     });
     const firebase = payload.firebase && typeof payload.firebase === "object" ? payload.firebase as Json : {};
     if (typeof payload.sub !== "string" || !payload.sub || payload.email_verified !== true || firebase.sign_in_provider === "anonymous") {
-      return reply({ error: "VERIFIED_OWNER_REQUIRED" }, 403);
+      return send({ error: "VERIFIED_OWNER_REQUIRED" }, 403);
     }
     uid = payload.sub;
     claimedOwner = payload.diagnosticsOwner === true;
   } catch {
-    return reply({ error: "UNAUTHENTICATED" }, 401);
+    return send({ error: "UNAUTHENTICATED" }, 401);
   }
 
   const admin = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -108,20 +117,20 @@ async function main(req: Request): Promise<Response> {
     const { data: operator, error: operatorError } = await admin.schema("nexora")
       .from("migration_operators").select("firebase_uid,enabled,role")
       .eq("firebase_uid", uid).eq("enabled", true).eq("role", "owner").maybeSingle();
-    if (operatorError || !operator) return reply({ error: "MIGRATION_OWNER_REQUIRED" }, 403);
+    if (operatorError || !operator) return send({ error: "MIGRATION_OWNER_REQUIRED" }, 403);
   }
 
   let body: Json;
-  try { body = await req.json(); } catch { return reply({ error: "INVALID_JSON" }, 400); }
+  try { body = await req.json(); } catch { return send({ error: "INVALID_JSON" }, 400); }
   const collection = typeof body.collection === "string" ? body.collection : "";
   const spec = SPECS[collection];
-  if (!spec) return reply({ error: "COLLECTION_NOT_ALLOWED" }, 400);
+  if (!spec) return send({ error: "COLLECTION_NOT_ALLOWED" }, 400);
 
   const parentId = typeof body.parentId === "string" ? body.parentId : "";
-  if (collection === "conversation_messages" && !/^[A-Za-z0-9_-]{1,256}$/.test(parentId)) return reply({ error: "PARENT_ID_REQUIRED" }, 400);
-  if (collection !== "conversation_messages" && parentId) return reply({ error: "UNEXPECTED_PARENT_ID" }, 400);
+  if (collection === "conversation_messages" && !/^[A-Za-z0-9_-]{1,256}$/.test(parentId)) return send({ error: "PARENT_ID_REQUIRED" }, 400);
+  if (collection !== "conversation_messages" && parentId) return send({ error: "UNEXPECTED_PARENT_ID" }, 400);
 
-  if (!Array.isArray(body.documents) || body.documents.length > 100) return reply({ error: "INVALID_BATCH_SIZE" }, 400);
+  if (!Array.isArray(body.documents) || body.documents.length > 100) return send({ error: "INVALID_BATCH_SIZE" }, 400);
   const docs = body.documents as Doc[];
   const ids = new Set<string>();
   const rows: Json[] = [];
@@ -130,13 +139,13 @@ async function main(req: Request): Promise<Response> {
   for (const doc of docs) {
     if (!doc || !safeId(doc.id) || typeof doc.path !== "string" || doc.path.length > 2048 ||
         !doc.fields || typeof doc.fields !== "object" || Array.isArray(doc.fields) || ids.has(doc.id)) {
-      return reply({ error: "INVALID_DOCUMENT" }, 400);
+      return send({ error: "INVALID_DOCUMENT" }, 400);
     }
     ids.add(doc.id);
     const suffix = collection === "conversation_messages"
       ? `/conversations/${parentId}/messages/${doc.id}`
       : `/${collection}/${doc.id}`;
-    if (!doc.path.endsWith(suffix)) return reply({ error: "DOCUMENT_PATH_MISMATCH" }, 400);
+    if (!doc.path.endsWith(suffix)) return send({ error: "DOCUMENT_PATH_MISMATCH" }, 400);
 
     const row: Json = {};
     for (const [key, value] of Object.entries(doc.fields)) {
@@ -166,19 +175,19 @@ async function main(req: Request): Promise<Response> {
   const { data: priorBatch, error: priorError } = await db.from("migration_batches")
     .select("id,row_count").eq("source_collection", collection)
     .eq("source_parent_id", parentId).eq("checksum", checksum).maybeSingle();
-  if (priorError) return reply({ error: "MIGRATION_STATE_READ_FAILED" }, 500);
-  if (priorBatch) return reply({ ok: true, alreadyImported: true, imported: priorBatch.row_count, checksum });
+  if (priorError) return send({ error: "MIGRATION_STATE_READ_FAILED" }, 500);
+  if (priorBatch) return send({ ok: true, alreadyImported: true, imported: priorBatch.row_count, checksum });
 
   if (rows.length) {
     const { error } = await db.from(spec.table).upsert(rows, { onConflict: spec.conflict });
-    if (error) return reply({ error: "MAPPED_IMPORT_FAILED", table: spec.table, detail: error.message.slice(0, 180) }, 500);
+    if (error) return send({ error: "MAPPED_IMPORT_FAILED", table: spec.table, detail: error.message.slice(0, 180) }, 500);
   }
 
   if (payloadRows.length) {
     const { error } = await db.from("firestore_import_payloads").upsert(payloadRows, {
       onConflict: "source_collection,source_parent_id,source_document_id",
     });
-    if (error) return reply({ error: "RAW_ARCHIVE_FAILED", detail: error.message.slice(0, 180) }, 500);
+    if (error) return send({ error: "RAW_ARCHIVE_FAILED", detail: error.message.slice(0, 180) }, 500);
   }
 
   const { error: batchError } = await db.from("migration_batches").insert({
@@ -188,9 +197,9 @@ async function main(req: Request): Promise<Response> {
     checksum,
     imported_by_firebase_uid: uid,
   });
-  if (batchError) return reply({ error: "MIGRATION_AUDIT_WRITE_FAILED" }, 500);
+  if (batchError) return send({ error: "MIGRATION_AUDIT_WRITE_FAILED" }, 500);
 
-  return reply({ ok: true, imported: rows.length, archived: payloadRows.length, checksum });
+  return send({ ok: true, imported: rows.length, archived: payloadRows.length, checksum });
 }
 
 Deno.serve((req: Request) => main(req));
