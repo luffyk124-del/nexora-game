@@ -14,7 +14,7 @@ This document describes the staged Firebase-to-Supabase migration on `feature/ne
 ## Supabase Edge Function
 
 - Function: `nexora-economy`
-- Latest deployed version at this checkpoint: v21, ACTIVE
+- Latest deployed version at this checkpoint: verify in Supabase before release; economy and player-data functions have been redeployed during this migration wave.
 - Gateway JWT verification is disabled because the function validates Firebase ID tokens itself (issuer, audience, signature, verified email, and non-anonymous provider).
 - Service-role credentials are used only inside the Edge Function. RPC execution is revoked from `public`, `anon`, and `authenticated`.
 
@@ -27,6 +27,9 @@ This document describes the staged Firebase-to-Supabase migration on `feature/ne
 - Manufacturing with server-side recipe/material validation.
 - Property purchase, upgrade, rent collection, and lease toggling.
 - Company founding, company-level upgrades, company revenue collection, and profit-vault upgrades/completion.
+- Company auctions: creation, escrowed bids, outbid refunds, idempotent retries, settlement, ownership transfer, and audit/notification records.
+- Social workflows: player search/public profiles, direct conversations/messages, global chat, blocks, reports, and organization invitations/acceptance.
+- Server-validated achievement unlocking.
 - Organization creation, join/leave, join-request decisions, member removal, role changes, join-mode changes, membership synchronization, treasury deposit/withdrawal, organization level upgrades, and research.
 - Player settings, avatar changes, and notification read-state updates.
 
@@ -48,20 +51,31 @@ All are disabled unless explicitly set to the string `true`:
 - `VITE_NEXORA_SUPABASE_COMPANIES`
 - `VITE_NEXORA_SUPABASE_ORG_TREASURY`
 - `VITE_NEXORA_SUPABASE_ORGANIZATIONS`
+- `VITE_NEXORA_SUPABASE_COMPANY_AUCTIONS`
+- `VITE_NEXORA_SUPABASE_SOCIAL`
+- `VITE_NEXORA_SUPABASE_ACHIEVEMENTS`
+- `VITE_NEXORA_SUPABASE_PLAYER_READS`
 
 ## Remaining migration work before cutover
 
-- Complete the company auction lifecycle (create, bid escrow/refund, settlement, and scheduled settlement).
-- Move remaining social systems: direct/global chat, player blocking/reporting, organization invitations, and conversation messages.
-- Move achievement unlock writes and remaining player/org mutations.
-- Replace Firestore snapshot reads in `useGameData.ts` with a verified Supabase read path only after all write paths for the same domains have been moved.
-- Replace the Firestore migration exporter and scheduled/world-event jobs; retain the existing Firebase jobs until parity is proven.
-- Add end-to-end tests using a verified test player, including concurrent requests, idempotent retries, wallet conservation, ownership checks, and full source-vs-target reconciliation.
-- Run full CI on the final PR head and perform a supervised production cutover with a rollback window.
+- Replace the remaining Firestore migration exporter. The current `api/migration-export.ts` still uses Vercel OIDC with Google Cloud Workload Identity Federation; a GitHub OIDC trust provider or a dedicated Supabase export credential must be configured before this can be removed.
+- Complete source-vs-target reconciliation using per-collection source counts and checksums. The current NEXORA table counts total 194 records, matching the previously recorded raw archive total, but that is not a substitute for per-collection checksum verification.
+- Finish moving any residual game mutations that are still intentionally on Firebase, then verify each domain independently.
+- Run an authenticated end-to-end test using a verified player session. Synthetic database tests cover core auction, social, and achievement workflows, but no live Firebase-authenticated player session has been tested.
+- Run concurrency tests against parallel authenticated requests, including same-request retries, wallet conservation, auction escrow, and ownership transfer.
+- Wait for CI to pass on the final PR head, then perform a supervised production cutover with a rollback window.
+
+## Scheduled jobs
+
+- Supabase `pg_cron` jobs are configured for company-auction settlement (every minute) and world-event rotation (every six hours).
+- Both jobs call gated wrapper functions. `nexora.scheduler_flags` currently keeps both disabled so Supabase does not diverge from Firebase before cutover.
+- Keep the existing Firebase scheduled functions enabled until reconciliation and cutover are approved.
 
 ## Verification notes
 
-- SQL migrations are applied to the Supabase project and the economy Edge Function is deployed.
-- Safe validation tests exercise invalid-input and missing-record branches without modifying real player data.
-- RPC privilege checks confirm `service_role` can execute the migration RPCs and `authenticated` cannot.
-- A live authenticated player session and full end-to-end parity run have not yet been verified. Do not describe the migration as complete until those checks pass.
+- SQL migrations are applied to the Supabase project; the economy and player-data Edge Functions have been redeployed.
+- Synthetic transaction-scoped tests exercised company auction creation, two bids, escrow refund, settlement, idempotent retries, social messaging, blocks, reports, organization invites, and achievement unlocks. Test data was rolled back; no test records remain.
+- Read-only reconciliation checks found no negative wallets, orphan wallet/inventory/company/property/member rows, mismatched organization member counts, or missing wallet `last_tx_id` references. The six system-reserve listings use `seller_uid=SYSTEM` intentionally.
+- RPC privilege checks confirm service-role execution while `authenticated` is denied.
+- The new player-data polling path and Social Hub Supabase path are opt-in; Firebase remains the default.
+- A live authenticated player session, parallel live concurrency tests, per-collection checksums, and final CI success have not yet been verified. Do not describe the migration as complete until those checks pass.
