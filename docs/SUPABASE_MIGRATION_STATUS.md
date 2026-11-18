@@ -108,3 +108,12 @@ All are disabled unless explicitly set to the string `true`:
 - The database's immutable ledger trigger prevents deletion of committed transaction/audit rows. Two synthetic QA profiles and their wallets/usernames remain, marked with `QA TEST` titles and `QAConc...` usernames; their two immutable transfer rows and two immutable audit rows are intentionally retained as an audit trail. Test notifications were removed. These QA records must be excluded from Firestore source reconciliation and must never be imported back into Firebase.
 - Post-test integrity checks: zero negative wallets, zero orphan wallets/inventory/companies/properties/organization members, and zero organization member-count mismatches.
 - This is a synthetic concurrent database test, not a real-player authenticated session test. The Migration Console now includes a read-only real-player parity check for the owner to run after Pages is enabled.
+
+## Imported real-player archive reconciliation
+
+The imported Firestore archive for the actual player UID was compared directly with the matching Supabase rows (this validates the archived source snapshot; it is not yet a live Firebase-authenticated session test):
+
+- Exact field-level matches: profile, private settings, username mapping, and wallet balance/earned/spent/last transaction fields.
+- Exact count matches: inventory 9, transactions 84, company 1, company logs 43, market listings 2, market orders 17, organization membership 1, player missions 5, daily claims 3, contract claims 7, achievements 4, notifications 4, and properties 0.
+- Field-level comparison returned zero mismatches for all 84 transaction records, all 9 inventory rows, the company row, all 43 company logs, and all 17 market orders.
+- This is strong archived-data parity evidence. The live-player Migration Console check is still required because the archive snapshot predates this QA session and cannot prove the running Firebase session is current.
