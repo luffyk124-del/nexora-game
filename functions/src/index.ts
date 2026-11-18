@@ -713,6 +713,9 @@ export const rotateWorldEvents = onSchedule(
     memory: '256MiB',
   },
   async () => {
+    // During the approved cutover, Supabase pg_cron becomes the sole scheduler.
+    // Keep Firebase as the rollback scheduler until this explicit environment flag is enabled.
+    if (process.env.NEXORA_SUPABASE_SCHEDULERS_ACTIVE === 'true') return;
     const nowMs = Date.now();
     const snap = await db.collection('world_events').get();
     const existing: ExistingWorldEventRecord[] = snap.docs.map((docSnap) => {
@@ -1309,6 +1312,8 @@ async function settleCompanyAuction(auctionId: string): Promise<void> {
 export const settleExpiredCompanyAuctions = onSchedule(
   { schedule: 'every 1 minutes', timeZone: 'UTC', region: 'us-central1', maxInstances: 1 },
   async () => {
+    // Prevent duplicate settlement after Supabase pg_cron has been enabled.
+    if (process.env.NEXORA_SUPABASE_SCHEDULERS_ACTIVE === 'true') return;
     const now = Date.now();
     const snapshot = await db.collection('company_auctions').where('status', '==', 'active').get();
     for (const auctionDoc of snapshot.docs) {
