@@ -194,7 +194,7 @@ async function main(req: Request): Promise<Response> {
   if (priorBatch) return send({ ok: true, alreadyImported: true, imported: priorBatch.row_count, checksum });
 
   if (rows.length) {
-    const immutableCollections = new Set(["transactions", "player_missions"]);
+    const immutableCollections = new Set(["transactions", "player_missions", "daily_claims"]);
     const { error } = immutableCollections.has(collection)
       ? await db.from(spec.table).upsert(rows, { onConflict: spec.conflict, ignoreDuplicates: true })
       : await db.from(spec.table).upsert(rows, { onConflict: spec.conflict });
