@@ -16,7 +16,7 @@ const EXPORT_COLLECTIONS = new Set([
   'properties', 'organizations', 'organization_members', 'organization_requests',
   'organization_transactions', 'player_missions', 'daily_claims', 'contract_claims',
   'player_achievements', 'notifications', 'world_events', 'audit_logs', 'user_blocks',
-  'chat_rate_limits', 'conversations', 'global_chat_messages', 'organization_invites', 'conversation_messages',
+  'chat_rate_limits', 'conversations', 'global_chat_messages', 'organization_invites', 'conversation_messages', 'player_reports',
 ]);
 
 type Req = IncomingMessage & { body?: unknown };
