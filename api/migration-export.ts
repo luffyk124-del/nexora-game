@@ -92,7 +92,7 @@ function firestoreClient(req: Req) {
   return client;
 }
 
-async function firestoreRequest<T>(client: IdentityPoolClient, url: string, init?: RequestInit): Promise<T> {
+async function firestoreRequest<T>(client: IdentityPoolClient, url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }): Promise<T> {
   const response = await client.fetch(url, init);
   return response.data as T;
 }
