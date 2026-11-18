@@ -86,6 +86,44 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  if (action === "update_player_settings" || action === "update_player_avatar" ||
+      action === "mark_notification_read" || action === "mark_notifications_read") {
+    let rpcName: string;
+    let rpcArgs: Record<string, unknown>;
+    if (action === "update_player_settings") {
+      const language = body.language;
+      const notificationsEnabled = body.notificationsEnabled;
+      if (language !== "ar" && language !== "en") return json({ error: "INVALID_LANGUAGE" }, 400, origin);
+      if (typeof notificationsEnabled !== "boolean") return json({ error: "INVALID_ARGUMENT" }, 400, origin);
+      rpcName = "update_player_settings";
+      rpcArgs = { p_user_id: uid, p_language: language, p_notifications_enabled: notificationsEnabled };
+    } else if (action === "update_player_avatar") {
+      const avatarId = typeof body.avatarId === "string" ? body.avatarId : "";
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(avatarId)) return json({ error: "INVALID_AVATAR" }, 400, origin);
+      rpcName = "update_player_avatar";
+      rpcArgs = { p_user_id: uid, p_avatar_id: avatarId };
+    } else if (action === "mark_notification_read") {
+      const notificationId = typeof body.notificationId === "string" ? body.notificationId : "";
+      if (!notificationId || notificationId.length > 160) return json({ error: "NOTIFICATION_NOT_FOUND" }, 400, origin);
+      rpcName = "mark_notification_read";
+      rpcArgs = { p_user_id: uid, p_notification_id: notificationId };
+    } else {
+      const notificationIds = Array.isArray(body.notificationIds)
+        ? body.notificationIds.filter((value): value is string => typeof value === "string").slice(0, 200)
+        : [];
+      rpcName = "mark_notifications_read";
+      rpcArgs = { p_user_id: uid, p_notification_ids: notificationIds };
+    }
+    const { data, error } = await admin.schema("nexora").rpc(rpcName, rpcArgs);
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      if (["INVALID_LANGUAGE","INVALID_ARGUMENT","INVALID_AVATAR","ACCOUNT_NOT_FOUND","NOTIFICATION_NOT_FOUND"].includes(message)) return json({ error: message }, 400, origin);
+      console.error("NEXORA player settings/notification RPC failed:", error.message);
+      return json({ error: "PLAYER_UPDATE_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
   if (action === "manufacture_recipe") {
     const recipeId = typeof body.recipeId === "string" ? body.recipeId : "";
     const batchQuantity = body.batchQuantity;
