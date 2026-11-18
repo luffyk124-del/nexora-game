@@ -86,6 +86,21 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  if (action === "cancel_market_listing") {
+    const listingId = typeof body.listingId === "string" ? body.listingId : "";
+    if (!listingId || listingId.length > 160) return json({ error: "LISTING_NOT_FOUND" }, 400, origin);
+    const { data, error } = await admin.schema("nexora").rpc("cancel_market_listing", {
+      p_user_id: uid, p_listing_id: listingId,
+    });
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      if (["LISTING_NOT_FOUND","CANNOT_CANCEL_LISTING"].includes(message)) return json({ error: message }, 400, origin);
+      console.error("NEXORA listing cancellation RPC failed:", error.message);
+      return json({ error: "MARKET_CANCELLATION_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
   if (action === "create_market_listing") {
     const itemId = typeof body.itemId === "string" ? body.itemId : "";
     const quantity = body.quantity;
