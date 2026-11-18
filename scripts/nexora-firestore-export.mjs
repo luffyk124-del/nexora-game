@@ -97,6 +97,8 @@ async function importPage(collection, parentId, documents) {
   process.stdout.write(`  imported ${result.imported ?? documents.length} rows; checksum ${result.checksum ?? 'n/a'}\n`);
 }
 
+const conversationIds = [];
+
 async function exportCollection(collection, parentId = '') {
   const sourcePath = parentId ? `conversations/${parentId}/messages` : collection;
   let pageToken = '';
@@ -104,6 +106,9 @@ async function exportCollection(collection, parentId = '') {
   do {
     const page = await fetchFirestorePage(sourcePath, pageToken);
     const documents = (page.documents ?? []).map(decodeDocument);
+    if (collection === 'conversations' && !parentId) {
+      for (const document of documents) if (document.id && !conversationIds.includes(document.id)) conversationIds.push(document.id);
+    }
     total += documents.length;
     if (documents.length) await importPage(collection, parentId, documents);
     pageToken = page.nextPageToken ?? '';
@@ -113,21 +118,8 @@ async function exportCollection(collection, parentId = '') {
 }
 
 let total = 0;
-const conversationIds = [];
 for (const collection of COLLECTIONS) {
-  const count = await exportCollection(collection);
-  total += count;
-  if (collection === 'conversations') {
-    let pageToken = '';
-    do {
-      const page = await fetchFirestorePage('conversations', pageToken);
-      for (const doc of page.documents ?? []) {
-        const id = String(doc.name ?? '').split('/').pop() ?? '';
-        if (id && !conversationIds.includes(id)) conversationIds.push(id);
-      }
-      pageToken = page.nextPageToken ?? '';
-    } while (pageToken);
-  }
+  total += await exportCollection(collection);
 }
 let messageCount = 0;
 for (const conversationId of conversationIds) {
