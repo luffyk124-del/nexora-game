@@ -365,7 +365,7 @@ export function MigrationConsole() {
         getDocs(query(collection(db, 'properties'), where('ownerUid', '==', uid), limit(100))),
         getDocs(query(collection(db, 'organizations'), where('reputation', '>=', 0), orderBy('reputation', 'desc'), limit(40))),
         getDocs(query(collection(db, 'organization_members'), where('uid', '==', uid), limit(1))),
-        getDocs(query(collection(db, 'organization_requests'), where('uid', '==', uid))),
+        getDocs(query(collection(db, 'organization_requests'), where('uid', '==', uid), limit(100))),
         getDocs(query(collection(db, 'player_missions'), where('uid', '==', uid), limit(200))),
         getDoc(doc(db, 'daily_claims', uid + '_' + dateKey)),
         getDocs(query(collection(db, 'contract_claims'), where('uid', '==', uid), limit(200))),
