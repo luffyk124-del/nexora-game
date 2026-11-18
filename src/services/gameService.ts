@@ -1,3 +1,4 @@
+// Supabase migration switches remain opt-in; see docs/SUPABASE_MIGRATION_STATUS.md.
 import {
   collection,
   doc,
