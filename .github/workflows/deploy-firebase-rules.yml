@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - firestore.rules
+      - firestore.indexes.json
       - firebase.json
   workflow_dispatch:
 
@@ -40,5 +41,5 @@ jobs:
       - name: Install Firebase CLI
         run: npm install --global firebase-tools
 
-      - name: Deploy only NEXORA Firestore rules
-        run: firebase deploy --only firestore:rules --project gen-lang-client-0074900177 --non-interactive
+      - name: Deploy NEXORA Firestore rules and query indexes
+        run: firebase deploy --only firestore:rules,firestore:indexes --project gen-lang-client-0074900177 --non-interactive
