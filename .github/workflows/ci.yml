@@ -55,6 +55,7 @@ jobs:
           deno check supabase/functions/nexora-migration-import/index.ts
           deno check supabase/functions/nexora-player-session/index.ts
           deno check supabase/functions/nexora-player-data/index.ts
+          deno check supabase/functions/nexora-economy/index.ts
 
       - name: Unit tests
         run: npm test
