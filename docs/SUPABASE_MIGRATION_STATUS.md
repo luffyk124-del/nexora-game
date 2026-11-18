@@ -59,7 +59,7 @@ All are disabled unless explicitly set to the string `true`:
 ## Remaining migration work before cutover
 
 - Replace the remaining Firestore migration exporter. The current `api/migration-export.ts` still uses Vercel OIDC with Google Cloud Workload Identity Federation; a GitHub OIDC trust provider or a dedicated Supabase export credential must be configured before this can be removed.
-- Complete source-vs-target reconciliation using per-collection source counts and checksums. The current NEXORA table counts total 194 records, matching the previously recorded raw archive total, but that is not a substitute for per-collection checksum verification.
+- Source-vs-target row-count reconciliation now matches exactly across all 29 imported top-level/subcollection mappings: 194 unique Firestore source paths in `firestore_import_payloads`, 194 target rows, and zero per-collection count deltas. `migration_batches` contains repeated batch attempts with different checksums, so summing `row_count` across batches overstates the unique source count; use `firestore_import_payloads` unique `source_path` counts for reconciliation. Per-collection cryptographic source checksums and a fresh GitHub exporter scan are still pending.
 - Finish moving any residual game mutations that are still intentionally on Firebase, then verify each domain independently.
 - Run an authenticated end-to-end test using a verified player session. Synthetic database tests cover core auction, social, and achievement workflows, but no live Firebase-authenticated player session has been tested.
 - Run concurrency tests against parallel authenticated requests, including same-request retries, wallet conservation, auction escrow, and ownership transfer.
@@ -78,4 +78,4 @@ All are disabled unless explicitly set to the string `true`:
 - Read-only reconciliation checks found no negative wallets, orphan wallet/inventory/company/property/member rows, mismatched organization member counts, or missing wallet `last_tx_id` references. The six system-reserve listings use `seller_uid=SYSTEM` intentionally.
 - RPC privilege checks confirm service-role execution while `authenticated` is denied.
 - The new player-data polling path and Social Hub Supabase path are opt-in; Firebase remains the default.
-- A live authenticated player session, parallel live concurrency tests, per-collection checksums, and final CI success have not yet been verified. Do not describe the migration as complete until those checks pass.
+- A live authenticated player session, parallel live concurrency tests, per-collection cryptographic checksums, and a successful GitHub OIDC export/import run have not yet been verified. CI run 420 passed on the branch head before the latest Migration Console notice update; rerun CI for the latest commit before cutover. Do not describe the migration as complete until those checks pass.
