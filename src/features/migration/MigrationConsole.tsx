@@ -512,6 +512,7 @@ export function MigrationConsole() {
             <section className="rounded-2xl border border-emerald-500/30 bg-[#141821] p-5 space-y-3">
               <h2 className="text-lg font-semibold">مطابقة اللاعب الحقيقي</h2>
               <p className="text-sm leading-6 text-slate-300">اختبار قراءة فقط يقارن جلسة Firebase الحالية مع بيانات Supabase لنفس UID، بما فيها الرصيد والمخزون والمعاملات وملكية الشركات والعقارات والمزادات والمنظمات. لا ينفّذ أي تعديل.</p>
+              <a className="text-sm text-emerald-200 underline" href="https://github.com/luffyk124-del/nexora-game/blob/feature/nexora-social-economy-mobile-overhaul/docs/REAL_PLAYER_PARITY_LOCAL.md" target="_blank" rel="noreferrer">طريقة تشغيل الفحص محلياً دون نشر الموقع</a>
               <button onClick={runPlayerParityCheck} disabled={parityRunning || running || !user.emailVerified || user.isAnonymous} className="w-full rounded-xl border border-emerald-400/60 px-4 py-3 font-semibold text-emerald-200 disabled:opacity-40">
                 {parityRunning ? 'جارٍ فحص مطابقة اللاعب…' : 'تشغيل فحص المطابقة الآن'}
               </button>
