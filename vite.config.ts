@@ -6,6 +6,8 @@ import {defineConfig} from 'vite';
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
+    // GitHub Pages hosts this repository under /nexora-game/; Vercel keeps root hosting.
+    base: process.env.GITHUB_PAGES === 'true' ? '/nexora-game/' : '/',
     resolve: {
       alias: {
         // Vercel builds with Node 22, which provides import.meta.dirname.
