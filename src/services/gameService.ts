@@ -365,6 +365,31 @@ export async function upgradeSkill(uid: string, skillKey: SkillKey): Promise<voi
   const def = SKILL_DEFINITIONS.find((s) => s.key === skillKey);
   if (!def) throw new Error('INVALID_SKILL');
 
+  if (import.meta.env.VITE_NEXORA_SUPABASE_SKILLS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) {
+      throw new Error('UNAUTHENTICATED');
+    }
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch(
+      'https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ action: 'upgrade_skill', skillKey }),
+        cache: 'no-store',
+      }
+    );
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.error || 'SKILL_UPGRADE_FAILED');
+    }
+    return;
+  }
+
   try {
     await runTransaction(db, async (tx) => {
       const profileRef = doc(db, 'profiles', uid);
