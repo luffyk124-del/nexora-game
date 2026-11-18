@@ -23,7 +23,7 @@
 The Edge Function queries the `nexora` schema through the Supabase Data API. In Project Settings → API, ensure `nexora` is listed under exposed schemas. Schema exposure does not grant table privileges. Keep grants and RLS restrictive.
 
 ## Current deployment and data status
-- Supabase Edge Function `nexora-reports-admin`: active, version 2, JWT verification enabled.
+- Supabase Edge Function `nexora-reports-admin`: active, version 3, JWT verification enabled.
 - The atomic status/audit RPC migration is applied.
 - The Auth user and enabled owner record are provisioned.
 - Current counts at verification: `nexora.player_reports = 0`, `nexora.player_report_audit = 0`.
@@ -45,7 +45,7 @@ From `reports-center/`:
 ## Release checklist
 1. Confirm Supabase Auth public signups are disabled.
 2. Verify the `nexora` schema is exposed to the Edge Function Data API while direct client grants remain revoked.
-3. Restrict Edge Function CORS to the final hosting origin before publishing.
+3. Edge Function CORS is restricted to `https://luffyk124-del.github.io`; keep the GitHub Pages hostname unchanged or update the allowlist before changing hosts.
 4. Enable GitHub Pages with the GitHub Actions source in repository Settings.
 5. Publish the static frontend only after the migration and security gates are verified.
 6. Test valid MJNON login, invalid password, denied non-admin access, report list, status update, and audit history.
