@@ -1,9 +1,7 @@
-import { createHash, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { getApps, initializeApp } from 'firebase-admin/app';
-import { FieldValue, getFirestore, Timestamp, type DocumentData, type Query } from 'firebase-admin/firestore';
-import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/https';
-import { defineSecret } from 'firebase-functions/params';
-import { getAuth } from 'firebase-admin/auth';
+import { FieldValue, getFirestore, Timestamp, type DocumentData } from 'firebase-admin/firestore';
+import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import {
   ALLOWED_DIAGNOSTIC_COLLECTIONS,
@@ -1688,133 +1686,6 @@ export const getPublicPlayerProfileSecure = onCall(
       reputation: Math.max(0, Number(data.reputation) || 0),
       influence: Math.max(0, Number(data.influence) || 0),
       orgId: typeof data.orgId === 'string' ? data.orgId : null,
-    };
-  }
-);
-
-
-// Dedicated NEXORA Reports Center API. Exactly one fixed Firebase UID is allowed.
-const REPORTS_ADMIN_UID = 'nexora-reports-mjnon-admin';
-const reportsAdminPasswordHash = defineSecret('REPORTS_ADMIN_PASSWORD_HASH');
-export const loginReportsAdmin = onCall(
-  { region: 'us-central1', maxInstances: 5, timeoutSeconds: 15, secrets: [reportsAdminPasswordHash] },
-  async (request) => {
-    const username = typeof request.data?.username === 'string' ? request.data.username.trim() : '';
-    const password = typeof request.data?.password === 'string' ? request.data.password : '';
-    const ipDigest = createHash('sha256').update(request.rawRequest.ip || 'unknown').digest('hex');
-    const attemptRef = db.doc('reports_login_attempts/' + ipDigest);
-    const now = Date.now();
-    await db.runTransaction(async (tx) => {
-      const snap = await tx.get(attemptRef);
-      const data = snap.data();
-      const resetAt = typeof data?.resetAt === 'number' ? data.resetAt : 0;
-      const count = resetAt > now ? Math.max(0, Number(data?.count) || 0) : 0;
-      if (count >= 5) throw new HttpsError('resource-exhausted', 'TRY_LATER');
-      tx.set(attemptRef, { count: count + 1, resetAt: resetAt > now ? resetAt : now + 10 * 60_000, updatedAt: FieldValue.serverTimestamp() });
-    });
-    const encoded = reportsAdminPasswordHash.value();
-    const [saltHex, expectedHex] = encoded.split(':');
-    let valid = false;
-    if (/^[a-f0-9]{32,128}$/i.test(saltHex || '') && /^[a-f0-9]{128}$/i.test(expectedHex || '') && username === 'MJNON' && password.length >= 12 && password.length <= 128) {
-      const actual = scryptSync(password, Buffer.from(saltHex, 'hex'), 64);
-      const expected = Buffer.from(expectedHex, 'hex');
-      valid = timingSafeEqual(actual, expected);
-    }
-    if (!valid) throw new HttpsError('unauthenticated', 'INVALID_CREDENTIALS');
-    await attemptRef.delete();
-    const token = await getAuth(adminApp).createCustomToken(REPORTS_ADMIN_UID, { reportsAdmin: true });
-    return { token };
-  }
-);
-
-async function requireReportsAdmin(request: CallableRequest<unknown>): Promise<string> {
-  const uid = request.auth?.uid;
-  const claims = request.auth?.token as Record<string, unknown> | undefined;
-  if (!uid) throw new HttpsError('unauthenticated', 'UNAUTHENTICATED');
-  if (uid !== REPORTS_ADMIN_UID || claims?.reportsAdmin !== true) {
-    throw new HttpsError('permission-denied', 'REPORTS_ADMIN_REQUIRED');
-  }
-  return uid;
-}
-
-export const listPlayerReportsAdmin = onCall(
-  { region: 'us-central1', maxInstances: 10, timeoutSeconds: 30 },
-  async (request) => {
-    await requireReportsAdmin(request);
-    const status = typeof request.data?.status === 'string' ? request.data.status : 'all';
-    const allowed = ['all', 'open', 'reviewing', 'closed'];
-    if (!allowed.includes(status)) throw new HttpsError('invalid-argument', 'INVALID_STATUS');
-    const limit = Math.max(1, Math.min(100, Number(request.data?.limit) || 50));
-    const query: Query = db.collection('player_reports').orderBy('createdAt', 'desc').limit(limit);
-    const snapshot = await query.get();
-    const reports = snapshot.docs.map((item) => {
-        const data = item.data();
-        const createdAt = data.createdAt;
-        return {
-          id: item.id,
-          reporterUid: typeof data.reporterUid === 'string' ? data.reporterUid : '',
-          targetUid: typeof data.targetUid === 'string' ? data.targetUid : '',
-          reason: typeof data.reason === 'string' ? data.reason : 'other',
-          status: typeof data.status === 'string' ? data.status : 'open',
-          createdAt: createdAt && typeof createdAt.toMillis === 'function' ? createdAt.toMillis() : null,
-          reviewedAt: data.reviewedAt && typeof data.reviewedAt.toMillis === 'function' ? data.reviewedAt.toMillis() : null,
-          reviewedBy: typeof data.reviewedBy === 'string' ? data.reviewedBy : null,
-        };
-      });
-    return { reports: status === 'all' ? reports : reports.filter((report) => report.status === status) };
-  }
-);
-
-export const updatePlayerReportAdmin = onCall(
-  { region: 'us-central1', maxInstances: 10, timeoutSeconds: 30 },
-  async (request) => {
-    const adminUid = await requireReportsAdmin(request);
-    const reportId = typeof request.data?.reportId === 'string' ? request.data.reportId.trim() : '';
-    const status = request.data?.status;
-    if (!reportId || reportId.length > 180 || !['reviewing', 'closed', 'open'].includes(status)) {
-      throw new HttpsError('invalid-argument', 'INVALID_REPORT_UPDATE');
-    }
-    const reportRef = db.collection('player_reports').doc(reportId);
-    const auditRef = db.collection('player_report_audit').doc('audit_' + randomUUID());
-    await db.runTransaction(async (tx) => {
-      const reportSnap = await tx.get(reportRef);
-      if (!reportSnap.exists) throw new HttpsError('not-found', 'REPORT_NOT_FOUND');
-      tx.update(reportRef, {
-        status,
-        reviewedBy: adminUid,
-        reviewedAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-      tx.create(auditRef, {
-        reportId,
-        actorUid: adminUid,
-        action: 'status_changed',
-        newStatus: status,
-        createdAt: FieldValue.serverTimestamp(),
-      });
-    });
-    return { ok: true };
-  }
-);
-
-export const listPlayerReportAuditAdmin = onCall(
-  { region: 'us-central1', maxInstances: 10, timeoutSeconds: 30 },
-  async (request) => {
-    await requireReportsAdmin(request);
-    const limit = Math.max(1, Math.min(100, Number(request.data?.limit) || 50));
-    const snapshot = await db.collection('player_report_audit').orderBy('createdAt', 'desc').limit(limit).get();
-    return {
-      entries: snapshot.docs.map((item) => {
-        const data = item.data();
-        return {
-          id: item.id,
-          reportId: typeof data.reportId === 'string' ? data.reportId : '',
-          actorUid: typeof data.actorUid === 'string' ? data.actorUid : '',
-          action: typeof data.action === 'string' ? data.action : '',
-          newStatus: typeof data.newStatus === 'string' ? data.newStatus : '',
-          createdAt: data.createdAt && typeof data.createdAt.toMillis === 'function' ? data.createdAt.toMillis() : null,
-        };
-      }),
     };
   }
 );
