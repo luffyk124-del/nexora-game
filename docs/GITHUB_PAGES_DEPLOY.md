@@ -21,3 +21,12 @@ Do not enable the full set of flags until:
 - the migration PR is approved and merged.
 
 Firebase Auth remains the identity provider during this database migration. The app's Firebase Authorized Domain must include `luffyk124-del.github.io`.
+
+
+## Real-player parity QA
+
+After the Pages workflow is enabled and the app is deployed, open:
+
+`https://luffyk124-del.github.io/nexora-game/?migration=1`
+
+Sign in with the verified Firebase player account, then run **مطابقة اللاعب الحقيقي**. This reads the signed-in player's Firebase documents and the matching Supabase player snapshot without changing either database. Resolve every mismatch before enabling the read switch or any production cutover.
