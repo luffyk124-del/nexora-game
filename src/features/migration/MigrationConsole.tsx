@@ -83,18 +83,26 @@ function parityTimestampMillis(value: unknown): number {
   return 0;
 }
 
+function canonicalParityField(key: string, value: unknown): unknown {
+  if (value != null && /At$/.test(key)) {
+    const millis = parityTimestampMillis(value);
+    if (millis > 0) return millis;
+  }
+  return canonicalParityValue(value);
+}
+
 function projectParityRows(rows: unknown, keys: string[]): unknown[] {
   if (!Array.isArray(rows)) return [];
   return rows.map((row) => {
     const record = (row && typeof row === 'object' ? row : {}) as ParityRow;
-    return Object.fromEntries(keys.map((key) => [key, record[key] ?? null]));
-  }).map(canonicalParityValue).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    return Object.fromEntries(keys.map((key) => [key, canonicalParityField(key, record[key] ?? null)]));
+  }).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
 }
 
 function projectParityRow(row: unknown, keys: string[]): unknown {
   if (!row || typeof row !== 'object') return null;
   const record = row as ParityRow;
-  return canonicalParityValue(Object.fromEntries(keys.map((key) => [key, record[key] ?? null])));
+  return Object.fromEntries(keys.map((key) => [key, canonicalParityField(key, record[key] ?? null)]));
 }
 
 function errorMessage(error: unknown): string {
@@ -434,7 +442,7 @@ export function MigrationConsole() {
         { section: 'العقود المستلمة', source: source.claimedContractsToday, target: target.claimedContractsToday },
         { section: 'الإنجازات', source: source.unlockedAchievements, target: target.unlockedAchievements },
         { section: 'الإشعارات', source: source.notifications, target: target.notifications, keys: ['id','uid','title','body','type','read'] },
-        { section: 'الأحداث العالمية', source: source.worldEvents, target: target.worldEvents, keys: ['id','effectType','targetItemId','priceMultiplier','taxDelta','active','revenueMultiplier','stackGroup'] },
+        { section: 'الأحداث العالمية', source: source.worldEvents, target: target.worldEvents, keys: ['id','effectType','targetItemId','priceMultiplier','taxDelta','active','startsAt','endsAt','revenueMultiplier','stackGroup'] },
       ];
       const results = checks.map((check) => {
         const sourceValue = check.keys
