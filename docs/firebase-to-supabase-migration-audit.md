@@ -90,6 +90,16 @@ Firebase UIDs and Supabase Auth user IDs are different identity namespaces. The 
 - Exports one bounded page (maximum 100 documents) at a time and returns an opaque continuation token. Responses are marked no-store.
 - The endpoint has been committed but is not deployed; CI is still validating it. It must remain behind the draft PR until owner authorization and pagination tests pass.
 - This endpoint only exports; it does not write to Firestore or Supabase and does not itself complete migration.
+- The Firebase bearer-token parser was corrected in commit `837ee52faf1e136db48d8a5a47dcf3f328a0f680`. The corrected route is committed but is not deployed to Vercel because the current account has hit the daily deployment/build limit.
+- The latest CI run before the Deno-aware CI adjustment failed because the root browser TypeScript check included `supabase/functions/**`, which imports Deno `npm:` modules and the `Deno` global. `tsconfig.json` now excludes those runtime files, and `.github/workflows/ci.yml` now runs a dedicated `deno check` for the migration Edge Function. A fresh CI result for this update is still pending.
+
+## Import mapping and dependency verification (2026-11-18)
+- The exporter and importer allowlists were compared: all 30 collection names match exactly, with no missing importer or exporter entry.
+- All 30 importer field lists were compared against `information_schema.columns`; no mapped destination column was missing.
+- All declared `upsert` conflict keys were checked against unique indexes; no conflict-key index was missing.
+- The `nexora` schema currently has 37 tables, all with RLS enabled. Only `service_role` has table grants; `anon` and `authenticated` have none.
+- Foreign-key dependencies require this import order (parents before children): `profiles`, `usernames`, `users_private`, `wallets`, `transactions`, `inventory`, `market_listings`, `companies`, `organizations`, `conversations`, then dependent collections including `market_orders`, `company_auctions`, `company_logs`, `organization_members`, `organization_requests`, `organization_transactions`, and `conversation_messages`. Import `market_orders` only after both `market_listings` and `transactions`; import `conversation_messages` only after `conversations` and pass the parent conversation ID.
+- `player_report_audit` and `user_identity_map` are not in the 30-collection exporter/importer allowlist. Do not assume these records are migrated by importing `player_reports`; decide whether report audit history exists in Firestore and how identity links will be populated before cutover.
 
 ## Data export/import path
 
