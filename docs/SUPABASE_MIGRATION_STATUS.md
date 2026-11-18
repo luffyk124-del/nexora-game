@@ -79,3 +79,12 @@ All are disabled unless explicitly set to the string `true`:
 - RPC privilege checks confirm service-role execution while `authenticated` is denied.
 - The new player-data polling path and Social Hub Supabase path are opt-in; Firebase remains the default.
 - A live authenticated player session, parallel live concurrency tests, per-collection cryptographic checksums, and a successful GitHub OIDC export/import run have not yet been verified. CI run 420 passed on the branch head before the latest Migration Console notice update; rerun CI for the latest commit before cutover. Do not describe the migration as complete until those checks pass.
+
+
+## Scheduler cutover and rollback
+
+- Supabase cron entries are active, but their guarded wrapper functions return `CUTOVER_DISABLED` while the corresponding `nexora.scheduler_flags.enabled` value is false.
+- Firebase scheduled functions remain the active production schedulers by default.
+- The Firebase scheduled callbacks now honor `NEXORA_SUPABASE_SCHEDULERS_ACTIVE=true` as an explicit cutover guard. Set it only after verifying the Supabase jobs and then enable the matching Supabase scheduler flags. Do not enable one side without disabling the other.
+- Rollback order: set both Supabase scheduler flags to false first, then unset `NEXORA_SUPABASE_SCHEDULERS_ACTIVE` in Firebase Functions and redeploy the scheduled functions.
+- This environment variable is intentionally not set by this migration. No scheduled production workload has been switched.
