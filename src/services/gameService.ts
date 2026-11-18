@@ -1791,6 +1791,19 @@ export async function handleOrgJoinRequest(
 }
 
 export async function syncSelfOrgMembership(uid: string, orgId: string | null): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'sync_org_membership', orgId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'ORG_MEMBERSHIP_SYNC_FAILED');
+    return;
+  }
   try {
     await updateDoc(doc(db, 'profiles', uid), {
       orgId,
