@@ -401,7 +401,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'inventory'), where('uid', '==', uid)),
+        query(collection(db, 'inventory'), where('uid', '==', uid), limit(200)),
         (snap) => {
           setInventory(snap.docs.map((d) => d.data() as InventoryItem));
         },
@@ -463,7 +463,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'companies'), where('ownerUid', '==', uid)),
+        query(collection(db, 'companies'), where('ownerUid', '==', uid), limit(50)),
         (snap) => {
           setCompanies(snap.docs.map((d) => d.data() as Company));
         },
@@ -493,7 +493,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'properties'), where('ownerUid', '==', uid)),
+        query(collection(db, 'properties'), where('ownerUid', '==', uid), limit(100)),
         (snap) => {
           setProperties(snap.docs.map((d) => d.data() as PropertyAsset));
         },
@@ -528,7 +528,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'organization_requests'), where('uid', '==', uid)),
+        query(collection(db, 'organization_requests'), where('uid', '==', uid), limit(100)),
         (snap) => {
           const pendingIds = new Set<string>();
           snap.docs.forEach((d) => {
@@ -545,7 +545,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'player_missions'), where('uid', '==', uid)),
+        query(collection(db, 'player_missions'), where('uid', '==', uid), limit(200)),
         (snap) => {
           setClaimedMissions(snap.docs.map((d) => d.data() as PlayerMissionClaim));
         },
@@ -565,7 +565,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'contract_claims'), where('uid', '==', uid)),
+        query(collection(db, 'contract_claims'), where('uid', '==', uid), limit(200)),
         (snap) => {
           const ids = new Set<string>();
           snap.docs.forEach((d) => {
@@ -580,7 +580,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'player_achievements'), where('uid', '==', uid)),
+        query(collection(db, 'player_achievements'), where('uid', '==', uid), limit(200)),
         (snap) => {
           const ids = new Set<string>();
           snap.docs.forEach((d) => {
@@ -605,7 +605,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'world_events'), where('active', '==', true)),
+        query(collection(db, 'world_events'), where('active', '==', true), limit(100)),
         (snap) => {
           setWorldEvents(snap.docs.map((d) => d.data() as WorldEvent));
         },
@@ -650,7 +650,7 @@ export function useGameData(): GameDataState {
     const canManageMembers = hasOrgPermission(myOrgMember, 'manage_members');
 
     const u1 = onSnapshot(
-      query(collection(db, 'organization_members'), where('orgId', '==', orgId)),
+      query(collection(db, 'organization_members'), where('orgId', '==', orgId), limit(200)),
       (snap) => {
         setOrgMembers(snap.docs.map((d) => d.data() as OrganizationMember));
       },
