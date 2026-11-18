@@ -88,6 +88,50 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  if (action === "join_organization" || action === "leave_organization" ||
+      action === "handle_org_join_request" || action === "kick_org_member" || action === "set_org_join_mode") {
+    const orgId = typeof body.orgId === "string" ? body.orgId : "";
+    if (!orgId || orgId.length > 160) return json({ error: "NOT_FOUND" }, 400, origin);
+    let rpcName: string;
+    const args: Record<string, unknown> = { p_user_id: uid, p_org_id: orgId };
+    if (action === "join_organization") rpcName = "join_organization";
+    else if (action === "leave_organization") rpcName = "leave_organization";
+    else if (action === "handle_org_join_request") {
+      const reqId = typeof body.reqId === "string" ? body.reqId : "";
+      const applicantUid = typeof body.applicantUid === "string" ? body.applicantUid : "";
+      const decision = body.decision;
+      if (!reqId || reqId.length > 160 || !applicantUid || applicantUid.length > 128 ||
+          (decision !== "approved" && decision !== "rejected")) return json({ error: "INVALID_ARGUMENT" }, 400, origin);
+      rpcName = "handle_org_join_request";
+      args.p_actor_uid = uid; args.p_request_id = reqId; args.p_applicant_uid = applicantUid; args.p_decision = decision;
+      delete args.p_user_id;
+    } else if (action === "kick_org_member") {
+      const targetUid = typeof body.targetUid === "string" ? body.targetUid : "";
+      if (!targetUid || targetUid.length > 128) return json({ error: "INVALID_ARGUMENT" }, 400, origin);
+      rpcName = "kick_org_member";
+      args.p_actor_uid = uid; args.p_target_uid = targetUid;
+      delete args.p_user_id;
+    } else {
+      const mode = body.mode;
+      if (mode !== "open" && mode !== "request" && mode !== "closed") return json({ error: "INVALID_ARGUMENT" }, 400, origin);
+      rpcName = "set_org_join_mode";
+      args.p_actor_uid = uid; args.p_mode = mode;
+      delete args.p_user_id;
+    }
+    const { data, error } = await admin.schema("nexora").rpc(rpcName, args);
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      const allowed = ["NOT_FOUND","ALREADY_IN_ORG","ALREADY_ORG_MEMBER","ORG_JOIN_CLOSED","ORG_FULL",
+        "REQUEST_ALREADY_PENDING","MEMBERSHIP_MISMATCH","LEADER_CANNOT_LEAVE","UNAUTHORIZED",
+        "REQUEST_ALREADY_HANDLED","REQUEST_MISMATCH","APPLICANT_NOT_FOUND","APPLICANT_IN_OTHER_ORG",
+        "RANK_TOO_HIGH","PROFILE_MEMBERSHIP_MISMATCH","PERMISSION_DENIED","INVALID_ARGUMENT"];
+      if (allowed.includes(message)) return json({ error: message }, 400, origin);
+      console.error("NEXORA organization membership RPC failed:", error.message);
+      return json({ error: "ORG_MEMBERSHIP_OPERATION_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
   if (action === "create_organization") {
     const name = typeof body.name === "string" ? body.name : "";
     const tag = typeof body.tag === "string" ? body.tag : "";
