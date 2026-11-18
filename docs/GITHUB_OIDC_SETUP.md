@@ -48,4 +48,4 @@ No Firebase private key, Google service-account key, or Supabase service-role ke
 4. Only after reviewing the scan, run mode `import`. The importer verifies the GitHub OIDC issuer, audience, repository, branch, workflow path, event, and actor; batch checksums make retries idempotent.
 5. Keep Firebase authoritative until read/write parity and authenticated end-to-end tests pass.
 
-Scheduled runs use scan mode. The manual import mode is intentionally explicit. The legacy Vercel exporter remains as a rollback path until the first GitHub scan and import have both succeeded; do not run both exporters at the same time.
+Automatic scheduling is intentionally disabled until the Google Cloud federation and first scan/import are verified. Use manual mode `scan` first; `import` is a separate explicit action. The legacy Vercel exporter remains as a rollback path until the first GitHub scan and import have both succeeded; do not run both exporters at the same time.
