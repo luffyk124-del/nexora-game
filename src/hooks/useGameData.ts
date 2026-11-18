@@ -411,7 +411,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'transactions'), where('fromUid', '==', uid), limit(30)),
+        query(collection(db, 'transactions'), where('fromUid', '==', uid), orderBy('createdAt', 'desc'), limit(30)),
         (fromSnap) => {
           const sent = fromSnap.docs.map((d) => d.data() as TransactionRecord);
           setTransactions((prev) => {
@@ -427,7 +427,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'transactions'), where('toUid', '==', uid), limit(30)),
+        query(collection(db, 'transactions'), where('toUid', '==', uid), orderBy('createdAt', 'desc'), limit(30)),
         (toSnap) => {
           const received = toSnap.docs.map((d) => d.data() as TransactionRecord);
           setTransactions((prev) => {
@@ -443,7 +443,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'market_listings'), where('status', '==', 'active'), limit(100)),
+        query(collection(db, 'market_listings'), where('status', '==', 'active'), orderBy('createdAt', 'desc'), limit(100)),
         (snap) => {
           setMarketListings(snap.docs.map((d) => d.data() as MarketListing));
         },
@@ -453,7 +453,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'market_orders'), where('buyerUid', '==', uid), limit(25)),
+        query(collection(db, 'market_orders'), where('buyerUid', '==', uid), orderBy('createdAt', 'desc'), limit(25)),
         (snap) => {
           setMarketOrders(sortByCreatedAtDesc(snap.docs.map((d) => d.data() as MarketOrder)));
         },
@@ -483,7 +483,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'company_logs'), where('ownerUid', '==', uid), limit(25)),
+        query(collection(db, 'company_logs'), where('ownerUid', '==', uid), orderBy('createdAt', 'desc'), limit(25)),
         (snap) => {
           setCompanyLogs(sortByCreatedAtDesc(snap.docs.map((d) => d.data() as CompanyLog)));
         },
@@ -595,7 +595,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'notifications'), where('uid', '==', uid), limit(30)),
+        query(collection(db, 'notifications'), where('uid', '==', uid), orderBy('createdAt', 'desc'), limit(30)),
         (snap) => {
           setNotifications(sortByCreatedAtDesc(snap.docs.map((d) => d.data() as GameNotification)));
         },
@@ -662,7 +662,8 @@ export function useGameData(): GameDataState {
           query(
             collection(db, 'organization_requests'),
             where('orgId', '==', orgId),
-            where('status', '==', 'pending')
+            where('status', '==', 'pending'),
+            orderBy('createdAt', 'asc')
           ),
           (snap) => {
             setOrgRequests(snap.docs.map((d) => d.data() as OrganizationRequest));
@@ -675,7 +676,7 @@ export function useGameData(): GameDataState {
         })();
 
     const u3 = onSnapshot(
-      query(collection(db, 'organization_transactions'), where('orgId', '==', orgId), limit(40)),
+      query(collection(db, 'organization_transactions'), where('orgId', '==', orgId), orderBy('createdAt', 'desc'), limit(40)),
       (snap) => {
         setOrgTransactions(
           sortByCreatedAtDesc(snap.docs.map((d) => d.data() as OrganizationTransaction))
