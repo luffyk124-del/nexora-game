@@ -71,9 +71,23 @@ function camelKey(key: string): string {
 function normalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(normalize);
   if (value && typeof value === "object" && !(value instanceof Date)) {
-    return Object.fromEntries(
+    const normalized = Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([key, item]) => [camelKey(key), normalize(item)]),
-    );
+    ) as Record<string, unknown>;
+    // Preserve the existing React game-domain interfaces during the read-only migration.
+    if ("userId" in normalized) {
+      normalized.uid = normalized.userId;
+      delete normalized.userId;
+    }
+    if ("isRead" in normalized) {
+      normalized.read = normalized.isRead;
+      delete normalized.isRead;
+    }
+    if ("propertyType" in normalized) {
+      normalized.type = normalized.propertyType;
+      delete normalized.propertyType;
+    }
+    return normalized;
   }
   return value;
 }
