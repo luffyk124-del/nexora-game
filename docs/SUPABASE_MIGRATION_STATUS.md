@@ -125,3 +125,8 @@ The imported Firestore archive for the actual player UID was compared directly w
 - The exporter is deliberately manual-only; no scheduled scan or import has been enabled.
 - The remaining external prerequisite is Google Cloud Workload Identity Federation plus the GitHub repository variable `GCP_GITHUB_WIF_PROVIDER`. The exact commands and required permissions are in `docs/GITHUB_OIDC_SETUP.md`.
 - Until that setup is complete and a read-only scan is reviewed, keep the legacy Vercel exporter as a fallback and do not run both exporters concurrently.
+
+## Social source-data reconciliation
+
+- The imported Firestore archive and Supabase target both contain zero rows for conversations, conversation messages, global chat messages, user blocks, player reports, and organization invites.
+- Therefore there was no historical social content to copy for these six collections. The Supabase workflows are implemented and synthetic transaction-scoped tests cover messaging, blocking, reporting, and organization invitations; real-player UI verification remains pending.
