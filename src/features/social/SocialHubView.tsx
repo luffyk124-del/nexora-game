@@ -1,34 +1,32 @@
 import { useEffect, useState } from 'react';
-import { collection, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
 import { ArrowLeft, Ban, Flag, Globe2, MessageCircle, Search, Send, ShieldCheck, Users, UserRound } from 'lucide-react';
-import { db, functions } from '../../lib/firebase';
 import { AVATARS } from '../../data/catalog';
 import { timestampToMs } from '../../lib/economy';
 import type { Language, OrganizationMember, PlayerProfile } from '../../types/game';
-
-type PublicPlayer = {
-  uid: string;
-  username: string;
-  avatarId: string;
-  title: string;
-  level: number;
-  reputation: number;
-  influence: number;
-  orgId: string | null;
-};
-type Conversation = {
-  id: string;
-  participants: string[];
-  participantNames: Record<string, string>;
-  participantAvatars?: Record<string, string>;
-  lastMessage: string;
-  lastMessageAt: unknown;
-  lastSenderUid: string;
-};
-type DirectMessage = { id: string; senderUid: string; senderName: string; text: string; createdAt: unknown };
-type GlobalMessage = { id: string; senderUid: string; senderName: string; avatarId: string; text: string; createdAt: unknown };
-type OrgInvite = { id: string; orgId: string; orgName: string; orgTag: string; inviterName: string; status: string; targetUid: string };
+import {
+  blockPlayer as blockPlayerOnSupabase,
+  getPublicPlayerProfile,
+  invitePlayerToOrganization,
+  listBlockedPlayers,
+  listDirectConversations,
+  listDirectMessages,
+  listGlobalChatMessages,
+  listOrganizationInvites,
+  openDirectConversation,
+  reportPlayer as submitPlayerReport,
+  respondOrganizationInvite,
+  searchPlayers,
+  sendDirectMessage,
+  sendGlobalChatMessage,
+  unblockPlayer as unblockPlayerOnSupabase,
+} from '../../services/socialService';
+import type {
+  PublicPlayer,
+  SocialConversation as Conversation,
+  SocialDirectMessage as DirectMessage,
+  SocialGlobalMessage as GlobalMessage,
+  SocialOrgInvite as OrgInvite,
+} from '../../services/socialService';
 
 interface SocialHubViewProps {
   profile: PlayerProfile;
@@ -58,9 +56,8 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
 
   async function openPlayerProfile(targetUid: string) {
     try {
-      const getProfile = httpsCallable<{ targetUid: string }, PublicPlayer>(functions, 'getPublicPlayerProfileSecure');
-      const result = await getProfile({ targetUid });
-      setSelectedPlayer(result.data);
+      const result = await getPublicPlayerProfile(targetUid);
+      setSelectedPlayer(result);
       setMode('players');
     } catch {
       setError(ar ? 'تعذر فتح الملف الشخصي.' : 'Could not open player profile.');
@@ -77,10 +74,11 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
   const targetUid = selectedConversationData?.participants.find((uid) => uid !== profile.uid) || '';
 
   useEffect(() => {
-    const listBlocked = httpsCallable<Record<string, never>, { blockedUids: string[] }>(functions, 'listBlockedPlayersSecure');
-    void listBlocked({}).then((result) => setBlockedUids(result.data.blockedUids)).catch(() => {
-      setError(ar ? 'تعذر تحميل قائمة الحظر.' : 'Could not load blocked players.');
+    let active = true;
+    void listBlockedPlayers().then((blocked) => { if (active) setBlockedUids(blocked); }).catch(() => {
+      if (active) setError(ar ? 'تعذر تحميل قائمة الحظر.' : 'Could not load blocked players.');
     });
+    return () => { active = false; };
   }, [ar]);
 
   useEffect(() => {
@@ -90,33 +88,31 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
       return;
     }
     const timer = window.setTimeout(() => {
-      const searchFn = httpsCallable<{ prefix: string }, { players: PublicPlayer[] }>(functions, 'searchPlayersSecure');
-      void searchFn({ prefix }).then((result) => setPlayers(result.data.players)).catch(() => setError(ar ? 'تعذر البحث عن اللاعبين.' : 'Player search failed.'));
+      void searchPlayers(prefix).then(setPlayers).catch(() => setError(ar ? 'تعذر البحث عن اللاعبين.' : 'Player search failed.'));
     }, 300);
     return () => window.clearTimeout(timer);
   }, [search, ar]);
 
   useEffect(() => {
-    const unsubscribers = [
-      onSnapshot(
-        query(collection(db, 'conversations'), where('participants', 'array-contains', profile.uid), limit(50)),
-        (snapshot) => setConversations(snapshot.docs.map((item) => item.data() as Conversation).sort(
-          (a, b) => timestampToMs(b.lastMessageAt, 0) - timestampToMs(a.lastMessageAt, 0)
-        )),
-        () => setError(ar ? 'تعذر تحميل المحادثات.' : 'Could not load conversations.')
-      ),
-      onSnapshot(
-        query(collection(db, 'global_chat_messages'), orderBy('createdAt', 'desc'), limit(60)),
-        (snapshot) => setGlobalMessages(snapshot.docs.map((item) => item.data() as GlobalMessage).reverse()),
-        () => setError(ar ? 'تعذر تحميل الدردشة العامة.' : 'Could not load global chat.')
-      ),
-      onSnapshot(
-        query(collection(db, 'organization_invites'), where('targetUid', '==', profile.uid), limit(20)),
-        (snapshot) => setInvites(snapshot.docs.map((item) => item.data() as OrgInvite).filter((item) => item.status === 'pending')),
-        () => setError(ar ? 'تعذر تحميل دعوات المنظمات.' : 'Could not load organization invites.')
-      ),
-    ];
-    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+    let active = true;
+    const refresh = async () => {
+      try {
+        const [nextConversations, nextGlobalMessages, nextInvites] = await Promise.all([
+          listDirectConversations(), listGlobalChatMessages(), listOrganizationInvites(),
+        ]);
+        if (!active) return;
+        setConversations(nextConversations.sort((a, b) =>
+          timestampToMs(b.lastMessageAt, 0) - timestampToMs(a.lastMessageAt, 0)
+        ));
+        setGlobalMessages(nextGlobalMessages);
+        setInvites(nextInvites);
+      } catch {
+        if (active) setError(ar ? 'تعذر تحديث بيانات التواصل.' : 'Could not refresh social data.');
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => { void refresh(); }, 5000);
+    return () => { active = false; window.clearInterval(timer); };
   }, [profile.uid, ar]);
 
   useEffect(() => {
@@ -124,16 +120,18 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
       setDirectMessages([]);
       return;
     }
-    const messagesQuery = query(
-      collection(db, 'conversations', selectedConversation, 'messages'),
-      orderBy('createdAt', 'desc'),
-      limit(80)
-    );
-    return onSnapshot(
-      messagesQuery,
-      (snapshot) => setDirectMessages(snapshot.docs.map((item) => item.data() as DirectMessage).reverse()),
-      () => setError(ar ? 'تعذر تحميل الرسائل.' : 'Could not load messages.')
-    );
+    let active = true;
+    const refresh = async () => {
+      try {
+        const messages = await listDirectMessages(selectedConversation);
+        if (active) setDirectMessages(messages);
+      } catch {
+        if (active) setError(ar ? 'تعذر تحميل الرسائل.' : 'Could not load messages.');
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => { void refresh(); }, 3000);
+    return () => { active = false; window.clearInterval(timer); };
   }, [selectedConversation, ar]);
 
   const dateLabel = (value: unknown) => {
@@ -146,10 +144,9 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
     setBusy('open');
     setError('');
     try {
-      const openFn = httpsCallable<{ targetUid: string }, { conversationId: string }>(functions, 'openDirectConversationSecure');
-      const result = await openFn({ targetUid: player.uid });
+      const result = await openDirectConversation(player.uid);
       setSelectedPlayer(player);
-      setSelectedConversation(result.data.conversationId);
+      setSelectedConversation(result.conversationId);
       setMode('messages');
     } catch {
       setError(ar ? 'تعذر فتح المحادثة.' : 'Could not open conversation.');
@@ -163,9 +160,13 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
     if (!text || !targetUid) return;
     setBusy('send_dm');
     try {
-      const sendFn = httpsCallable<{ targetUid: string; text: string }, { ok: boolean }>(functions, 'sendDirectMessageSecure');
-      await sendFn({ targetUid, text });
+      await sendDirectMessage(targetUid, text);
       setDraft('');
+      const [messages, nextConversations] = await Promise.all([
+        listDirectMessages(selectedConversation || ''), listDirectConversations(),
+      ]);
+      setDirectMessages(messages);
+      setConversations(nextConversations);
     } catch {
       setError(ar ? 'تعذر إرسال الرسالة. انتظر قليلاً ثم حاول.' : 'Message could not be sent. Wait a moment and retry.');
     } finally {
@@ -178,9 +179,9 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
     if (!text) return;
     setBusy('send_global');
     try {
-      const sendFn = httpsCallable<{ text: string }, { ok: boolean }>(functions, 'sendGlobalChatMessageSecure');
-      await sendFn({ text });
+      await sendGlobalChatMessage(text);
       setDraft('');
+      setGlobalMessages(await listGlobalChatMessages());
     } catch {
       setError(ar ? 'تعذر إرسال الرسالة. الدردشة تحدّ الإرسال المتكرر.' : 'Message could not be sent. Chat has a short rate limit.');
     } finally {
@@ -193,10 +194,8 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
     setBusy('block');
     setError('');
     try {
-      const action = httpsCallable<{ targetUid: string }, { ok: boolean }>(
-        functions, isBlocked ? 'unblockPlayerSecure' : 'blockPlayerSecure'
-      );
-      await action({ targetUid: player.uid });
+      if (isBlocked) await unblockPlayerOnSupabase(player.uid);
+      else await blockPlayerOnSupabase(player.uid);
       setBlockedUids((previous) => isBlocked
         ? previous.filter((uid) => uid !== player.uid)
         : [...previous, player.uid]);
@@ -214,8 +213,7 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
     setBusy('report');
     setError('');
     try {
-      const reportFn = httpsCallable<{ targetUid: string; reason: string }, { ok: boolean }>(functions, 'reportPlayerSecure');
-      await reportFn({ targetUid: player.uid, reason: reportReason });
+      await submitPlayerReport(player.uid, reportReason);
       setError(ar ? 'تم إرسال البلاغ للمراجعة.' : 'Report submitted for review.');
     } catch {
       setError(ar ? 'تعذر إرسال البلاغ. حاول لاحقاً.' : 'Could not submit report. Try again later.');
@@ -227,8 +225,7 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
   async function invitePlayer(player: PublicPlayer) {
     setBusy('invite');
     try {
-      const inviteFn = httpsCallable<{ targetUid: string }, { ok: boolean }>(functions, 'invitePlayerToOrganizationSecure');
-      await inviteFn({ targetUid: player.uid });
+      await invitePlayerToOrganization(player.uid);
       setError(ar ? 'تم إرسال دعوة المنظمة.' : 'Organization invite sent.');
     } catch {
       setError(ar ? 'تعذر إرسال الدعوة. تحقق من صلاحيتك وحالة اللاعب.' : 'Invite failed. Check your permission and player eligibility.');
@@ -240,8 +237,7 @@ export function SocialHubView({ profile, myOrgMember, language }: SocialHubViewP
   async function respondInvite(inviteId: string, response: 'accept' | 'decline') {
     setBusy(inviteId);
     try {
-      const respondFn = httpsCallable<{ inviteId: string; response: 'accept' | 'decline' }, { ok: boolean }>(functions, 'respondOrganizationInviteSecure');
-      await respondFn({ inviteId, response });
+      await respondOrganizationInvite(inviteId, response);
       setInvites((previous) => previous.filter((invite) => invite.id !== inviteId));
     } catch {
       setError(ar ? 'تعذر معالجة الدعوة.' : 'Could not process invite.');
