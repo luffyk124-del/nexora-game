@@ -236,7 +236,7 @@ export function MigrationConsole() {
   }
 
   async function runMigration(mode: RunMode) {
-    if (!user || running) return;
+    if (!user || running || parityRunning) return;
     setRunning(true);
     setRunMode(mode);
     setFailure('');
@@ -504,7 +504,7 @@ export function MigrationConsole() {
                   <p className="mt-1 text-sm text-slate-300">{user.email || 'بدون بريد إلكتروني'}</p>
                   <p className="mt-1 break-all text-xs text-slate-500">UID: {user.uid}</p>
                 </div>
-                <button onClick={() => signOut(auth)} disabled={running} className="rounded-lg border border-slate-600 px-3 py-2 text-sm">تسجيل الخروج</button>
+                <button onClick={() => signOut(auth)} disabled={running || parityRunning} className="rounded-lg border border-slate-600 px-3 py-2 text-sm">تسجيل الخروج</button>
               </div>
               {!user.emailVerified && <p className="rounded-lg bg-amber-500/10 p-3 text-sm text-amber-200">يجب توثيق البريد الإلكتروني لهذا الحساب أولاً.</p>}
             </section>
@@ -512,7 +512,7 @@ export function MigrationConsole() {
             <section className="rounded-2xl border border-emerald-500/30 bg-[#141821] p-5 space-y-3">
               <h2 className="text-lg font-semibold">مطابقة اللاعب الحقيقي</h2>
               <p className="text-sm leading-6 text-slate-300">اختبار قراءة فقط يقارن جلسة Firebase الحالية مع بيانات Supabase لنفس UID، بما فيها الرصيد والمخزون والمعاملات وملكية الشركات والعقارات والمزادات والمنظمات. لا ينفّذ أي تعديل.</p>
-              <button onClick={runPlayerParityCheck} disabled={parityRunning || !user.emailVerified || user.isAnonymous} className="w-full rounded-xl border border-emerald-400/60 px-4 py-3 font-semibold text-emerald-200 disabled:opacity-40">
+              <button onClick={runPlayerParityCheck} disabled={parityRunning || running || !user.emailVerified || user.isAnonymous} className="w-full rounded-xl border border-emerald-400/60 px-4 py-3 font-semibold text-emerald-200 disabled:opacity-40">
                 {parityRunning ? 'جارٍ فحص مطابقة اللاعب…' : 'تشغيل فحص المطابقة الآن'}
               </button>
               {parityError && <p className="text-sm text-amber-200">{parityError}</p>}
@@ -548,14 +548,14 @@ export function MigrationConsole() {
               <div className="grid gap-3 sm:grid-cols-2">
                 <button
                   onClick={() => runMigration('scan')}
-                  disabled={running || !user.emailVerified || user.isAnonymous}
+                  disabled={running || parityRunning || !user.emailVerified || user.isAnonymous}
                   className="rounded-xl border border-cyan-400/60 px-4 py-3 font-semibold text-cyan-200 disabled:opacity-40"
                 >
                   {running && runMode === 'scan' ? 'جارٍ فحص Firestore…' : '1) فحص المصدر فقط'}
                 </button>
                 <button
                   onClick={() => runMigration('import')}
-                  disabled={running || !scanComplete || !user.emailVerified || user.isAnonymous}
+                  disabled={running || parityRunning || !scanComplete || !user.emailVerified || user.isAnonymous}
                   className="rounded-xl bg-cyan-400 px-4 py-3 font-bold text-slate-950 disabled:opacity-40"
                 >
                   {running && runMode === 'import' ? 'جارٍ الاستيراد…' : '2) استيراد البيانات إلى NEXORA'}
