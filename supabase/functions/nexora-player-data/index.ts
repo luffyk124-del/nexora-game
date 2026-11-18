@@ -130,24 +130,24 @@ Deno.serve(async (req: Request) => {
         run("profile", db.from("player_profiles").select("*").eq("user_id", uid).maybeSingle()),
         run("private", db.from("player_private").select("*").eq("user_id", uid).maybeSingle()),
         run("wallet", db.from("wallets").select("*").eq("user_id", uid).maybeSingle()),
-        run("inventory", db.from("inventory").select("*").eq("user_id", uid).limit(200)),
+        run("inventory", db.from("inventory").select("*").eq("user_id", uid).order("item_id", { ascending: true }).limit(200)),
         run("sent_transactions", db.from("transactions").select("*").eq("from_uid", uid).order("created_at", { ascending: false }).limit(30)),
         run("received_transactions", db.from("transactions").select("*").eq("to_uid", uid).order("created_at", { ascending: false }).limit(30)),
         run("market_listings", db.from("market_listings").select("*").eq("status", "active").order("created_at", { ascending: false }).limit(100)),
         run("market_orders", db.from("market_orders").select("*").eq("buyer_uid", uid).order("created_at", { ascending: false }).limit(25)),
-        run("companies", db.from("companies").select("*").eq("owner_uid", uid).limit(50)),
-        run("company_auctions", db.from("company_auctions").select("*").eq("status", "active").limit(100)),
+        run("companies", db.from("companies").select("*").eq("owner_uid", uid).order("id", { ascending: true }).limit(50)),
+        run("company_auctions", db.from("company_auctions").select("*").eq("status", "active").order("id", { ascending: true }).limit(100)),
         run("company_logs", db.from("company_logs").select("*").eq("owner_uid", uid).order("created_at", { ascending: false }).limit(25)),
-        run("properties", db.from("properties").select("*").eq("owner_uid", uid).limit(100)),
+        run("properties", db.from("properties").select("*").eq("owner_uid", uid).order("id", { ascending: true }).limit(100)),
         run("organizations", db.from("organizations").select("*").order("reputation", { ascending: false }).limit(40)),
         run("membership", db.from("organization_members").select("*").eq("user_id", uid).limit(1).maybeSingle()),
-        run("my_pending_requests", db.from("organization_requests").select("org_id").eq("user_id", uid).eq("status", "pending").limit(100)),
-        run("missions", db.from("player_missions").select("*").eq("user_id", uid).limit(200)),
+        run("my_pending_requests", db.from("organization_requests").select("org_id").eq("user_id", uid).eq("status", "pending").order("id", { ascending: true }).limit(100)),
+        run("missions", db.from("player_missions").select("*").eq("user_id", uid).order("mission_id", { ascending: true }).limit(200)),
         run("daily_claims", db.from("daily_claims").select("*").eq("user_id", uid).eq("date_key", new Date().toISOString().slice(0, 10)).limit(2)),
-        run("contract_claims", db.from("contract_claims").select("*").eq("user_id", uid).limit(200)),
-        run("achievements", db.from("player_achievements").select("*").eq("user_id", uid).limit(200)),
+        run("contract_claims", db.from("contract_claims").select("*").eq("user_id", uid).order("contract_id", { ascending: true }).limit(200)),
+        run("achievements", db.from("player_achievements").select("*").eq("user_id", uid).order("achievement_id", { ascending: true }).limit(200)),
         run("notifications", db.from("notifications").select("*").eq("user_id", uid).order("created_at", { ascending: false }).limit(30)),
-        run("world_events", db.from("world_events").select("*").eq("active", true).limit(100)),
+        run("world_events", db.from("world_events").select("*").eq("active", true).order("id", { ascending: true }).limit(100)),
       ]);
 
     const member = membership as Record<string, unknown> | null;
@@ -155,8 +155,8 @@ Deno.serve(async (req: Request) => {
 
     const [orgMembers, orgRequests, orgTransactions] = orgId
       ? await Promise.all([
-          run("organization_members", db.from("organization_members").select("*").eq("org_id", orgId).limit(200)),
-          run("organization_requests", db.from("organization_requests").select("*").eq("org_id", orgId).eq("status", "pending").limit(100)),
+          run("organization_members", db.from("organization_members").select("*").eq("org_id", orgId).order("user_id", { ascending: true }).limit(200)),
+          run("organization_requests", db.from("organization_requests").select("*").eq("org_id", orgId).eq("status", "pending").order("created_at", { ascending: true }).limit(100)),
           run("organization_transactions", db.from("organization_transactions").select("*").eq("org_id", orgId).order("created_at", { ascending: false }).limit(40)),
         ])
       : [[], [], []];
