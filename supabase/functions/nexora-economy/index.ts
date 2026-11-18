@@ -88,18 +88,20 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
-  if (action === "company_upgrade" || action === "company_complete" || action === "company_collect") {
+  if (action === "company_upgrade" || action === "company_complete" || action === "company_collect" ||
+      action === "company_vault_upgrade" || action === "company_vault_complete") {
     const companyId = typeof body.companyId === "string" ? body.companyId : "";
     if (!companyId || companyId.length > 160) return json({ error: "COMPANY_NOT_FOUND" }, 400, origin);
     let rpcName: string;
     let args: Record<string, unknown>;
-    if (action === "company_upgrade" || action === "company_collect") {
+    if (action === "company_upgrade" || action === "company_collect" || action === "company_vault_upgrade") {
       const requestId = typeof body.requestId === "string" ? body.requestId : "";
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) return json({ error: "INVALID_REQUEST" }, 400, origin);
-      rpcName = action === "company_upgrade" ? "start_company_upgrade" : "collect_company_revenue";
+      rpcName = action === "company_upgrade" ? "start_company_upgrade"
+        : action === "company_collect" ? "collect_company_revenue" : "upgrade_company_vault";
       args = { p_user_id: uid, p_company_id: companyId, p_request_id: requestId };
     } else {
-      rpcName = "complete_company_upgrade";
+      rpcName = action === "company_complete" ? "complete_company_upgrade" : "complete_company_vault_upgrade";
       args = { p_user_id: uid, p_company_id: companyId };
     }
     const { data, error } = await admin.schema("nexora").rpc(rpcName, args);
