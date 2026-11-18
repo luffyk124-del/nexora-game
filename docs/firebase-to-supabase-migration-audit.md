@@ -101,6 +101,8 @@ Firebase UIDs and Supabase Auth user IDs are different identity namespaces. The 
 - Foreign-key dependencies require this import order (parents before children): `profiles`, `usernames`, `users_private`, `wallets`, `transactions`, `inventory`, `market_listings`, `companies`, `organizations`, `conversations`, then dependent collections including `market_orders`, `company_auctions`, `company_logs`, `organization_members`, `organization_requests`, `organization_transactions`, and `conversation_messages`. Import `market_orders` only after both `market_listings` and `transactions`; import `conversation_messages` only after `conversations` and pass the parent conversation ID.
 - `player_report_audit` and `user_identity_map` are not in the 30-collection exporter/importer allowlist. Do not assume these records are migrated by importing `player_reports`; decide whether report audit history exists in Firestore and how identity links will be populated before cutover.
 
+- Added index `player_report_audit_report_id_idx` for the `player_report_audit.report_id` foreign key after the performance advisor flagged it; migration `20261118060000_nexora_player_report_audit_fk_index.sql` is committed and applied.
+
 ## Data export/import path
 
 No direct Firebase Admin / Firestore connector is attached to this ChatGPT session. However, the existing Vercel API routes `api/company-vault.ts`, `api/organization-create.ts`, `api/organization-upgrade.ts`, and `api/account-delete.ts` already use Vercel OIDC plus Google Workload Identity Federation (`IdentityPoolClient`) to impersonate the NEXORA runtime service account and access the named Firestore database.
