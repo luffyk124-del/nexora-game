@@ -91,6 +91,14 @@ export function MigrationConsole() {
     };
   }, []);
 
+  useEffect(() => {
+    setScanComplete(false);
+    setImportComplete(false);
+    setCounts({});
+    setLogs([]);
+    setFailure('');
+  }, [user?.uid]);
+
   const addLog = (message: string) => {
     setLogs((previous) => [...previous.slice(-79), message]);
   };
@@ -111,20 +119,20 @@ export function MigrationConsole() {
     }
   }
 
-  async function getOwnerToken(activeUser: User): Promise<string> {
+  async function verifyOwnerSession(activeUser: User): Promise<void> {
     await activeUser.reload();
     if (activeUser.isAnonymous || !activeUser.emailVerified) {
       throw new Error('يجب تسجيل الدخول بحساب موثّق البريد، ولا يمكن استخدام حساب ضيف.');
     }
-    return activeUser.getIdToken();
   }
 
   async function exportPage(
-    token: string,
+    activeUser: User,
     collection: string,
     parentId: string,
     pageToken: string,
   ): Promise<ExportPage> {
+    const token = await activeUser.getIdToken();
     const response = await fetch('/api/migration-export', {
       method: 'POST',
       headers: {
@@ -147,12 +155,13 @@ export function MigrationConsole() {
   }
 
   async function importPage(
-    token: string,
+    activeUser: User,
     collection: string,
     parentId: string,
     documents: ExportDocument[],
   ): Promise<number> {
     if (!documents.length) return 0;
+    const token = await activeUser.getIdToken();
     const response = await fetch(SUPABASE_URL + '/functions/v1/nexora-migration-import', {
       method: 'POST',
       headers: {
@@ -192,7 +201,7 @@ export function MigrationConsole() {
     }
 
     try {
-      const token = await getOwnerToken(user);
+      await verifyOwnerSession(user);
       const conversationIds: string[] = [];
       let total = 0;
       let imported = 0;
@@ -201,11 +210,9 @@ export function MigrationConsole() {
         setCurrentTask(collection);
         let pageToken = '';
         let collectionCount = 0;
-        let pageNumber = 0;
 
         do {
-          const page = await exportPage(token, collection, '', pageToken);
-          pageNumber += 1;
+          const page = await exportPage(user, collection, '', pageToken);
           const documents = Array.isArray(page.documents) ? page.documents : [];
           collectionCount += documents.length;
           total += documents.length;
@@ -218,7 +225,7 @@ export function MigrationConsole() {
           }
 
           if (mode === 'import' && documents.length) {
-            imported += await importPage(token, collection, '', documents);
+            imported += await importPage(user, collection, '', documents);
             setImportedDocuments(imported);
           }
 
@@ -236,7 +243,7 @@ export function MigrationConsole() {
         let pageToken = '';
         let parentCount = 0;
         do {
-          const page = await exportPage(token, 'conversation_messages', parentId, pageToken);
+          const page = await exportPage(user, 'conversation_messages', parentId, pageToken);
           const documents = Array.isArray(page.documents) ? page.documents : [];
           parentCount += documents.length;
           messageCount += documents.length;
@@ -244,7 +251,7 @@ export function MigrationConsole() {
           setTotalDocuments(total);
 
           if (mode === 'import' && documents.length) {
-            imported += await importPage(token, 'conversation_messages', parentId, documents);
+            imported += await importPage(user, 'conversation_messages', parentId, documents);
             setImportedDocuments(imported);
           }
           pageToken = page.nextPageToken || '';
