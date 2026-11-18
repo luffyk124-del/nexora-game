@@ -80,6 +80,17 @@ begin
   if v_sender_balance is null or v_recipient_balance is null then
     raise exception 'RECIPIENT_NOT_FOUND';
   end if;
+
+  -- Recheck after acquiring wallet locks: concurrent retries with the same request ID
+  -- must observe the first committed transfer rather than debit the sender twice.
+  select * into v_existing from transactions where id = v_tx_id;
+  if found then
+    if v_existing.from_uid <> p_sender_uid or v_existing.type <> 'transfer' then
+      raise exception 'REQUEST_ID_CONFLICT';
+    end if;
+    return jsonb_build_object('ok', true, 'transactionId', v_tx_id, 'replayed', true);
+  end if;
+
   if v_sender_balance < p_amount then
     raise exception 'INSUFFICIENT_FUNDS';
   end if;
