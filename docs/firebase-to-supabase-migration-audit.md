@@ -42,7 +42,15 @@ Verification confirmed:
 ### Remaining known schema mismatch
 - `nexora.company_logs.details` is JSONB, while the TypeScript model currently treats it as a string. This needs a deliberate adapter or a separately reviewed type migration before imports; it was not silently changed.
 
-## Additional social/messaging schema work completed\nMigration `20261118054000_nexora_social_messaging_schema_v1.sql` was applied and committed. It adds locked tables for `user_blocks`, `chat_rate_limits`, `conversations`, `conversation_messages`, `global_chat_messages`, and `organization_invites`. RLS is enabled and client grants are revoked. Direct-message subcollections map to `nexora.conversation_messages` with `conversation_id`.\n\n## Server-side Firebase functions that must be migrated
+## Additional social/messaging schema work completed\nMigration `20261118054000_nexora_social_messaging_schema_v1.sql` was applied and committed. It adds locked tables for `user_blocks`, `chat_rate_limits`, `conversations`, `conversation_messages`, `global_chat_messages`, and `organization_invites`. RLS is enabled and client grants are revoked. Direct-message subcollections map to `nexora.conversation_messages` with `conversation_id`.\n\n## Import control plane added
+
+- Deployed Supabase Edge Function `nexora-migration-import` (version 1). It verifies Firebase ID tokens itself, requires a verified non-anonymous account, and then checks `nexora.migration_operators` for an enabled `owner` record. Supabase gateway JWT verification is disabled only because the function validates Firebase JWTs directly.
+- The function accepts only an allowlisted source collection and batches of at most 100 documents. It maps known fields into the destination tables, uses upserts for retry safety, and archives every raw source document in `nexora.firestore_import_payloads` so unrecognized fields are not discarded.
+- Added locked `nexora.migration_operators`, `nexora.migration_batches`, and `nexora.firestore_import_payloads` tables. RLS is enabled and direct client grants are revoked.
+- The operator table is intentionally empty until the verified owner Firebase UID is provisioned. No import has been run and no player data has been copied.
+- The importer uses `.schema("nexora")`; the `nexora` schema must be enabled in Supabase Project Settings → API → Exposed schemas before the Data API path will work. Exposing the schema does not grant direct client table access.
+
+## Server-side Firebase functions that must be migrated
 The current Functions source exports:
 - `upgradeCompanyProfitVault`
 - `collectCompanyRevenueSecure`
