@@ -532,11 +532,11 @@ export function MigrationConsole() {
                 شغّل وضع scan أولاً، ولا تشغّل المسارين بالتوازي.
               </p>
               <div className="flex flex-wrap gap-3 text-sm">
-                <a className="underline text-cyan-200" href="https://github.com/luffyk124-del/nexora-game/blob/feature/nexora-social-economy-mobile-overhaul/docs/GITHUB_OIDC_SETUP.md" target="_blank" rel="noreferrer">دليل إعداد GitHub OIDC</a>
-                <a className="underline text-cyan-200" href="https://github.com/luffyk124-del/nexora-game/blob/feature/nexora-social-economy-mobile-overhaul/.github/workflows/nexora-firestore-export.yml" target="_blank" rel="noreferrer">ملف مهمة التصدير الجديدة</a>
+                <a className="underline text-cyan-200" href="https://github.com/luffyk124-del/nexora-game/blob/main/docs/GITHUB_OIDC_SETUP.md" target="_blank" rel="noreferrer">دليل إعداد GitHub OIDC</a>
+                <a className="underline text-cyan-200" href="https://github.com/luffyk124-del/nexora-game/blob/main/.github/workflows/nexora-firestore-export.yml" target="_blank" rel="noreferrer">ملف مهمة التصدير الجديدة</a>
               </div>
               <p className="text-xs leading-6 text-slate-400">
-                ستظهر إمكانية تشغيل المهمة من تبويب Actions بعد وصول ملف workflow إلى الفرع الافتراضي. يبقى المصدّر الحالي احتياطياً فقط حتى نجاح أول فحص واستيراد عبر GitHub.
+                أصبحت المهمة متاحة في تبويب Actions على الفرع الافتراضي، لكنها لن تعمل قبل إعداد Google Cloud Workload Identity Federation ومتغير GCP_GITHUB_WIF_PROVIDER. يبقى المصدّر القديم احتياطياً حتى نجاح أول فحص واستيراد عبر GitHub.
               </p>
             </section>
 
