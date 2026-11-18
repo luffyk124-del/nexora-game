@@ -839,6 +839,20 @@ export async function manufactureRecipe(uid: string, recipeId: string, batchQuan
   const recipe = MANUFACTURING_RECIPES.find((r) => r.id === recipeId);
   if (!recipe) throw new Error('INVALID_RECIPE');
   if (!Number.isInteger(batchQuantity) || batchQuantity < 1 || batchQuantity > 999) throw new Error('INVALID_QUANTITY');
+  if (import.meta.env.VITE_NEXORA_SUPABASE_MANUFACTURING === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'manufacture_recipe', recipeId, batchQuantity, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'MANUFACTURING_FAILED');
+    return;
+  }
+
   const txId = genId('tx');
 
   try {
