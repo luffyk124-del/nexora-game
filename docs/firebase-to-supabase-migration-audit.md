@@ -73,8 +73,13 @@ These operations include wallet/economy transactions, organization permissions, 
 ## Identity migration requirement
 Firebase UIDs and Supabase Auth user IDs are different identity namespaces. The locked `nexora.user_identity_map` foundation now exists, but it contains no mappings. Preserve original Firebase UIDs as stable legacy IDs. Link accounts only after validating a Firebase ID token or completing a trusted admin-reviewed recovery; do not match by unverified email or let clients choose their legacy UID. Guest accounts need a separate recovery strategy.
 
-## Data export/import blocker
-No connected Firebase Admin / Firestore export-import tool is currently available in this execution environment. Supabase tools manage the destination but cannot export Firestore documents. No Firestore data has been copied. A trusted Firestore export or authorized Admin SDK transfer path is required, followed by batched import with collection counts, checksums, and reconciliation.
+## Data export/import path
+
+No direct Firebase Admin / Firestore connector is attached to this ChatGPT session. However, the existing Vercel API routes `api/company-vault.ts`, `api/organization-create.ts`, `api/organization-upgrade.ts`, and `api/account-delete.ts` already use Vercel OIDC plus Google Workload Identity Federation (`IdentityPoolClient`) to impersonate the NEXORA runtime service account and access the named Firestore database.
+
+This provides a viable foundation for a new **admin-gated, paginated export endpoint** without Cloud Shell or a static Google service-account key. That exporter has not yet been implemented or deployed. It must verify an authorized owner before returning any source records, and the import side must write only to schema `nexora`.
+
+No Firestore documents have been copied yet. A controlled export/import bridge must be implemented and tested, followed by collection counts, checksums, and reconciliation. Do not expose an unauthenticated export endpoint or return bulk player data to a public client.
 
 ## Required migration sequence
 1. Finalize source collection/type contracts, including the company-log details mismatch.
