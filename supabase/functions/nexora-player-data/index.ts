@@ -30,6 +30,8 @@ function json(body: unknown, status: number, origin: string | null) {
 }
 
 function getServiceKey(): string | null {
+  const direct = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (direct) return direct;
   const raw = Deno.env.get("SUPABASE_SECRET_KEYS");
   if (!raw) return null;
   try {
