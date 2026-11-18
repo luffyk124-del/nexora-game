@@ -220,7 +220,7 @@ export function useGameData(): GameDataState {
     const uid = authUser.uid;
 
     // Opt-in read migration. Disabled by default until a real-player QA pass is complete.
-    if (import.meta.env.VITE_NEXORA_SUPABASE_READS === 'true') {
+    if (import.meta.env.VITE_NEXORA_SUPABASE_READS === 'true' && !authUser.isAnonymous) {
       let cancelled = false;
       void (async () => {
         try {
