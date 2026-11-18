@@ -7,7 +7,8 @@ import {
   signOut,
   type User,
 } from 'firebase/auth';
-import { auth, googleAuthProvider } from '../../lib/firebase';
+import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
+import { auth, db, googleAuthProvider } from '../../lib/firebase';
 
 const SUPABASE_URL = 'https://dmeupqmhsyojxlgalxrc.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PCsjX_kcS-D8FY4PobPl4w_2BwpeilC';
@@ -56,6 +57,31 @@ type ExportPage = {
 };
 type RunMode = 'scan' | 'import';
 
+type ParityRow = Record<string, unknown>;
+
+function canonicalParityValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalParityValue);
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return Object.fromEntries(Object.keys(record).sort().map((key) => [key, canonicalParityValue(record[key])]));
+  }
+  return value;
+}
+
+function projectParityRows(rows: unknown, keys: string[]): unknown[] {
+  if (!Array.isArray(rows)) return [];
+  return rows.map((row) => {
+    const record = (row && typeof row === 'object' ? row : {}) as ParityRow;
+    return Object.fromEntries(keys.map((key) => [key, record[key] ?? null]));
+  }).map(canonicalParityValue).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+}
+
+function projectParityRow(row: unknown, keys: string[]): unknown {
+  if (!row || typeof row !== 'object') return null;
+  const record = row as ParityRow;
+  return canonicalParityValue(Object.fromEntries(keys.map((key) => [key, record[key] ?? null])));
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -74,6 +100,9 @@ export function MigrationConsole() {
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [logs, setLogs] = useState<string[]>([]);
   const [failure, setFailure] = useState('');
+  const [parityRunning, setParityRunning] = useState(false);
+  const [parityResults, setParityResults] = useState<{ section: string; match: boolean; sourceCount?: number; targetCount?: number }[]>([]);
+  const [parityError, setParityError] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -280,6 +309,143 @@ export function MigrationConsole() {
     }
   }
 
+  async function runPlayerParityCheck() {
+    if (!user || parityRunning) return;
+    setParityRunning(true);
+    setParityError('');
+    setParityResults([]);
+    try {
+      await verifyOwnerSession(user);
+      const token = await user.getIdToken();
+      const response = await fetch(SUPABASE_URL + '/functions/v1/nexora-player-data', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: '{}',
+        cache: 'no-store',
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok !== true || !payload?.player) {
+        throw new Error(payload?.error || 'SUPABASE_PLAYER_READ_FAILED');
+      }
+      const target = payload.player as Record<string, unknown>;
+      const uid = user.uid;
+      const dateKey = new Date().toISOString().slice(0, 10);
+      const [
+        profileSnap, privateSnap, walletSnap, inventorySnap, sentSnap, receivedSnap,
+        listingsSnap, ordersSnap, companiesSnap, auctionsSnap, logsSnap, propertiesSnap,
+        organizationsSnap, membershipSnap, pendingSelfSnap, missionsSnap, dailySnap,
+        contractsSnap, achievementsSnap, notificationsSnap, worldEventsSnap,
+      ] = await Promise.all([
+        getDoc(doc(db, 'profiles', uid)),
+        getDoc(doc(db, 'users_private', uid)),
+        getDoc(doc(db, 'wallets', uid)),
+        getDocs(query(collection(db, 'inventory'), where('uid', '==', uid), limit(200))),
+        getDocs(query(collection(db, 'transactions'), where('fromUid', '==', uid), limit(30))),
+        getDocs(query(collection(db, 'transactions'), where('toUid', '==', uid), limit(30))),
+        getDocs(query(collection(db, 'market_listings'), where('status', '==', 'active'), limit(100))),
+        getDocs(query(collection(db, 'market_orders'), where('buyerUid', '==', uid), limit(25))),
+        getDocs(query(collection(db, 'companies'), where('ownerUid', '==', uid))),
+        getDocs(query(collection(db, 'company_auctions'), where('status', '==', 'active'), limit(100))),
+        getDocs(query(collection(db, 'company_logs'), where('ownerUid', '==', uid), limit(25))),
+        getDocs(query(collection(db, 'properties'), where('ownerUid', '==', uid))),
+        getDocs(query(collection(db, 'organizations'), where('reputation', '>=', 0), limit(40))),
+        getDocs(query(collection(db, 'organization_members'), where('uid', '==', uid), limit(1))),
+        getDocs(query(collection(db, 'organization_requests'), where('uid', '==', uid))),
+        getDocs(query(collection(db, 'player_missions'), where('uid', '==', uid))),
+        getDoc(doc(db, 'daily_claims', uid + '_' + dateKey)),
+        getDocs(query(collection(db, 'contract_claims'), where('uid', '==', uid))),
+        getDocs(query(collection(db, 'player_achievements'), where('uid', '==', uid))),
+        getDocs(query(collection(db, 'notifications'), where('uid', '==', uid), limit(30))),
+        getDocs(query(collection(db, 'world_events'), where('active', '==', true))),
+      ]);
+      const membership = membershipSnap.docs[0]?.data() ?? null;
+      const orgId = typeof membership?.orgId === 'string' ? membership.orgId : '';
+      const [orgMembersSnap, orgRequestsSnap, orgTransactionsSnap] = orgId
+        ? await Promise.all([
+            getDocs(query(collection(db, 'organization_members'), where('orgId', '==', orgId))),
+            getDocs(query(collection(db, 'organization_requests'), where('orgId', '==', orgId), where('status', '==', 'pending'))),
+            getDocs(query(collection(db, 'organization_transactions'), where('orgId', '==', orgId), limit(40))),
+          ])
+        : [null, null, null];
+      const txMap = new Map<string, ParityRow>();
+      [...sentSnap.docs, ...receivedSnap.docs].forEach((item) => txMap.set(item.id, item.data() as ParityRow));
+      const source = {
+        profile: profileSnap.exists() ? profileSnap.data() : null,
+        privateData: privateSnap.exists() ? privateSnap.data() : null,
+        wallet: walletSnap.exists() ? walletSnap.data() : null,
+        inventory: inventorySnap.docs.map((item) => item.data()),
+        transactions: [...txMap.values()],
+        marketListings: listingsSnap.docs.map((item) => item.data()),
+        marketOrders: ordersSnap.docs.map((item) => item.data()),
+        companies: companiesSnap.docs.map((item) => item.data()),
+        companyAuctions: auctionsSnap.docs.map((item) => item.data()),
+        companyLogs: logsSnap.docs.map((item) => item.data()),
+        properties: propertiesSnap.docs.map((item) => item.data()),
+        organizations: organizationsSnap.docs.map((item) => item.data()),
+        myOrgMember: membership,
+        orgMembers: orgMembersSnap?.docs.map((item) => item.data()) ?? [],
+        orgRequests: orgRequestsSnap?.docs.map((item) => item.data()) ?? [],
+        myPendingOrgIds: pendingSelfSnap.docs.map((item) => (item.data() as ParityRow).orgId),
+        orgTransactions: orgTransactionsSnap?.docs.map((item) => item.data()) ?? [],
+        claimedMissions: missionsSnap.docs.map((item) => item.data()),
+        claimedDailyToday: dailySnap.exists(),
+        claimedContractsToday: contractsSnap.docs.map((item) => (item.data() as ParityRow).contractId),
+        unlockedAchievements: achievementsSnap.docs.map((item) => (item.data() as ParityRow).achievementId),
+        notifications: notificationsSnap.docs.map((item) => item.data()),
+        worldEvents: worldEventsSnap.docs.map((item) => item.data()),
+      };
+      const checks: { section: string; source: unknown; target: unknown; keys?: string[] }[] = [
+        { section: 'الملف الشخصي', source: source.profile, target: target.profile, keys: ['uid','username','usernameLower','avatarId','title','level','xp','reputation','influence','skillPoints','skills','stats','orgId'] },
+        { section: 'البيانات الخاصة', source: source.privateData, target: target.privateData, keys: ['uid','email','language','notificationsEnabled'] },
+        { section: 'المحفظة والأرصدة', source: source.wallet, target: target.wallet, keys: ['uid','balance','totalEarned','totalSpent','lastTxId'] },
+        { section: 'المخزون والملكية', source: source.inventory, target: target.inventory, keys: ['uid','itemId','quantity','lastListingId'] },
+        { section: 'سجل العمليات', source: source.transactions, target: target.transactions, keys: ['id','fromUid','toUid','amount','fee','netAmount','type','referenceId','description','status'] },
+        { section: 'عروض السوق', source: source.marketListings, target: target.marketListings, keys: ['id','sellerUid','itemId','quantity','remainingQty','unitPrice','status'] },
+        { section: 'طلبات السوق', source: source.marketOrders, target: target.marketOrders, keys: ['id','listingId','buyerUid','sellerUid','itemId','quantity','unitPrice','totalPrice','taxAmount','txId'] },
+        { section: 'الشركات', source: source.companies, target: target.companies, keys: ['id','ownerUid','name','sector','level','capital','employeesCount','baseRevenuePerHour','expensePerHour','totalRevenue','vaultLevel','vaultBalance','auctionId','auctionEndsAt','auctionStatus'] },
+        { section: 'مزادات الشركات', source: source.companyAuctions, target: target.companyAuctions, keys: ['id','companyId','sellerUid','startingPrice','currentBid','highestBidderUid','endsAt','status'] },
+        { section: 'سجلات الشركات', source: source.companyLogs, target: target.companyLogs, keys: ['id','companyId','ownerUid','action','amount'] },
+        { section: 'العقارات', source: source.properties, target: target.properties, keys: ['id','ownerUid','name','type','level','purchasePrice','rentPerHour','maintenancePerHour','isRented'] },
+        { section: 'المنظمات', source: source.organizations, target: target.organizations, keys: ['id','name','tag','leaderUid','memberCount','reputation','level','memberCapacity','joinMode'] },
+        { section: 'عضوية المنظمة', source: source.myOrgMember, target: target.myOrgMember, keys: ['orgId','uid','username','role','permissions'] },
+        { section: 'أعضاء المنظمة', source: source.orgMembers, target: target.orgMembers, keys: ['orgId','uid','username','role','permissions'] },
+        { section: 'طلبات الانضمام', source: source.orgRequests, target: target.orgRequests, keys: ['id','orgId','uid','username','status'] },
+        { section: 'معاملات خزينة المنظمة', source: source.orgTransactions, target: target.orgTransactions, keys: ['id','orgId','uid','type','amount','note'] },
+        { section: 'المهام المستلمة', source: source.claimedMissions, target: target.claimedMissions, keys: ['uid','missionId','category','rewardCredits','rewardXp'] },
+        { section: 'المكافأة اليومية', source: source.claimedDailyToday, target: target.claimedDailyToday },
+        { section: 'العقود المستلمة', source: source.claimedContractsToday, target: target.claimedContractsToday },
+        { section: 'الإنجازات', source: source.unlockedAchievements, target: target.unlockedAchievements },
+        { section: 'الإشعارات', source: source.notifications, target: target.notifications, keys: ['id','uid','title','body','type','read'] },
+        { section: 'الأحداث العالمية', source: source.worldEvents, target: target.worldEvents, keys: ['id','effectType','targetItemId','priceMultiplier','taxDelta','active','revenueMultiplier','stackGroup'] },
+      ];
+      const results = checks.map((check) => {
+        const sourceValue = check.keys
+          ? Array.isArray(check.source)
+            ? projectParityRows(check.source, check.keys)
+            : projectParityRow(check.source, check.keys)
+          : canonicalParityValue(check.source);
+        const targetValue = check.keys
+          ? Array.isArray(check.target)
+            ? projectParityRows(check.target, check.keys)
+            : projectParityRow(check.target, check.keys)
+          : canonicalParityValue(check.target);
+        return {
+          section: check.section,
+          match: JSON.stringify(sourceValue) === JSON.stringify(targetValue),
+          sourceCount: Array.isArray(check.source) ? check.source.length : undefined,
+          targetCount: Array.isArray(check.target) ? check.target.length : undefined,
+        };
+      });
+      setParityResults(results);
+      const mismatches = results.filter((item) => !item.match);
+      if (mismatches.length) setParityError('هناك ' + mismatches.length + ' أقسام لا تتطابق. لا تفعّل تحويل القراءات بعد.');
+    } catch (error) {
+      setParityError(errorMessage(error));
+    } finally {
+      setParityRunning(false);
+    }
+  }
+
   if (!authReady) {
     return <main className="min-h-screen bg-[#0B0D12] text-white flex items-center justify-center p-6">جارٍ التحقق من جلسة Firebase…</main>;
   }
@@ -315,6 +481,21 @@ export function MigrationConsole() {
                 <button onClick={() => signOut(auth)} disabled={running} className="rounded-lg border border-slate-600 px-3 py-2 text-sm">تسجيل الخروج</button>
               </div>
               {!user.emailVerified && <p className="rounded-lg bg-amber-500/10 p-3 text-sm text-amber-200">يجب توثيق البريد الإلكتروني لهذا الحساب أولاً.</p>}
+            </section>
+
+            <section className="rounded-2xl border border-emerald-500/30 bg-[#141821] p-5 space-y-3">
+              <h2 className="text-lg font-semibold">مطابقة اللاعب الحقيقي</h2>
+              <p className="text-sm leading-6 text-slate-300">اختبار قراءة فقط يقارن جلسة Firebase الحالية مع بيانات Supabase لنفس UID، بما فيها الرصيد والمخزون والمعاملات وملكية الشركات والعقارات والمزادات والمنظمات. لا ينفّذ أي تعديل.</p>
+              <button onClick={runPlayerParityCheck} disabled={parityRunning || !user.emailVerified || user.isAnonymous} className="w-full rounded-xl border border-emerald-400/60 px-4 py-3 font-semibold text-emerald-200 disabled:opacity-40">
+                {parityRunning ? 'جارٍ فحص مطابقة اللاعب…' : 'تشغيل فحص المطابقة الآن'}
+              </button>
+              {parityError && <p className="text-sm text-amber-200">{parityError}</p>}
+              {parityResults.length > 0 && <div className="divide-y divide-slate-700 rounded-xl border border-slate-700">
+                {parityResults.map((item) => <div key={item.section} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                  <span>{item.section}</span>
+                  <span className={item.match ? 'text-emerald-300' : 'text-rose-300'}>{item.match ? 'متطابق' : 'اختلاف'}</span>
+                </div>)}
+              </div>}
             </section>
 
             <section className="rounded-2xl border border-cyan-500/40 bg-[#141821] p-5 space-y-3">
