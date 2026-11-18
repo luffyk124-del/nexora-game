@@ -73,6 +73,16 @@ These operations include wallet/economy transactions, organization permissions, 
 ## Identity migration requirement
 Firebase UIDs and Supabase Auth user IDs are different identity namespaces. The locked `nexora.user_identity_map` foundation now exists, but it contains no mappings. Preserve original Firebase UIDs as stable legacy IDs. Link accounts only after validating a Firebase ID token or completing a trusted admin-reviewed recovery; do not match by unverified email or let clients choose their legacy UID. Guest accounts need a separate recovery strategy.
 
+## Owner-gated Firestore export endpoint added
+
+- Added `api/migration-export.ts` on the unpublished game branch.
+- Uses the existing Vercel OIDC → Google Workload Identity Federation → NEXORA runtime service-account path; no static Google service-account private key is introduced.
+- Requires a verified, non-anonymous Firebase ID token and an existing owner authorization source: `diagnosticsOwner` custom claim, the existing server-side diagnostics UID/email allowlist, or `diagnostics_admins/{uid}` with `enabled=true` and `role='owner'`.
+- Collection names are fixed to the audited NEXORA allowlist; the client cannot provide arbitrary Firestore paths or queries.
+- Exports one bounded page (maximum 100 documents) at a time and returns an opaque continuation token. Responses are marked no-store.
+- The endpoint has been committed but is not deployed; CI is still validating it. It must remain behind the draft PR until owner authorization and pagination tests pass.
+- This endpoint only exports; it does not write to Firestore or Supabase and does not itself complete migration.
+
 ## Data export/import path
 
 No direct Firebase Admin / Firestore connector is attached to this ChatGPT session. However, the existing Vercel API routes `api/company-vault.ts`, `api/organization-create.ts`, `api/organization-upgrade.ts`, and `api/account-delete.ts` already use Vercel OIDC plus Google Workload Identity Federation (`IdentityPoolClient`) to impersonate the NEXORA runtime service account and access the named Firestore database.
