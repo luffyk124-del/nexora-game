@@ -167,6 +167,22 @@ export async function createPlayerCharacter(
     leadership: 0,
   };
 
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ACCOUNT === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous || !currentUser.emailVerified) {
+      throw new Error('UNAUTHENTICATED');
+    }
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create_player_character', username: trimmed, avatarId, language }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'PLAYER_CREATION_FAILED');
+    return;
+  }
+
   try {
     await runTransaction(db, async (tx) => {
       const unameRef = doc(db, 'usernames', usernameLower);
