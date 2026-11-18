@@ -1,0 +1,42 @@
+name: NEXORA Reports Center CI
+
+on:
+  push:
+    branches:
+      - "feature/nexora-social-economy-mobile-overhaul"
+    paths:
+      - "reports-center/**"
+      - ".github/workflows/reports-center-ci.yml"
+  pull_request:
+    branches:
+      - "feature/nexora-social-economy-mobile-overhaul"
+    paths:
+      - "reports-center/**"
+      - ".github/workflows/reports-center-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reports-center-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: reports-center
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund --package-lock=false
+      - name: Build static Reports Center
+        run: npm run build
+      - name: Verify build output
+        run: test -s dist/index.html
