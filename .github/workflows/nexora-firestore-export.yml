@@ -11,8 +11,6 @@ on:
         options:
           - scan
           - import
-  schedule:
-    - cron: "17 3 * * *"
 
 permissions:
   contents: read
