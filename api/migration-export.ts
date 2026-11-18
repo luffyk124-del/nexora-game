@@ -66,15 +66,17 @@ async function verifyActor(req: Req): Promise<TokenActor> {
   const { payload } = await jwtVerify(match[1], FIREBASE_KEYS, {
     issuer: FIREBASE_ISSUER, audience: PROJECT_ID, algorithms: ['RS256'],
   });
-  const firebase = payload.firebase && typeof payload.firebase === 'object'
-    ? payload.firebase as Record<string, unknown> : {};
-  if (typeof payload.sub !== 'string' || !payload.sub || payload.email_verified !== true || firebase.sign_in_provider === 'anonymous') {
+  const claims = payload as Record<string, unknown>;
+  const firebase = claims.firebase && typeof claims.firebase === 'object'
+    ? claims.firebase as Record<string, unknown> : {};
+  const uid = typeof claims.sub === 'string' ? claims.sub : '';
+  if (!uid || claims.email_verified !== true || firebase.sign_in_provider === 'anonymous') {
     throw new ExportError(403, 'VERIFIED_OWNER_REQUIRED');
   }
   return {
-    uid: payload.sub,
-    email: typeof payload.email === 'string' ? payload.email : null,
-    claims: payload as Record<string, unknown>,
+    uid,
+    email: typeof claims.email === 'string' ? claims.email : null,
+    claims,
   };
 }
 
