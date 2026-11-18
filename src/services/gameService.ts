@@ -557,6 +557,21 @@ export async function createMarketListing(
     throw new Error('INVALID_LISTING_PARAMS');
   }
 
+  if (import.meta.env.VITE_NEXORA_SUPABASE_MARKET === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create_market_listing', itemId, quantity: qty, unitPrice, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'MARKET_LISTING_FAILED');
+    return;
+  }
+
   const invDocId = `${uid}_${itemId}`;
   const listingId = genId('lst');
 
@@ -602,6 +617,21 @@ export async function buyMarketListing(
 ): Promise<void> {
   const buyQty = Math.floor(buyQtyRaw);
   if (buyQty < 1) throw new Error('INVALID_QUANTITY');
+
+  if (import.meta.env.VITE_NEXORA_SUPABASE_MARKET === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== buyerUid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'buy_market_listing', listingId, quantity: buyQty, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'MARKET_PURCHASE_FAILED');
+    return;
+  }
 
   const txId = genId('tx');
   const orderId = `ord_${txId}`;
