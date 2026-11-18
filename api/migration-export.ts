@@ -131,6 +131,9 @@ export default async function handler(req: Req, res: Res): Promise<void> {
     const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body as Data : {};
     const collection = typeof body.collection === 'string' ? body.collection : '';
     if (!EXPORT_COLLECTIONS.has(collection)) throw new ExportError(400, 'COLLECTION_NOT_ALLOWED');
+    const parentId = typeof body.parentId === 'string' ? body.parentId : '';
+    if (collection === 'conversation_messages' && !/^[A-Za-z0-9_-]{1,256}$/.test(parentId)) throw new ExportError(400, 'PARENT_ID_REQUIRED');
+    if (collection !== 'conversation_messages' && parentId) throw new ExportError(400, 'UNEXPECTED_PARENT_ID');
 
     const pageSize = typeof body.pageSize === 'number' && Number.isInteger(body.pageSize)
       ? Math.max(1, Math.min(100, body.pageSize)) : 100;
@@ -148,6 +151,7 @@ export default async function handler(req: Req, res: Res): Promise<void> {
     res.status(200).json({
       ok: true,
       collection,
+      parentId: parentId || null,
       count: documents.length,
       documents,
       nextPageToken: result.nextPageToken ?? null,
