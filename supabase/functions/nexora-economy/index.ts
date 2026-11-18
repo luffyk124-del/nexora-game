@@ -88,6 +88,59 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  if (action === "fetch_leaderboards") {
+    const db = admin.schema("nexora");
+    const [players, companies, organizations] = await Promise.all([
+      db.from("player_profiles").select("user_id,username,username_lower,avatar_id,title,level,xp,reputation,influence,skill_points,skills,stats,org_id,created_at,updated_at").gte("influence", 0).order("influence", { ascending: false }).limit(20),
+      db.from("companies").select("*").gte("total_revenue", 0).order("total_revenue", { ascending: false }).limit(20),
+      db.from("organizations").select("*").gte("reputation", 0).order("reputation", { ascending: false }).limit(20),
+    ]);
+    const failed = [players.error, companies.error, organizations.error].find(Boolean);
+    if (failed) {
+      console.error("NEXORA leaderboard query failed:", failed.message);
+      return json({ error: "LEADERBOARD_READ_FAILED" }, 500, origin);
+    }
+    const normalize = (row: Record<string, unknown>) => {
+      const output: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(row)) output[key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())] = value;
+      if ("userId" in output) { output.uid = output.userId; delete output.userId; }
+      return output;
+    };
+    return json({
+      players: (players.data ?? []).map((row) => normalize(row as Record<string, unknown>)),
+      companies: (companies.data ?? []).map((row) => normalize(row as Record<string, unknown>)),
+      organizations: (organizations.data ?? []).map((row) => normalize(row as Record<string, unknown>)),
+    }, 200, origin);
+  }
+
+  if (action === "fetch_org_pending_requests") {
+    const orgId = typeof body.orgId === "string" ? body.orgId.trim() : "";
+    if (!orgId || orgId.length > 128) return json({ error: "INVALID_ORG" }, 400, origin);
+    const db = admin.schema("nexora");
+    const { data: membership, error: memberError } = await db.from("organization_members")
+      .select("role,permissions").eq("org_id", orgId).eq("user_id", uid).maybeSingle();
+    if (memberError) {
+      console.error("NEXORA organization membership check failed:", memberError.message);
+      return json({ error: "ORG_REQUESTS_READ_FAILED" }, 500, origin);
+    }
+    const permissions = Array.isArray(membership?.permissions) ? membership.permissions : [];
+    if (!membership || (membership.role !== "leader" && !permissions.includes("manage_members"))) {
+      return json({ error: "FORBIDDEN" }, 403, origin);
+    }
+    const { data, error } = await db.from("organization_requests").select("*")
+      .eq("org_id", orgId).eq("status", "pending").order("created_at", { ascending: true }).limit(100);
+    if (error) {
+      console.error("NEXORA organization requests query failed:", error.message);
+      return json({ error: "ORG_REQUESTS_READ_FAILED" }, 500, origin);
+    }
+    return json({ requests: (data ?? []).map((row) => {
+      const output: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(row)) output[key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())] = value;
+      if ("userId" in output) { output.uid = output.userId; delete output.userId; }
+      return output;
+    }) }, 200, origin);
+  }
+
   if (action === "claim_eligible_achievements") {
     const { data, error } = await admin.schema("nexora").rpc("claim_eligible_achievements", { p_user_id: uid });
     if (error) {
