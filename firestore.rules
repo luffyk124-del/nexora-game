@@ -100,7 +100,7 @@ service cloud.firestore {
         && data.usernameLower is string && data.usernameLower.size() >= 3 && data.usernameLower.size() <= 24
         && data.avatarId is string && data.avatarId.size() >= 1 && data.avatarId.size() <= 64
         && data.title is string && data.title.size() >= 1 && data.title.size() <= 64
-        && data.level is int && data.level >= 1 && data.level <= 1000
+        && data.level is int && data.level >= 1 && data.level <= 100
         && data.xp is int && data.xp >= 0
         && data.reputation is int && data.reputation >= 0
         && data.influence is int && data.influence >= 0
@@ -149,7 +149,8 @@ service cloud.firestore {
           'transfer', 'market_buy', 'mission_reward', 'daily_stipend',
           'company_create', 'company_upgrade', 'company_collect', 'company_vault_upgrade',
           'property_buy', 'property_upgrade', 'property_collect',
-          'manufacturing', 'org_create', 'org_deposit', 'org_withdraw', 'contract_deal'
+          'manufacturing', 'org_create', 'org_deposit', 'org_withdraw', 'contract_deal',
+          'company_auction_bid', 'company_auction_refund', 'company_auction_sale'
         ]
         && isValidId(data.referenceId)
         && data.description is string && data.description.size() >= 1 && data.description.size() <= 240
@@ -301,7 +302,7 @@ service cloud.firestore {
 
     function isValidCompany(data) {
       return data.keys().hasAll(['id', 'ownerUid', 'ownerName', 'name', 'sector', 'level', 'capital', 'baseRevenuePerHour', 'expensePerHour', 'totalRevenue', 'lastCollectedAt', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'ownerUid', 'ownerName', 'name', 'sector', 'level', 'capital', 'employeesCount', 'baseRevenuePerHour', 'expensePerHour', 'totalRevenue', 'vaultLevel', 'vaultBalance', 'levelUpgradeStartedAt', 'levelUpgradeEndsAt', 'levelUpgradeTargetLevel', 'levelUpgradeCost', 'vaultUpgradeStartedAt', 'vaultUpgradeEndsAt', 'vaultUpgradeTargetLevel', 'lastCollectedAt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerUid', 'ownerName', 'name', 'sector', 'level', 'capital', 'employeesCount', 'baseRevenuePerHour', 'expensePerHour', 'totalRevenue', 'vaultLevel', 'vaultBalance', 'levelUpgradeStartedAt', 'levelUpgradeEndsAt', 'levelUpgradeTargetLevel', 'levelUpgradeCost', 'vaultUpgradeStartedAt', 'vaultUpgradeEndsAt', 'vaultUpgradeTargetLevel', 'auctionId', 'auctionEndsAt', 'auctionStatus', 'lastCollectedAt', 'createdAt', 'updatedAt'])
         && isValidId(data.id)
         && isValidId(data.ownerUid)
         && data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 64
@@ -312,10 +313,13 @@ service cloud.firestore {
         && data.baseRevenuePerHour is number && data.baseRevenuePerHour >= 10 && data.baseRevenuePerHour <= 50000
         && data.expensePerHour is number && data.expensePerHour >= 0
         && data.totalRevenue is number && data.totalRevenue >= 0
-        && (!('vaultLevel' in data) || (data.vaultLevel is int && data.vaultLevel >= 1 && data.vaultLevel <= 5 && 'vaultBalance' in data && data.vaultBalance is number && data.vaultBalance >= 0 && data.vaultBalance <= (data.vaultLevel == 1 ? 3500 : data.vaultLevel == 2 ? 7000 : data.vaultLevel == 3 ? 14000 : data.vaultLevel == 4 ? 25000 : 40000)))
+        && (!('vaultLevel' in data) || (data.vaultLevel is int && data.vaultLevel >= 1 && data.vaultLevel <= 25 && 'vaultBalance' in data && data.vaultBalance is number && data.vaultBalance >= 0 && data.vaultBalance <= 1000000000))
         && (!('vaultBalance' in data) || 'vaultLevel' in data)
         && (!('levelUpgradeEndsAt' in data) || (data.levelUpgradeEndsAt is number && data.levelUpgradeTargetLevel is int && data.levelUpgradeTargetLevel >= 2 && data.levelUpgradeTargetLevel <= 100 && data.levelUpgradeCost is number))
-        && (!('vaultUpgradeEndsAt' in data) || (data.vaultUpgradeEndsAt is number && data.vaultUpgradeTargetLevel is int && data.vaultUpgradeTargetLevel >= 2 && data.vaultUpgradeTargetLevel <= 5));
+        && (!('vaultUpgradeEndsAt' in data) || (data.vaultUpgradeEndsAt is number && data.vaultUpgradeTargetLevel is int && data.vaultUpgradeTargetLevel >= 2 && data.vaultUpgradeTargetLevel <= 25))
+        && (!('auctionId' in data) || (data.auctionId is string && data.auctionId.size() <= 128))
+        && (!('auctionEndsAt' in data) || data.auctionEndsAt is number)
+        && (!('auctionStatus' in data) || data.auctionStatus == 'active');
     }
 
     function isCanonicalCompanyCreate(data, txAmount) {
@@ -369,7 +373,7 @@ service cloud.firestore {
 
     function isValidOrganization(data) {
       return data.keys().hasAll(['id', 'name', 'tag', 'description', 'leaderUid', 'leaderName', 'treasuryBalance', 'memberCount', 'reputation', 'level', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'name', 'tag', 'description', 'leaderUid', 'leaderName', 'treasuryBalance', 'memberCount', 'reputation', 'level', 'memberCapacity', 'research', 'upgradeStartedAt', 'upgradeEndsAt', 'upgradeTargetLevel', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'name', 'tag', 'description', 'leaderUid', 'leaderName', 'treasuryBalance', 'memberCount', 'reputation', 'level', 'memberCapacity', 'joinMode', 'research', 'upgradeStartedAt', 'upgradeEndsAt', 'upgradeTargetLevel', 'createdAt', 'updatedAt'])
         && isValidId(data.id)
         && data.name is string && data.name.size() >= 3 && data.name.size() <= 40
         && data.tag is string && data.tag.size() >= 2 && data.tag.size() <= 6
@@ -381,6 +385,7 @@ service cloud.firestore {
         && data.reputation is int && data.reputation >= 0
         && data.level is int && data.level >= 1 && data.level <= 50
         && (!('memberCapacity' in data) || (data.memberCapacity is int && data.memberCapacity >= 20 && data.memberCapacity <= 80))
+        && (!('joinMode' in data) || data.joinMode in ['open', 'request', 'closed'])
         && (!('research' in data) || isValidOrgResearch(data.research))
         && (!('upgradeStartedAt' in data) || data.upgradeStartedAt is number)
         && (!('upgradeEndsAt' in data) || data.upgradeEndsAt == null || data.upgradeEndsAt is number)
@@ -561,13 +566,19 @@ service cloud.firestore {
         && (
           // Action 1: Avatar change
           incoming().diff(existing()).affectedKeys().hasOnly(['avatarId', 'updatedAt']) ||
-          // Action 2: Organization membership sync / leave / kicked cleanup
+          // Action 2: Organization membership sync must be paired with a membership write.
           (
             incoming().diff(existing()).affectedKeys().hasOnly(['orgId', 'updatedAt']) &&
             (
-              incoming().orgId == null ||
-              exists(/databases/$(database)/documents/organization_members/$(incoming().orgId + '_' + uid)) ||
-              existsAfter(/databases/$(database)/documents/organization_members/$(incoming().orgId + '_' + uid))
+              (
+                incoming().orgId == null &&
+                existing().orgId != null &&
+                !existsAfter(/databases/$(database)/documents/organization_members/$(existing().orgId + '_' + uid))
+              ) ||
+              (
+                incoming().orgId is string &&
+                existsAfter(/databases/$(database)/documents/organization_members/$(incoming().orgId + '_' + uid))
+              )
             )
           ) ||
           // Action 3: Spend 1 skill point on skill tree (monotonically increasing, exact +1 delta)
@@ -588,6 +599,14 @@ service cloud.firestore {
             isProgressionTxType(newWalletTx(uid).type) &&
             incoming().skills == existing().skills &&
             isStatsStepValid(existing().stats, incoming().stats) &&
+            (
+              (newWalletTx(uid).type == 'company_create' &&
+                incoming().stats.companiesOwned == existing().stats.companiesOwned + 1 &&
+                incoming().stats.companiesOwned <= math.min(10, 1 + math.floor((existing().level - 1) * 9 / 49)) &&
+                getAfter(/databases/$(database)/documents/companies/$(newWalletTx(uid).referenceId)).data.ownerUid == uid) ||
+              (newWalletTx(uid).type != 'company_create' &&
+                incoming().stats.companiesOwned == existing().stats.companiesOwned)
+            ) &&
             incoming().xp >= existing().xp &&
             incoming().xp <= existing().xp + 350 &&
             incoming().level >= existing().level &&
@@ -828,6 +847,13 @@ false
       allow delete: if false;
     }
 
+    // Company auctions are server-managed; clients can only read active public listings.
+    match /company_auctions/{auctionId} {
+      allow get: if isSignedIn() && isValidId(auctionId);
+      allow list: if isSignedIn() && resource.data.status == 'active';
+      allow create, update, delete: if false;
+    }
+
     // Company Operational Logs
     match /company_logs/{logId} {
       allow get: if isSignedIn() && isValidId(logId) && (resource == null || existing().ownerUid == request.auth.uid);
@@ -980,11 +1006,13 @@ false
             incoming().role == 'member' &&
             getAfter(/databases/$(database)/documents/organizations/$(incoming().orgId)).data.memberCount == get(/databases/$(database)/documents/organizations/$(incoming().orgId)).data.memberCount + 1 &&
             getAfter(/databases/$(database)/documents/organizations/$(incoming().orgId)).data.memberCount <= (('memberCapacity' in get(/databases/$(database)/documents/organizations/$(incoming().orgId)).data) ? get(/databases/$(database)/documents/organizations/$(incoming().orgId)).data.memberCapacity : (get(/databases/$(database)/documents/organizations/$(incoming().orgId)).data.level >= 11 ? 70 : 20 + ((get(/databases/$(database)/documents/organizations/$(incoming().orgId)).data.level - 1) * 5))) &&
-            (
-              !exists(/databases/$(database)/documents/profiles/$(incoming().uid)) ||
-              !('orgId' in get(/databases/$(database)/documents/profiles/$(incoming().uid)).data) ||
-              get(/databases/$(database)/documents/profiles/$(incoming().uid)).data.orgId == null
-            )
+            existsAfter(/databases/$(database)/documents/organization_requests/$('join_' + incoming().orgId + '_' + incoming().uid)) &&
+            getAfter(/databases/$(database)/documents/organization_requests/$('join_' + incoming().orgId + '_' + incoming().uid)).data.orgId == incoming().orgId &&
+            getAfter(/databases/$(database)/documents/organization_requests/$('join_' + incoming().orgId + '_' + incoming().uid)).data.uid == incoming().uid &&
+            getAfter(/databases/$(database)/documents/organization_requests/$('join_' + incoming().orgId + '_' + incoming().uid)).data.status == 'approved' &&
+            exists(/databases/$(database)/documents/profiles/$(incoming().uid)) &&
+            (!('orgId' in get(/databases/$(database)/documents/profiles/$(incoming().uid)).data) ||
+              get(/databases/$(database)/documents/profiles/$(incoming().uid)).data.orgId == null)
           )
         );
       allow update: if isSignedIn() && isValidId(memberDocId)
@@ -1001,6 +1029,8 @@ false
         );
       allow delete: if isSignedIn() && isValidId(memberDocId)
         && existing().role != 'leader'
+        && existsAfter(/databases/$(database)/documents/profiles/$(existing().uid))
+        && getAfter(/databases/$(database)/documents/profiles/$(existing().uid)).data.orgId == null
         && (
           existing().uid == request.auth.uid ||
           (
@@ -1139,6 +1169,47 @@ false
         && incoming().uid == request.auth.uid
         && incoming().createdAt == request.time;
       allow update, delete: if false;
+    }
+
+    // Private direct-message conversations. Only the two participants can read.
+    match /conversations/{conversationId} {
+      allow get, list: if isSignedIn()
+        && resource.data.participants is list
+        && request.auth.uid in resource.data.participants;
+      allow create, update, delete: if false;
+
+      match /messages/{messageId} {
+        allow get, list: if isSignedIn()
+          && exists(/databases/$(database)/documents/conversations/$(conversationId))
+          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
+        allow create, update, delete: if false;
+      }
+    }
+
+    // Public global chat is read-only to clients; Cloud Functions validate and publish messages.
+    match /global_chat_messages/{messageId} {
+      allow get, list: if isSignedIn();
+      allow create, update, delete: if false;
+    }
+
+    // Player blocks and reports are private server-managed safety records.
+    match /user_blocks/{blockId} {
+      allow read, write: if false;
+    }
+
+    match /player_reports/{reportId} {
+      allow read, write: if false;
+    }
+
+    // Organization invitations are visible only to their target player.
+    match /organization_invites/{inviteId} {
+      allow get, list: if isSignedIn() && resource.data.targetUid == request.auth.uid;
+      allow create, update, delete: if false;
+    }
+
+    // Chat rate limits and escrow metadata are server-only.
+    match /chat_rate_limits/{rateId} {
+      allow read, write: if false;
     }
 
     // Read-only Diagnostics Owner Registry (Managed solely via Firebase Admin SDK / Console)

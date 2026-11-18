@@ -16,12 +16,14 @@ import {
   PROPERTY_SPECS,
 } from '../../data/catalog';
 import { useTranslations } from '../../i18n/translations';
+import { AuctionHubView } from './AuctionHubView';
 import {
   calculateAccruedPayout,
   calculateCompanyHourlyNet,
   calculateManufacturingCost,
   calculatePropertyHourlyNet,
   COMPANY_MAX_LEVEL,
+  getCompanyOwnershipLimit,
   COMPANY_VAULT_MAX_LEVEL,
   COMPANY_VAULT_UPGRADES,
   calculateCompanyVaultBalance,
@@ -46,6 +48,7 @@ import {
 import type {
   BusinessSubTab,
   Company,
+  CompanyAuction,
   CompanyLog,
   CompanySector,
   InventoryItem,
@@ -61,6 +64,7 @@ interface BusinessHubViewProps {
   profile: PlayerProfile;
   wallet: Wallet | null;
   companies: Company[];
+  companyAuctions: CompanyAuction[];
   companyLogs: CompanyLog[];
   properties: PropertyAsset[];
   inventory: InventoryItem[];
@@ -74,6 +78,7 @@ export function BusinessHubView({
   profile,
   wallet,
   companies,
+  companyAuctions,
   companyLogs,
   properties,
   inventory,
@@ -134,10 +139,7 @@ export function BusinessHubView({
     return sum + netHourly;
   }, 0);
 
-  const totalPropNetHr = properties.reduce((sum, p) => {
-    const { netHourly } = calculatePropertyHourlyNet(p, profile.skills.negotiation || 0);
-    return sum + netHourly;
-  }, 0);
+  const totalPropNetHr = 0; // Property operations have been retired from the active business UI.
 
   async function handleFoundCompany(e: React.FormEvent) {
     e.preventDefault();
@@ -152,7 +154,11 @@ export function BusinessHubView({
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
       showToast(
-        code === 'INSUFFICIENT_FUNDS'
+        code === 'COMPANY_OWNERSHIP_LIMIT'
+          ? language === 'ar'
+            ? `وصلت إلى حد الشركات المسموح به (${companies.length}/${getCompanyOwnershipLimit(profile.level)}).`
+            : `Company ownership limit reached (${companies.length}/${getCompanyOwnershipLimit(profile.level)}).`
+          : code === 'INSUFFICIENT_FUNDS'
           ? language === 'ar'
             ? 'رصيدك غير كافٍ.'
             : 'Insufficient funds.'
@@ -367,8 +373,8 @@ export function BusinessHubView({
 
   const subTabs: { id: BusinessSubTab; label: string }[] = [
     { id: 'companies', label: t.subCompanies },
+    { id: 'auctions', label: language === 'ar' ? 'المزادات' : 'Auctions' },
     { id: 'manufacturing', label: t.subManufacturing },
-    { id: 'properties', label: t.subProperties },
     { id: 'inventory', label: t.subInventory },
     { id: 'financials', label: t.subFinancials },
   ];
@@ -451,11 +457,11 @@ export function BusinessHubView({
 
             <button
               type="submit"
-              disabled={busyKey === 'found_company'}
+              disabled={busyKey === 'found_company' || companies.length >= getCompanyOwnershipLimit(profile.level)}
               className="w-full min-h-[44px] px-4 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
             >
               <Plus className="w-4 h-4" />
-              <span>{busyKey === 'found_company' ? '...' : t.foundCompany}</span>
+              <span>{busyKey === 'found_company' ? '...' : companies.length >= getCompanyOwnershipLimit(profile.level) ? (language === 'ar' ? 'اكتمل حد الشركات' : 'Company limit reached') : t.foundCompany}</span>
             </button>
           </form>
 
@@ -485,7 +491,7 @@ export function BusinessHubView({
                 const { netHourly, grossHourly, expenseHourly, sectorEventMultiplier } = breakdown;
                 const accrued = calculateCompanyVaultBalance(c, netHourly, nowMs);
                 const vaultLevel = getCompanyVaultLevel(c);
-                const vaultCapacity = getCompanyVaultCapacity(vaultLevel);
+                const vaultCapacity = getCompanyVaultCapacity(vaultLevel, netHourly);
                 const vaultUpgrade = COMPANY_VAULT_UPGRADES[vaultLevel - 1];
                 const vaultMaterialsAvailable = vaultUpgrade
                   ? Object.entries(vaultUpgrade.materials).every(([itemId, qty]) => (invMap.get(itemId) || 0) >= qty)
@@ -565,7 +571,7 @@ export function BusinessHubView({
                       <div className="flex items-center justify-between gap-2">
                         <div>
                           <p className="text-sm font-bold text-cyan-200">{language === 'ar' ? 'خزينة الأرباح' : 'Profit Vault'}</p>
-                          <p className="text-[11px] text-[#9299A6]">{language === 'ar' ? `المستوى ${vaultLevel} من ${COMPANY_VAULT_MAX_LEVEL}` : `Level ${vaultLevel} of ${COMPANY_VAULT_MAX_LEVEL}`}</p>
+                          <p className="text-[11px] text-[#9299A6]">{language === 'ar' ? `المستوى ${vaultLevel} من 25` : `Level ${vaultLevel} of 25`}</p>
                         </div>
                         <p className="font-mono-num text-sm font-bold text-[#F4F5F7]">
                           ${accrued.toLocaleString()} / ${vaultCapacity.toLocaleString()}
@@ -670,6 +676,16 @@ export function BusinessHubView({
       )}
 
       {/* 2. MANUFACTURING */}
+      {subTab === 'auctions' && (
+        <AuctionHubView
+          companies={companies}
+          auctions={companyAuctions}
+          profile={profile}
+          wallet={wallet}
+          language={language}
+        />
+      )}
+
       {subTab === 'manufacturing' && (
         <div className="space-y-4">
           <div className="bg-[#141821] border border-white/8 rounded-2xl p-4 space-y-3">

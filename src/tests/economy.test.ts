@@ -49,8 +49,10 @@ const sampleEvents: WorldEvent[] = [
 describe('Company Profit Vault', () => {
   const hour = 3_600_000;
 
-  it('uses independent configured capacities for all five levels', () => {
-    expect([1, 2, 3, 4, 5].map(getCompanyVaultCapacity)).toEqual([3500, 7000, 14000, 25000, 40000]);
+  it('scales vault capacity to hourly income and reaches four hours at level 25', () => {
+    expect(getCompanyVaultCapacity(1, 1000)).toBe(3500);
+    expect(getCompanyVaultCapacity(25, 1000)).toBe(4000);
+    expect(getCompanyVaultCapacity(25, 25_000)).toBe(100_000);
   });
 
   it('defaults legacy companies to vault level 1', () => {
@@ -77,7 +79,7 @@ describe('Company Profit Vault', () => {
   it('preserves the stored balance when no additional time has elapsed', () => {
     expect(calculateCompanyVaultBalance(
       { vaultLevel: 3, vaultBalance: 8250, lastCollectedAt: hour * 5 },
-      250,
+      20_000,
       hour * 5
     )).toBe(8250);
   });
@@ -97,7 +99,7 @@ describe('Company Profit Vault', () => {
 
   it('clamps invalid and out-of-range vault levels safely', () => {
     expect(getCompanyVaultLevel({ vaultLevel: Number.NaN })).toBe(1);
-    expect(getCompanyVaultLevel({ vaultLevel: 99 })).toBe(5);
+    expect(getCompanyVaultLevel({ vaultLevel: 99 })).toBe(25);
     expect(getCompanyVaultCapacity(-3)).toBe(3500);
     expect(getCompanyVaultCapacity(Number.NaN)).toBe(3500);
   });

@@ -64,7 +64,7 @@ export function calculateLevelProgress(totalXp: number): {
 } {
   let level = 1;
   let remaining = Math.max(0, Math.floor(totalXp));
-  while (level < 200) {
+  while (level < 100) {
     const step = xpStepForLevel(level);
     if (remaining < step) {
       return {
@@ -77,7 +77,7 @@ export function calculateLevelProgress(totalXp: number): {
     remaining -= step;
     level += 1;
   }
-  return { level: 200, currentLevelXp: 0, nextLevelXp: 1, progressPercent: 100 };
+  return { level: 100, currentLevelXp: 0, nextLevelXp: 1, progressPercent: 100 };
 }
 
 /**
@@ -454,14 +454,18 @@ export function calculateAccruedPayout(
   return Math.max(0, Math.floor(netPerHour * cappedHours));
 }
 
-export const COMPANY_VAULT_CAPACITIES = [3500, 7000, 14000, 25000, 40000] as const;
-export const COMPANY_VAULT_MAX_LEVEL = COMPANY_VAULT_CAPACITIES.length;
-export const COMPANY_VAULT_UPGRADES = [
-  { fromLevel: 1, cost: 1500, materials: { copper_wire: 20, crude_alloy: 10 } },
-  { fromLevel: 2, cost: 4000, materials: { silicon_ore: 20, energy_cells: 15 } },
-  { fromLevel: 3, cost: 10000, materials: { carbon_fiber: 15, precision_frame: 10 } },
-  { fromLevel: 4, cost: 25000, materials: { rare_minerals: 20, quantum_server: 5 } },
+export const COMPANY_VAULT_MAX_LEVEL = 25;
+const VAULT_MATERIAL_SETS = [
+  { copper_wire: 20, crude_alloy: 10 },
+  { silicon_ore: 20, energy_cells: 15 },
+  { carbon_fiber: 15, precision_frame: 10 },
+  { rare_minerals: 20, quantum_server: 5 },
 ] as const;
+export const COMPANY_VAULT_UPGRADES = Array.from({ length: COMPANY_VAULT_MAX_LEVEL - 1 }, (_, index) => ({
+  fromLevel: index + 1,
+  cost: Math.round(1_500 * Math.pow(1.32, index)),
+  materials: Object.fromEntries(Object.entries(VAULT_MATERIAL_SETS[index % VAULT_MATERIAL_SETS.length]).map(([itemId, qty]) => [itemId, Math.round(qty * (1 + index * 0.12))])),
+}));
 
 export function getCompanyVaultLevel(company: { vaultLevel?: number }): number {
   const rawLevel = company.vaultLevel;
@@ -469,10 +473,10 @@ export function getCompanyVaultLevel(company: { vaultLevel?: number }): number {
   return Math.max(1, Math.min(COMPANY_VAULT_MAX_LEVEL, Math.floor(rawLevel)));
 }
 
-export function getCompanyVaultCapacity(level: number): number {
-  const safeLevel = Number.isFinite(level) ? Math.floor(level) : 1;
-  const index = Math.max(0, Math.min(COMPANY_VAULT_MAX_LEVEL - 1, safeLevel - 1));
-  return COMPANY_VAULT_CAPACITIES[index];
+export function getCompanyVaultCapacity(level: number, netPerHour = 0): number {
+  const safeLevel = Math.max(1, Math.min(COMPANY_VAULT_MAX_LEVEL, Math.floor(Number.isFinite(level) ? level : 1)));
+  const fourHourTarget = Math.max(0, Number.isFinite(netPerHour) ? netPerHour : 0) * 4;
+  return Math.max(3_500, Math.floor((fourHourTarget * safeLevel) / COMPANY_VAULT_MAX_LEVEL));
 }
 
 export function calculateCompanyVaultBalance(
@@ -481,7 +485,7 @@ export function calculateCompanyVaultBalance(
   nowMs: number
 ): number {
   const level = getCompanyVaultLevel(company);
-  const capacity = getCompanyVaultCapacity(level);
+  const capacity = getCompanyVaultCapacity(level, netPerHour);
   const safeNowMs = Number.isFinite(nowMs) ? nowMs : 0;
   const stored = typeof company.vaultBalance === 'number' && Number.isFinite(company.vaultBalance)
     ? Math.max(0, company.vaultBalance)
@@ -494,6 +498,12 @@ export function calculateCompanyVaultBalance(
 }
 
 export const COMPANY_MAX_LEVEL = 100;
+
+/** Progressive company ownership allowance: level 1 starts at one, level 50 reaches ten. */
+export function getCompanyOwnershipLimit(playerLevel: number): number {
+  const level = Math.max(1, Math.min(100, Math.floor(Number.isFinite(playerLevel) ? playerLevel : 1)));
+  return Math.min(10, 1 + Math.floor(((level - 1) * 9) / 49));
+}
 export const PROPERTY_MAX_LEVEL = 15;
 export const LISTING_MAX_QTY = 10_000;
 export const LISTING_MAX_PRICE = 1_000_000;

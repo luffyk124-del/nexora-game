@@ -20,6 +20,7 @@ import {
 } from '../services/gameService';
 import type {
   Company,
+  CompanyAuction,
   CompanyLog,
   GameNotification,
   InventoryItem,
@@ -51,6 +52,7 @@ export interface GameDataState {
   marketListings: MarketListing[];
   marketOrders: MarketOrder[];
   companies: Company[];
+  companyAuctions: CompanyAuction[];
   companyLogs: CompanyLog[];
   properties: PropertyAsset[];
   organizations: Organization[];
@@ -81,6 +83,26 @@ function sortByCreatedAtDesc<T extends { createdAt?: unknown }>(items: T[]): T[]
   );
 }
 
+const SUPABASE_PLAYER_WRITE_PATHS_READY =
+  import.meta.env.VITE_NEXORA_SUPABASE_PLAYER_READS === 'true' &&
+  [
+    import.meta.env.VITE_NEXORA_SUPABASE_ACCOUNT,
+    import.meta.env.VITE_NEXORA_SUPABASE_DAILY_STIPEND,
+    import.meta.env.VITE_NEXORA_SUPABASE_SKILLS,
+    import.meta.env.VITE_NEXORA_SUPABASE_TRANSFERS,
+    import.meta.env.VITE_NEXORA_SUPABASE_MARKET,
+    import.meta.env.VITE_NEXORA_SUPABASE_MANUFACTURING,
+    import.meta.env.VITE_NEXORA_SUPABASE_CONTRACTS,
+    import.meta.env.VITE_NEXORA_SUPABASE_COMPANY_AUCTIONS,
+    import.meta.env.VITE_NEXORA_SUPABASE_COMPANIES,
+    import.meta.env.VITE_NEXORA_SUPABASE_PROPERTIES,
+    import.meta.env.VITE_NEXORA_SUPABASE_MISSIONS,
+    import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS,
+    import.meta.env.VITE_NEXORA_SUPABASE_ORG_TREASURY,
+    import.meta.env.VITE_NEXORA_SUPABASE_PROFILE,
+    import.meta.env.VITE_NEXORA_SUPABASE_ACHIEVEMENTS,
+  ].every((value) => value === 'true');
+
 export function useGameData(): GameDataState {
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -93,6 +115,7 @@ export function useGameData(): GameDataState {
   const [marketListings, setMarketListings] = useState<MarketListing[]>([]);
   const [marketOrders, setMarketOrders] = useState<MarketOrder[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [companyAuctions, setCompanyAuctions] = useState<CompanyAuction[]>([]);
   const [companyLogs, setCompanyLogs] = useState<CompanyLog[]>([]);
   const [properties, setProperties] = useState<PropertyAsset[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -159,6 +182,7 @@ export function useGameData(): GameDataState {
     setMarketListings([]);
     setMarketOrders([]);
     setCompanies([]);
+    setCompanyAuctions([]);
     setCompanyLogs([]);
     setProperties([]);
     setOrganizations([]);
@@ -214,6 +238,115 @@ export function useGameData(): GameDataState {
     setOrgMemberLoaded(false);
 
     const uid = authUser.uid;
+
+    // Verified Supabase read path. Firebase Auth remains the identity provider;
+    // anonymous guest sessions continue using the legacy Firebase data path.
+    if (SUPABASE_PLAYER_WRITE_PATHS_READY && !authUser.isAnonymous) {
+      let active = true;
+      let inFlight = false;
+      const refreshPlayer = async () => {
+        if (inFlight || !active) return;
+        inFlight = true;
+        try {
+          const idToken = await authUser.getIdToken();
+          const response = await fetch(
+            'https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-player-data',
+            {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+              body: '{}',
+              cache: 'no-store',
+            }
+          );
+          const payload = await response.json();
+          if (!response.ok || !payload?.ok || !payload?.player) {
+            throw new Error(payload?.error || 'SUPABASE_PLAYER_READ_FAILED');
+          }
+          if (!active) return;
+          const player = payload.player as Record<string, unknown>;
+          setProfile((player.profile ?? null) as PlayerProfile | null);
+          setProfileLoading(false);
+          setUserPrivate((player.privateData ?? null) as UserPrivate | null);
+          const privateData = player.privateData as UserPrivate | null;
+          if (privateData?.language === 'ar' || privateData?.language === 'en') {
+            setLanguageLocal(privateData.language);
+          }
+          setWallet((player.wallet ?? null) as Wallet | null);
+          setInventory((player.inventory ?? []) as InventoryItem[]);
+          setTransactions((player.transactions ?? []) as TransactionRecord[]);
+          setMarketListings((player.marketListings ?? []) as MarketListing[]);
+          setMarketOrders((player.marketOrders ?? []) as MarketOrder[]);
+          setCompanies((player.companies ?? []) as Company[]);
+          setCompanyAuctions((player.companyAuctions ?? []) as CompanyAuction[]);
+          setCompanyLogs((player.companyLogs ?? []) as CompanyLog[]);
+          setProperties((player.properties ?? []) as PropertyAsset[]);
+          setOrganizations((player.organizations ?? []) as Organization[]);
+          setMyOrgMember((player.myOrgMember ?? null) as OrganizationMember | null);
+          setOrgMemberLoaded(true);
+          setOrgMembers((player.orgMembers ?? []) as OrganizationMember[]);
+          setOrgRequests((player.orgRequests ?? []) as OrganizationRequest[]);
+          setMyPendingOrgIds(new Set((player.myPendingOrgIds ?? []) as string[]));
+          setOrgTransactions((player.orgTransactions ?? []) as OrganizationTransaction[]);
+          setClaimedMissions((player.claimedMissions ?? []) as PlayerMissionClaim[]);
+          setClaimedDailyToday(player.claimedDailyToday === true);
+          setClaimedContractsToday(new Set((player.claimedContractsToday ?? []) as string[]));
+          setUnlockedAchievements(new Set((player.unlockedAchievements ?? []) as string[]));
+          setNotifications((player.notifications ?? []) as GameNotification[]);
+          setWorldEvents((player.worldEvents ?? []) as WorldEvent[]);
+        } catch (error) {
+          console.warn('NEXORA Supabase player read failed:', error);
+          setProfileLoading(false);
+        } finally {
+          inFlight = false;
+        }
+      };
+      void refreshPlayer();
+      const timer = window.setInterval(() => { void refreshPlayer(); }, 5000);
+      return () => {
+        active = false;
+        window.clearInterval(timer);
+      };
+    }
+
+    // Shadow-read only: Supabase is queried for parity diagnostics while Firebase remains authoritative.
+    // Do not switch UI state to Supabase until all game mutations have migrated to server-side functions.
+    if (import.meta.env.VITE_NEXORA_SUPABASE_SHADOW_READS === 'true' && !SUPABASE_PLAYER_WRITE_PATHS_READY && !authUser.isAnonymous) {
+      void (async () => {
+        try {
+          const idToken = await authUser.getIdToken();
+          const response = await fetch(
+            'https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-player-data',
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${idToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: '{}',
+              cache: 'no-store',
+            }
+          );
+          const payload = await response.json();
+          if (!response.ok || !payload?.ok || !payload?.player) {
+            throw new Error(payload?.error || 'SUPABASE_SHADOW_READ_FAILED');
+          }
+          const player = payload.player;
+          console.info('NEXORA Supabase shadow-read counts', {
+            hasProfile: Boolean(player.profile),
+            hasWallet: Boolean(player.wallet),
+            inventory: player.inventory?.length ?? 0,
+            transactions: player.transactions?.length ?? 0,
+            listings: player.marketListings?.length ?? 0,
+            companies: player.companies?.length ?? 0,
+            organizations: player.organizations?.length ?? 0,
+            notifications: player.notifications?.length ?? 0,
+          });
+        } catch (error) {
+          console.warn('NEXORA Supabase shadow-read check failed:', error);
+        }
+      })();
+    }
+
     if (bootstrappedUidRef.current !== uid) {
       bootstrappedUidRef.current = uid;
       ensureBootstrapWorldData();
@@ -268,7 +401,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'inventory'), where('uid', '==', uid)),
+        query(collection(db, 'inventory'), where('uid', '==', uid), limit(200)),
         (snap) => {
           setInventory(snap.docs.map((d) => d.data() as InventoryItem));
         },
@@ -278,7 +411,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'transactions'), where('fromUid', '==', uid), limit(30)),
+        query(collection(db, 'transactions'), where('fromUid', '==', uid), orderBy('createdAt', 'desc'), limit(30)),
         (fromSnap) => {
           const sent = fromSnap.docs.map((d) => d.data() as TransactionRecord);
           setTransactions((prev) => {
@@ -294,7 +427,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'transactions'), where('toUid', '==', uid), limit(30)),
+        query(collection(db, 'transactions'), where('toUid', '==', uid), orderBy('createdAt', 'desc'), limit(30)),
         (toSnap) => {
           const received = toSnap.docs.map((d) => d.data() as TransactionRecord);
           setTransactions((prev) => {
@@ -310,7 +443,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'market_listings'), where('status', '==', 'active'), limit(100)),
+        query(collection(db, 'market_listings'), where('status', '==', 'active'), orderBy('createdAt', 'desc'), limit(100)),
         (snap) => {
           setMarketListings(snap.docs.map((d) => d.data() as MarketListing));
         },
@@ -320,7 +453,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'market_orders'), where('buyerUid', '==', uid), limit(25)),
+        query(collection(db, 'market_orders'), where('buyerUid', '==', uid), orderBy('createdAt', 'desc'), limit(25)),
         (snap) => {
           setMarketOrders(sortByCreatedAtDesc(snap.docs.map((d) => d.data() as MarketOrder)));
         },
@@ -330,7 +463,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'companies'), where('ownerUid', '==', uid)),
+        query(collection(db, 'companies'), where('ownerUid', '==', uid), limit(50)),
         (snap) => {
           setCompanies(snap.docs.map((d) => d.data() as Company));
         },
@@ -340,7 +473,17 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'company_logs'), where('ownerUid', '==', uid), limit(25)),
+        query(collection(db, 'company_auctions'), where('status', '==', 'active'), limit(100)),
+        (snap) => {
+          setCompanyAuctions(snap.docs.map((d) => d.data() as CompanyAuction));
+        },
+        onSnapErr('company_auctions')
+      )
+    );
+
+    unsubs.push(
+      onSnapshot(
+        query(collection(db, 'company_logs'), where('ownerUid', '==', uid), orderBy('createdAt', 'desc'), limit(25)),
         (snap) => {
           setCompanyLogs(sortByCreatedAtDesc(snap.docs.map((d) => d.data() as CompanyLog)));
         },
@@ -350,7 +493,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'properties'), where('ownerUid', '==', uid)),
+        query(collection(db, 'properties'), where('ownerUid', '==', uid), limit(100)),
         (snap) => {
           setProperties(snap.docs.map((d) => d.data() as PropertyAsset));
         },
@@ -385,7 +528,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'organization_requests'), where('uid', '==', uid)),
+        query(collection(db, 'organization_requests'), where('uid', '==', uid), limit(100)),
         (snap) => {
           const pendingIds = new Set<string>();
           snap.docs.forEach((d) => {
@@ -402,7 +545,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'player_missions'), where('uid', '==', uid)),
+        query(collection(db, 'player_missions'), where('uid', '==', uid), limit(200)),
         (snap) => {
           setClaimedMissions(snap.docs.map((d) => d.data() as PlayerMissionClaim));
         },
@@ -422,7 +565,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'contract_claims'), where('uid', '==', uid)),
+        query(collection(db, 'contract_claims'), where('uid', '==', uid), limit(200)),
         (snap) => {
           const ids = new Set<string>();
           snap.docs.forEach((d) => {
@@ -437,7 +580,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'player_achievements'), where('uid', '==', uid)),
+        query(collection(db, 'player_achievements'), where('uid', '==', uid), limit(200)),
         (snap) => {
           const ids = new Set<string>();
           snap.docs.forEach((d) => {
@@ -452,7 +595,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'notifications'), where('uid', '==', uid), limit(30)),
+        query(collection(db, 'notifications'), where('uid', '==', uid), orderBy('createdAt', 'desc'), limit(30)),
         (snap) => {
           setNotifications(sortByCreatedAtDesc(snap.docs.map((d) => d.data() as GameNotification)));
         },
@@ -462,7 +605,7 @@ export function useGameData(): GameDataState {
 
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'world_events'), where('active', '==', true)),
+        query(collection(db, 'world_events'), where('active', '==', true), limit(100)),
         (snap) => {
           setWorldEvents(snap.docs.map((d) => d.data() as WorldEvent));
         },
@@ -487,6 +630,7 @@ export function useGameData(): GameDataState {
 
   // Subscribe to current organization's members, requests, and treasury ledger
   useEffect(() => {
+    if (import.meta.env.VITE_NEXORA_SUPABASE_PLAYER_READS === 'true' && authUser && !authUser.isAnonymous) return;
     if (!authUser || !myOrgMember?.orgId) {
       setOrgMembers([]);
       setOrgRequests([]);
@@ -506,7 +650,7 @@ export function useGameData(): GameDataState {
     const canManageMembers = hasOrgPermission(myOrgMember, 'manage_members');
 
     const u1 = onSnapshot(
-      query(collection(db, 'organization_members'), where('orgId', '==', orgId)),
+      query(collection(db, 'organization_members'), where('orgId', '==', orgId), limit(200)),
       (snap) => {
         setOrgMembers(snap.docs.map((d) => d.data() as OrganizationMember));
       },
@@ -518,7 +662,8 @@ export function useGameData(): GameDataState {
           query(
             collection(db, 'organization_requests'),
             where('orgId', '==', orgId),
-            where('status', '==', 'pending')
+            where('status', '==', 'pending'),
+            orderBy('createdAt', 'asc')
           ),
           (snap) => {
             setOrgRequests(snap.docs.map((d) => d.data() as OrganizationRequest));
@@ -531,7 +676,7 @@ export function useGameData(): GameDataState {
         })();
 
     const u3 = onSnapshot(
-      query(collection(db, 'organization_transactions'), where('orgId', '==', orgId), limit(40)),
+      query(collection(db, 'organization_transactions'), where('orgId', '==', orgId), orderBy('createdAt', 'desc'), limit(40)),
       (snap) => {
         setOrgTransactions(
           sortByCreatedAtDesc(snap.docs.map((d) => d.data() as OrganizationTransaction))
@@ -549,6 +694,8 @@ export function useGameData(): GameDataState {
 
   // Auto-unlock eligible achievements (deduplicated per session)
   useEffect(() => {
+    if (import.meta.env.VITE_NEXORA_SUPABASE_READS === 'true') return;
+    if (import.meta.env.VITE_NEXORA_SUPABASE_PLAYER_READS === 'true' && import.meta.env.VITE_NEXORA_SUPABASE_ACHIEVEMENTS !== 'true') return;
     if (!authUser || !profile) return;
     const alreadySkipped = new Set([
       ...unlockedAchievements,
@@ -560,8 +707,13 @@ export function useGameData(): GameDataState {
     checkAndUnlockAchievements(authUser.uid, profile, alreadySkipped, pendingToAttempt).then(
       (unlockedNow) => {
         unlockedNow.forEach((id) => attemptedAchievementsRef.current.add(id));
+        if (unlockedNow.length > 0) {
+          setUnlockedAchievements((previous) => new Set([...previous, ...unlockedNow]));
+        }
       }
-    );
+    ).catch((error) => {
+      console.warn('NEXORA achievement unlock check failed:', error);
+    });
   }, [authUser, profile, unlockedAchievements]);
 
   const loginWithGoogle = useCallback(async () => {
@@ -619,6 +771,7 @@ export function useGameData(): GameDataState {
     marketListings,
     marketOrders,
     companies,
+    companyAuctions,
     companyLogs,
     properties,
     organizations,

@@ -1,3 +1,4 @@
+// Supabase migration switches remain opt-in; see docs/SUPABASE_MIGRATION_STATUS.md.
 import {
   collection,
   doc,
@@ -45,7 +46,8 @@ import {
   timestampToMs as parseTimestampMs,
   validateTransfer,
 } from '../lib/economy';
-import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { auth, db, functions, handleFirestoreError, OperationType } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
 import type {
   Company,
   CompanySector,
@@ -138,6 +140,19 @@ export async function ensureBootstrapWorldData(): Promise<void> {
 export async function isUsernameAvailable(username: string): Promise<boolean> {
   const clean = username.trim().toLowerCase();
   if (!isValidUsername(username)) return false;
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ACCOUNT === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'check_username', username: clean }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || typeof payload?.available !== 'boolean') throw new Error(payload?.error || 'USERNAME_CHECK_FAILED');
+    return payload.available;
+  }
   const snap = await getDoc(doc(db, 'usernames', clean));
   return !snap.exists();
 }
@@ -165,6 +180,22 @@ export async function createPlayerCharacter(
     finance: 0,
     leadership: 0,
   };
+
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ACCOUNT === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous || !currentUser.emailVerified) {
+      throw new Error('UNAUTHENTICATED');
+    }
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create_player_character', username: trimmed, avatarId, language }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'PLAYER_CREATION_FAILED');
+    return;
+  }
 
   try {
     await runTransaction(db, async (tx) => {
@@ -261,6 +292,32 @@ export async function claimDailyStipend(uid: string): Promise<number> {
   const txId = genId('tx');
   const notifId = genId('ntf');
 
+  // Opt-in migration route. Firebase remains the default until complete economy parity QA.
+  if (import.meta.env.VITE_NEXORA_SUPABASE_DAILY_STIPEND === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) {
+      throw new Error('UNAUTHENTICATED');
+    }
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch(
+      'https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ action: 'claim_daily_stipend' }),
+        cache: 'no-store',
+      }
+    );
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok || !Number.isFinite(payload.amount)) {
+      throw new Error(payload?.error || 'DAILY_STIPEND_FAILED');
+    }
+    return Number(payload.amount);
+  }
+
   try {
     let credited = 0;
     await runTransaction(db, async (tx) => {
@@ -338,6 +395,31 @@ export async function upgradeSkill(uid: string, skillKey: SkillKey): Promise<voi
   const def = SKILL_DEFINITIONS.find((s) => s.key === skillKey);
   if (!def) throw new Error('INVALID_SKILL');
 
+  if (import.meta.env.VITE_NEXORA_SUPABASE_SKILLS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) {
+      throw new Error('UNAUTHENTICATED');
+    }
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch(
+      'https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ action: 'upgrade_skill', skillKey }),
+        cache: 'no-store',
+      }
+    );
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.error || 'SKILL_UPGRADE_FAILED');
+    }
+    return;
+  }
+
   try {
     await runTransaction(db, async (tx) => {
       const profileRef = doc(db, 'profiles', uid);
@@ -375,6 +457,37 @@ export async function transferCredits(
   const amount = Math.floor(amountRaw);
   const cleanName = recipientUsername.trim().toLowerCase();
   if (!cleanName) throw new Error('RECIPIENT_NOT_FOUND');
+
+  // Explicit opt-in only. Firebase remains the default until transfer parity QA is complete.
+  if (import.meta.env.VITE_NEXORA_SUPABASE_TRANSFERS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== fromUid || currentUser.isAnonymous) {
+      throw new Error('UNAUTHENTICATED');
+    }
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch(
+      'https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          recipientUsername: cleanName,
+          amount,
+          note: note.trim().slice(0, 180),
+          requestId: crypto.randomUUID(),
+        }),
+        cache: 'no-store',
+      }
+    );
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.error || 'TRANSFER_FAILED');
+    }
+    return;
+  }
 
   const unameSnap = await getDoc(doc(db, 'usernames', cleanName));
   if (!unameSnap.exists()) throw new Error('RECIPIENT_NOT_FOUND');
@@ -474,6 +587,21 @@ export async function createMarketListing(
     throw new Error('INVALID_LISTING_PARAMS');
   }
 
+  if (import.meta.env.VITE_NEXORA_SUPABASE_MARKET === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create_market_listing', itemId, quantity: qty, unitPrice, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'MARKET_LISTING_FAILED');
+    return;
+  }
+
   const invDocId = `${uid}_${itemId}`;
   const listingId = genId('lst');
 
@@ -519,6 +647,21 @@ export async function buyMarketListing(
 ): Promise<void> {
   const buyQty = Math.floor(buyQtyRaw);
   if (buyQty < 1) throw new Error('INVALID_QUANTITY');
+
+  if (import.meta.env.VITE_NEXORA_SUPABASE_MARKET === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== buyerUid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'buy_market_listing', listingId, quantity: buyQty, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'MARKET_PURCHASE_FAILED');
+    return;
+  }
 
   const txId = genId('tx');
   const orderId = `ord_${txId}`;
@@ -663,6 +806,20 @@ export async function buyMarketListing(
 }
 
 export async function cancelMarketListing(uid: string, listingId: string): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_MARKET === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'cancel_market_listing', listingId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'MARKET_CANCELLATION_FAILED');
+    return;
+  }
   try {
     await runTransaction(db, async (tx) => {
       const listingRef = doc(db, 'market_listings', listingId);
@@ -712,6 +869,20 @@ export async function manufactureRecipe(uid: string, recipeId: string, batchQuan
   const recipe = MANUFACTURING_RECIPES.find((r) => r.id === recipeId);
   if (!recipe) throw new Error('INVALID_RECIPE');
   if (!Number.isInteger(batchQuantity) || batchQuantity < 1 || batchQuantity > 999) throw new Error('INVALID_QUANTITY');
+  if (import.meta.env.VITE_NEXORA_SUPABASE_MANUFACTURING === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'manufacture_recipe', recipeId, batchQuantity, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'MANUFACTURING_FAILED');
+    return;
+  }
+
   const txId = genId('tx');
 
   try {
@@ -819,6 +990,23 @@ export async function fulfillTradeContract(uid: string, contractId: string): Pro
   const contract = TRADE_CONTRACTS.find((c) => c.id === contractId);
   if (!contract) throw new Error('INVALID_CONTRACT');
 
+  if (import.meta.env.VITE_NEXORA_SUPABASE_CONTRACTS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'fulfill_trade_contract', contractId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok || !Number.isFinite(payload.payout)) {
+      throw new Error(payload?.error || 'CONTRACT_FULFILL_FAILED');
+    }
+    return Number(payload.payout);
+  }
+
   const dateKey = getUtcDateKey();
   const claimId = `${uid}_${contractId}_${dateKey}`;
   const txId = genId('tx');
@@ -912,6 +1100,62 @@ export async function fulfillTradeContract(uid: string, contractId: string): Pro
   }
 }
 
+export async function createCompanyAuction(
+  uid: string,
+  companyId: string,
+  startingPrice: number
+): Promise<{ auctionId: string; endsAt: number; minPrice: number; maxPrice: number }> {
+  if (auth.currentUser?.uid !== uid) throw new Error('AUTH_SESSION_MISMATCH');
+  if (import.meta.env.VITE_NEXORA_SUPABASE_COMPANY_AUCTIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create_company_auction', companyId, startingPrice, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || payload?.ok !== true || typeof payload.auctionId !== 'string') {
+      throw new Error(payload?.error || 'COMPANY_AUCTION_CREATE_FAILED');
+    }
+    return payload as { ok: boolean; auctionId: string; endsAt: number; minPrice: number; maxPrice: number };
+  }
+  const create = httpsCallable<
+    { companyId: string; startingPrice: number },
+    { ok: boolean; auctionId: string; endsAt: number; minPrice: number; maxPrice: number }
+  >(functions, 'createCompanyAuctionSecure');
+  const result = await create({ companyId, startingPrice });
+  return result.data;
+}
+
+export async function placeCompanyAuctionBid(
+  uid: string,
+  auctionId: string,
+  bidAmount: number
+): Promise<{ ok: boolean; currentBid: number; nextMinimumBid: number }> {
+  if (auth.currentUser?.uid !== uid) throw new Error('AUTH_SESSION_MISMATCH');
+  if (import.meta.env.VITE_NEXORA_SUPABASE_COMPANY_AUCTIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'place_company_auction_bid', auctionId, bidAmount, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || payload?.ok !== true) throw new Error(payload?.error || 'COMPANY_AUCTION_BID_FAILED');
+    return payload as { ok: boolean; currentBid: number; nextMinimumBid: number };
+  }
+  const placeBid = httpsCallable<
+    { auctionId: string; bidAmount: number },
+    { ok: boolean; currentBid: number; nextMinimumBid: number }
+  >(functions, 'placeCompanyAuctionBidSecure');
+  const result = await placeBid({ auctionId, bidAmount });
+  return result.data;
+}
+
 export async function foundCompany(
   uid: string,
   ownerName: string,
@@ -922,6 +1166,20 @@ export async function foundCompany(
   if (cleanName.length < 2 || cleanName.length > 48) throw new Error('INVALID_NAME');
   const spec = COMPANY_SECTORS.find((s) => s.sector === sector);
   if (!spec) throw new Error('INVALID_SECTOR');
+
+  if (import.meta.env.VITE_NEXORA_SUPABASE_COMPANIES === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'found_company', name: cleanName, sector, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'COMPANY_FOUNDING_FAILED');
+    return;
+  }
 
   const companyId = genId('cmp');
   const txId = genId('tx');
@@ -939,6 +1197,10 @@ export async function foundCompany(
       if (!walletSnap.exists() || !profileSnap.exists()) throw new Error('ACCOUNT_NOT_FOUND');
       const wallet = walletSnap.data() as Wallet;
       const profile = profileSnap.data() as PlayerProfile;
+      const playerLevel = Math.max(1, Math.min(100, Math.floor(profile.level || 1)));
+      const ownershipLimit = Math.min(10, 1 + Math.floor(((playerLevel - 1) * 9) / 49));
+      const ownedCompanies = Math.max(0, Math.floor(profile.stats?.companiesOwned || 0));
+      if (ownedCompanies >= ownershipLimit) throw new Error('COMPANY_OWNERSHIP_LIMIT');
 
       if (wallet.balance < spec.foundingCost) throw new Error('INSUFFICIENT_FUNDS');
 
@@ -1002,7 +1264,7 @@ export async function foundCompany(
       });
     });
   } catch (error) {
-    if (error instanceof Error && ['INVALID_NAME', 'INVALID_SECTOR', 'INSUFFICIENT_FUNDS'].includes(error.message)) {
+    if (error instanceof Error && ['INVALID_NAME', 'INVALID_SECTOR', 'INSUFFICIENT_FUNDS', 'COMPANY_OWNERSHIP_LIMIT'].includes(error.message)) {
       throw error;
     }
     handleFirestoreError(error, OperationType.WRITE, `companies/${companyId}`);
@@ -1010,6 +1272,19 @@ export async function foundCompany(
 }
 
 export async function upgradeCompany(uid: string, companyId: string): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_COMPANIES === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'company_upgrade', companyId, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'COMPANY_OPERATION_FAILED');
+    return;
+  }
   await callCompanyVault<{ ok: boolean }>(uid, 'company_upgrade', companyId);
 }
 
@@ -1038,18 +1313,70 @@ async function callCompanyVault<T>(
 }
 
 export async function upgradeCompanyVault(uid: string, companyId: string): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_COMPANIES === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'company_vault_upgrade', companyId, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'COMPANY_OPERATION_FAILED');
+    return;
+  }
   await callCompanyVault<{ ok: boolean }>(uid, 'upgrade', companyId);
 }
 
 export async function completeCompanyUpgrade(uid: string, companyId: string): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_COMPANIES === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'company_complete', companyId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'COMPANY_OPERATION_FAILED');
+    return;
+  }
   await callCompanyVault<{ ok: boolean }>(uid, 'company_complete', companyId);
 }
 
 export async function completeCompanyVaultUpgrade(uid: string, companyId: string): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_COMPANIES === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'company_vault_complete', companyId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'COMPANY_OPERATION_FAILED');
+    return;
+  }
   await callCompanyVault<{ ok: boolean }>(uid, 'vault_complete', companyId);
 }
 
 export async function collectCompanyRevenue(uid: string, companyId: string): Promise<number> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_COMPANIES === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'company_collect', companyId, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'COMPANY_OPERATION_FAILED');
+    return Number(payload.payout);
+  }
   const result = await callCompanyVault<{ ok: boolean; payout: number }>(uid, 'collect', companyId);
   return result.payout;
 }
@@ -1063,6 +1390,20 @@ export async function buyProperty(
   if (cleanName.length < 2 || cleanName.length > 48) throw new Error('INVALID_NAME');
   const spec = PROPERTY_SPECS.find((p) => p.type === type);
   if (!spec) throw new Error('INVALID_PROPERTY_TYPE');
+
+  if (import.meta.env.VITE_NEXORA_SUPABASE_PROPERTIES === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'buy_property', name: cleanName, propertyType: type, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'PROPERTY_PURCHASE_FAILED');
+    return;
+  }
 
   const propId = genId('prop');
   const txId = genId('tx');
@@ -1136,6 +1477,19 @@ export async function buyProperty(
 }
 
 export async function togglePropertyLease(uid: string, propertyId: string, nextState: boolean): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_PROPERTIES === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'toggle_property_lease', propertyId, isRented: nextState }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'PROPERTY_OPERATION_FAILED');
+    return;
+  }
   try {
     await updateDoc(doc(db, 'properties', propertyId), {
       isRented: nextState,
@@ -1147,6 +1501,19 @@ export async function togglePropertyLease(uid: string, propertyId: string, nextS
 }
 
 export async function upgradeProperty(uid: string, propertyId: string): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_PROPERTIES === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'upgrade_property', propertyId, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'PROPERTY_OPERATION_FAILED');
+    return;
+  }
   const txId = genId('tx');
   try {
     await runTransaction(db, async (tx) => {
@@ -1197,6 +1564,21 @@ export async function upgradeProperty(uid: string, propertyId: string): Promise<
 }
 
 export async function collectPropertyRent(uid: string, propertyId: string): Promise<number> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_PROPERTIES === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'collect_property_rent', propertyId, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok || !Number.isFinite(payload.payout)) {
+      throw new Error(payload?.error || 'PROPERTY_OPERATION_FAILED');
+    }
+    return Number(payload.payout);
+  }
   const txId = genId('tx');
   try {
     let payout = 0;
@@ -1267,6 +1649,21 @@ export async function collectPropertyRent(uid: string, propertyId: string): Prom
 export async function claimMissionReward(uid: string, missionId: string): Promise<void> {
   const mission = MISSIONS.find((m) => m.id === missionId);
   if (!mission) throw new Error('INVALID_MISSION');
+
+  if (import.meta.env.VITE_NEXORA_SUPABASE_MISSIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'claim_mission_reward', missionId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'MISSION_REWARD_FAILED');
+    return;
+  }
 
   const claimDocId = `${uid}_${missionId}`;
   const txId = genId('tx');
@@ -1358,6 +1755,22 @@ export async function createOrganization(
   if (!currentUser || currentUser.uid !== uid) throw new Error('AUTH_SESSION_MISMATCH');
   if (!currentUser.emailVerified) throw new Error('EMAIL_NOT_VERIFIED');
 
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const idToken = await currentUser.getIdToken(true);
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create_organization', name: cleanName, tag: cleanTag,
+        description: description.trim().slice(0, 240), requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json().catch(() => ({})) as { error?: unknown; orgId?: unknown; ok?: boolean };
+    if (!response.ok || payload.ok !== true || typeof payload.orgId !== 'string' || !payload.orgId) {
+      throw new Error(typeof payload.error === 'string' ? payload.error : 'ORGANIZATION_CREATE_FAILED');
+    }
+    return payload.orgId;
+  }
+
   const idToken = await currentUser.getIdToken(true);
   const response = await fetch('/api/organization-create', {
     method: 'POST',
@@ -1386,121 +1799,98 @@ export async function createOrganization(
 
 export async function requestJoinOrganization(
   uid: string,
-  username: string,
+  _username: string,
   orgId: string
-): Promise<void> {
-  const reqId = `${orgId}_${uid}_${Date.now()}`;
-  try {
-    const [profileSnap, existingReqsSnap] = await Promise.all([
-      getDoc(doc(db, 'profiles', uid)),
-      getDocs(query(collection(db, 'organization_requests'), where('uid', '==', uid))),
-    ]);
-    if (profileSnap.exists()) {
-      const p = profileSnap.data() as PlayerProfile;
-      if (p.orgId) throw new Error('ALREADY_IN_ORG');
-    }
-    const alreadyPending = existingReqsSnap.docs.some((d) => {
-      const data = d.data() as { orgId?: string; status?: string };
-      return data.orgId === orgId && data.status === 'pending';
+): Promise<'joined' | 'requested'> {
+  if (auth.currentUser?.uid !== uid) throw new Error('AUTH_SESSION_MISMATCH');
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'join_organization', orgId }),
+      cache: 'no-store',
     });
-    if (alreadyPending) {
-      throw new Error('REQUEST_ALREADY_PENDING');
-    }
-
-    await setDoc(doc(db, 'organization_requests', reqId), {
-      id: reqId,
-      orgId,
-      uid,
-      username,
-      status: 'pending',
-      createdAt: serverTimestamp(),
-    });
-  } catch (error) {
-    if (error instanceof Error && ['ALREADY_IN_ORG', 'REQUEST_ALREADY_PENDING'].includes(error.message)) {
-      throw error;
-    }
-    handleFirestoreError(error, OperationType.CREATE, `organization_requests/${reqId}`);
+    const payload = await response.json();
+    if (!response.ok || (!payload?.ok && !payload?.status)) throw new Error(payload?.error || 'ORG_MEMBERSHIP_OPERATION_FAILED');
+    if (payload.status !== 'joined' && payload.status !== 'requested') throw new Error('ORGANIZATION_JOIN_FAILED'); return payload.status as 'joined' | 'requested';
   }
+
+  const join = httpsCallable<{ orgId: string }, { status: 'joined' | 'requested' }>(functions, 'joinOrganizationSecure');
+  const result = await join({ orgId });
+  if (result.data.status !== 'joined' && result.data.status !== 'requested') {
+    throw new Error('ORGANIZATION_JOIN_FAILED');
+  }
+  return result.data.status;
+}
+
+export async function setOrganizationJoinMode(
+  uid: string,
+  orgId: string,
+  mode: 'open' | 'request' | 'closed'
+): Promise<void> {
+  if (auth.currentUser?.uid !== uid) throw new Error('AUTH_SESSION_MISMATCH');
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'set_org_join_mode', orgId, mode }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || (!payload?.ok && !payload?.status)) throw new Error(payload?.error || 'ORG_MEMBERSHIP_OPERATION_FAILED');
+    return;
+  }
+
+  const updateMode = httpsCallable<{ orgId: string; mode: 'open' | 'request' | 'closed' }, { ok: boolean }>(
+    functions,
+    'setOrganizationJoinModeSecure'
+  );
+  await updateMode({ orgId, mode });
 }
 
 export async function handleOrgJoinRequest(
   orgId: string,
   reqId: string,
   applicantUid: string,
-  applicantUsername: string,
+  _applicantUsername: string,
   decision: 'approved' | 'rejected'
 ): Promise<void> {
-  try {
-    await runTransaction(db, async (tx) => {
-      const reqRef = doc(db, 'organization_requests', reqId);
-      const orgRef = doc(db, 'organizations', orgId);
-      const memberRef = doc(db, 'organization_members', `${orgId}_${applicantUid}`);
-      const applicantProfileRef = doc(db, 'profiles', applicantUid);
-
-      const [reqSnap, orgSnap, memberSnap, applicantProfileSnap] = await Promise.all([
-        tx.get(reqRef),
-        tx.get(orgRef),
-        tx.get(memberRef),
-        tx.get(applicantProfileRef),
-      ]);
-      if (!reqSnap.exists() || !orgSnap.exists()) throw new Error('NOT_FOUND');
-
-      const reqData = reqSnap.data() as { status: string };
-      if (reqData.status !== 'pending') {
-        throw new Error('REQUEST_ALREADY_HANDLED');
-      }
-
-      if (decision === 'approved') {
-        const org = orgSnap.data() as Organization;
-        if (memberSnap.exists()) {
-          throw new Error('ALREADY_ORG_MEMBER');
-        }
-        if (applicantProfileSnap.exists()) {
-          const applicantProfile = applicantProfileSnap.data() as PlayerProfile;
-          if (applicantProfile.orgId && applicantProfile.orgId !== orgId) {
-            throw new Error('APPLICANT_IN_OTHER_ORG');
-          }
-        }
-        const memberCapacity = typeof org.memberCapacity === 'number' ? org.memberCapacity : Math.min(70, 20 + (Math.max(1, org.level) - 1) * 5);
-        if (org.memberCount >= memberCapacity) {
-          throw new Error('ORG_FULL');
-        }
-
-        tx.update(reqRef, { status: decision });
-        tx.set(memberRef, {
-          orgId,
-          uid: applicantUid,
-          username: applicantUsername,
-          role: 'member',
-          permissions: ROLE_DEFAULT_PERMISSIONS.member,
-          joinedAt: serverTimestamp(),
-        });
-        tx.update(orgRef, {
-          memberCount: org.memberCount + 1,
-          updatedAt: serverTimestamp(),
-        });
-      } else {
-        tx.update(reqRef, { status: decision });
-      }
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'handle_org_join_request', orgId, reqId, applicantUid, decision }),
+      cache: 'no-store',
     });
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      [
-        'NOT_FOUND',
-        'REQUEST_ALREADY_HANDLED',
-        'ALREADY_ORG_MEMBER',
-        'APPLICANT_IN_OTHER_ORG',
-        'ORG_FULL',
-      ].includes(error.message)
-    ) {
-      throw error;
-    }
-    handleFirestoreError(error, OperationType.UPDATE, `organization_requests/${reqId}`);
+    const payload = await response.json();
+    if (!response.ok || (!payload?.ok && !payload?.status)) throw new Error(payload?.error || 'ORG_MEMBERSHIP_OPERATION_FAILED');
+    return;
   }
+
+  const handleRequest = httpsCallable(functions, 'approveOrganizationJoinRequestSecure');
+  await handleRequest({ orgId, reqId, applicantUid, decision });
 }
 
 export async function syncSelfOrgMembership(uid: string, orgId: string | null): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'sync_org_membership', orgId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'ORG_MEMBERSHIP_SYNC_FAILED');
+    return;
+  }
   try {
     await updateDoc(doc(db, 'profiles', uid), {
       orgId,
@@ -1516,6 +1906,19 @@ export async function updateOrgMemberRole(
   targetUid: string,
   newRole: Exclude<OrgRole, 'leader'>
 ): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'update_org_member_role', orgId, targetUid, newRole }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'ORG_ROLE_UPDATE_FAILED');
+    return;
+  }
   try {
     await updateDoc(doc(db, 'organization_members', `${orgId}_${targetUid}`), {
       role: newRole,
@@ -1527,31 +1930,23 @@ export async function updateOrgMemberRole(
 }
 
 export async function leaveOrganization(uid: string, orgId: string): Promise<void> {
-  try {
-    await runTransaction(db, async (tx) => {
-      const orgRef = doc(db, 'organizations', orgId);
-      const memberRef = doc(db, 'organization_members', `${orgId}_${uid}`);
-      const profileRef = doc(db, 'profiles', uid);
-      const [orgSnap, memberSnap] = await Promise.all([tx.get(orgRef), tx.get(memberRef)]);
-      if (!orgSnap.exists() || !memberSnap.exists()) throw new Error('NOT_FOUND');
-      const member = memberSnap.data() as OrganizationMember;
-      if (member.role === 'leader') throw new Error('LEADER_CANNOT_LEAVE');
-
-      const org = orgSnap.data() as Organization;
-      tx.delete(memberRef);
-      tx.update(orgRef, {
-        memberCount: Math.max(1, org.memberCount - 1),
-        updatedAt: serverTimestamp(),
-      });
-      tx.update(profileRef, {
-        orgId: null,
-        updatedAt: serverTimestamp(),
-      });
+  if (!uid || auth.currentUser?.uid !== uid) throw new Error('UNAUTHENTICATED');
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'leave_organization', orgId }),
+      cache: 'no-store',
     });
-  } catch (error) {
-    if (error instanceof Error && error.message === 'LEADER_CANNOT_LEAVE') throw error;
-    handleFirestoreError(error, OperationType.DELETE, `organization_members/${orgId}_${uid}`);
+    const payload = await response.json();
+    if (!response.ok || (!payload?.ok && !payload?.status)) throw new Error(payload?.error || 'ORG_MEMBERSHIP_OPERATION_FAILED');
+    return;
   }
+
+  const leave = httpsCallable(functions, 'leaveOrganizationSecure');
+  await leave({ orgId });
 }
 
 export async function kickOrgMember(
@@ -1560,43 +1955,23 @@ export async function kickOrgMember(
   targetUid: string
 ): Promise<void> {
   if (!actorUid || actorUid === targetUid) throw new Error('CANNOT_KICK_SELF');
-
-  try {
-    await runTransaction(db, async (tx) => {
-      const orgRef = doc(db, 'organizations', orgId);
-      const actorRef = doc(db, 'organization_members', `${orgId}_${actorUid}`);
-      const targetRef = doc(db, 'organization_members', `${orgId}_${targetUid}`);
-      const [orgSnap, actorSnap, targetSnap] = await Promise.all([
-        tx.get(orgRef),
-        tx.get(actorRef),
-        tx.get(targetRef),
-      ]);
-
-      if (!orgSnap.exists() || !actorSnap.exists() || !targetSnap.exists()) {
-        throw new Error('NOT_FOUND');
-      }
-
-      const actor = actorSnap.data() as OrganizationMember;
-      const target = targetSnap.data() as OrganizationMember;
-      if (!hasOrgPermission(actor, 'manage_members')) throw new Error('UNAUTHORIZED');
-      if (!canManageOrgMember(actor.role, target.role)) throw new Error('RANK_TOO_HIGH');
-
-      const org = orgSnap.data() as Organization;
-      tx.delete(targetRef);
-      tx.update(orgRef, {
-        memberCount: Math.max(1, org.memberCount - 1),
-        updatedAt: serverTimestamp(),
-      });
+  if (auth.currentUser?.uid !== actorUid) throw new Error('UNAUTHENTICATED');
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'kick_org_member', orgId, targetUid }),
+      cache: 'no-store',
     });
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      ['CANNOT_KICK_SELF', 'NOT_FOUND', 'UNAUTHORIZED', 'RANK_TOO_HIGH'].includes(error.message)
-    ) {
-      throw error;
-    }
-    handleFirestoreError(error, OperationType.DELETE, `organization_members/${orgId}_${targetUid}`);
+    const payload = await response.json();
+    if (!response.ok || (!payload?.ok && !payload?.status)) throw new Error(payload?.error || 'ORG_MEMBERSHIP_OPERATION_FAILED');
+    return;
   }
+
+  const removeMember = httpsCallable(functions, 'kickOrganizationMemberSecure');
+  await removeMember({ orgId, targetUid });
 }
 
 async function callOrganizationUpgrade(orgId: string, action: 'start' | 'complete' | 'research', researchId?: string) {
@@ -1618,6 +1993,20 @@ export async function upgradeOrganization(
   _username: string,
   orgId: string
 ): Promise<{ targetLevel: number; endsAt: number; cost: number }> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'start_org_upgrade', orgId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'ORGANIZATION_UPGRADE_FAILED');
+    return { targetLevel: Number(payload.targetLevel), endsAt: Number(payload.endsAt), cost: Number(payload.cost) };
+  }
+
   const result = await callOrganizationUpgrade(orgId, 'start');
   return {
     targetLevel: Number(result.targetLevel),
@@ -1627,10 +2016,38 @@ export async function upgradeOrganization(
 }
 
 export async function completeOrganizationUpgrade(orgId: string): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'complete_org_upgrade', orgId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'ORGANIZATION_UPGRADE_FAILED');
+    return;
+  }
+
   await callOrganizationUpgrade(orgId, 'complete');
 }
 
 export async function researchOrganization(orgId: string, researchId: 'commerce' | 'engineering' | 'expansion' | 'finance' | 'diplomacy'): Promise<{ level: number; cost: number }> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'research_org', orgId, researchId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'ORGANIZATION_UPGRADE_FAILED');
+    return { level: Number(payload.level), cost: Number(payload.cost) };
+  }
+
   const result = await callOrganizationUpgrade(orgId, 'research', researchId);
   return { level: Number(result.level), cost: Number(result.cost) };
 }
@@ -1646,6 +2063,19 @@ export async function depositToOrgTreasury(
   const txId = genId('tx');
   const orgTxId = genId('otx');
 
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORG_TREASURY === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'deposit_org_treasury', orgId, amount, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'ORG_TREASURY_OPERATION_FAILED');
+    return;
+  }
   try {
     await runTransaction(db, async (tx) => {
       const walletRef = doc(db, 'wallets', uid);
@@ -1716,6 +2146,19 @@ export async function withdrawFromOrgTreasury(
   const txId = genId('tx');
   const orgTxId = genId('otx');
 
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORG_TREASURY === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'withdraw_org_treasury', orgId, amount, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'ORG_TREASURY_OPERATION_FAILED');
+    return;
+  }
   try {
     await runTransaction(db, async (tx) => {
       const walletRef = doc(db, 'wallets', uid);
@@ -1781,6 +2224,19 @@ export async function updatePlayerSettings(
   language: Language,
   notificationsEnabled: boolean
 ): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_PROFILE === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'update_player_settings', language, notificationsEnabled }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'PLAYER_UPDATE_FAILED');
+    return;
+  }
   try {
     await updateDoc(doc(db, 'users_private', uid), {
       language,
@@ -1793,6 +2249,19 @@ export async function updatePlayerSettings(
 }
 
 export async function updatePlayerAvatar(uid: string, avatarId: string): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_PROFILE === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'update_player_avatar', avatarId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'PLAYER_UPDATE_FAILED');
+    return;
+  }
   try {
     await updateDoc(doc(db, 'profiles', uid), {
       avatarId,
@@ -1804,6 +2273,19 @@ export async function updatePlayerAvatar(uid: string, avatarId: string): Promise
 }
 
 export async function markNotificationRead(notifId: string): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_PROFILE === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'mark_notification_read', notificationId: notifId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'PLAYER_UPDATE_FAILED');
+    return;
+  }
   try {
     await updateDoc(doc(db, 'notifications', notifId), { read: true });
   } catch (error) {
@@ -1813,6 +2295,19 @@ export async function markNotificationRead(notifId: string): Promise<void> {
 
 export async function markAllNotificationsRead(notifIds: string[]): Promise<void> {
   if (!notifIds.length) return;
+  if (import.meta.env.VITE_NEXORA_SUPABASE_PROFILE === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'mark_notifications_read', notificationIds: notifIds }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'PLAYER_UPDATE_FAILED');
+    return;
+  }
   try {
     const batch = writeBatch(db);
     for (const id of notifIds) {
@@ -1829,6 +2324,20 @@ export async function fetchLeaderboards(): Promise<{
   companies: Company[];
   organizations: Organization[];
 }> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_PLAYER_READS === 'true' && auth.currentUser && !auth.currentUser.isAnonymous) {
+    const idToken = await auth.currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'fetch_leaderboards' }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.players || !payload?.companies || !payload?.organizations) {
+      throw new Error(payload?.error || 'LEADERBOARD_READ_FAILED');
+    }
+    return payload as { players: PlayerProfile[]; companies: Company[]; organizations: Organization[] };
+  }
   const [pSnap, cSnap, oSnap] = await Promise.all([
     getDocs(query(collection(db, 'profiles'), where('influence', '>=', 0), orderBy('influence', 'desc'), limit(20))),
     getDocs(query(collection(db, 'companies'), where('totalRevenue', '>=', 0), orderBy('totalRevenue', 'desc'), limit(20))),
@@ -1852,6 +2361,22 @@ export async function checkAndUnlockAchievements(
     threshold: number;
   }[]
 ): Promise<string[]> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ACHIEVEMENTS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'claim_eligible_achievements' }),
+      cache: 'no-store',
+    });
+    const payload = await response.json().catch(() => ({})) as { ok?: boolean; unlockedIds?: unknown; error?: unknown };
+    if (!response.ok || payload.ok !== true || !Array.isArray(payload.unlockedIds)) {
+      throw new Error(typeof payload.error === 'string' ? payload.error : 'ACHIEVEMENT_UNLOCK_FAILED');
+    }
+    return payload.unlockedIds.filter((id): id is string => typeof id === 'string');
+  }
   const eligible = achievements.filter((ach) => {
     if (unlockedIds.has(ach.id)) return false;
     return getAchievementProgress(ach.metric, profile) >= ach.threshold;
@@ -1875,6 +2400,22 @@ export async function checkAndUnlockAchievements(
 }
 
 export async function fetchOrgPendingRequests(orgId: string) {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'fetch_org_pending_requests', orgId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !Array.isArray(payload?.requests)) {
+      throw new Error(payload?.error || 'ORG_REQUESTS_READ_FAILED');
+    }
+    return payload.requests;
+  }
   const q = query(
     collection(db, 'organization_requests'),
     where('orgId', '==', orgId),

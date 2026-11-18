@@ -5,6 +5,7 @@ import {
   Check,
   Coins,
   Home,
+  MessageCircle,
   Store,
   User,
   X,
@@ -47,6 +48,7 @@ export function AppShell({
     { id: 'business', label: t.navBusiness, icon: Briefcase },
     { id: 'market', label: t.navMarket, icon: Store },
     { id: 'organization', label: t.navOrganization, icon: Building2 },
+    { id: 'social', label: language === 'ar' ? 'التواصل' : 'Social', icon: MessageCircle },
     { id: 'profile', label: t.navProfile, icon: User },
   ];
 
@@ -123,7 +125,7 @@ export function AppShell({
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 w-full max-w-6xl mx-auto px-4 lg:px-6 pt-5 pb-24 lg:pb-10">
+      <main className="flex-1 w-full max-w-6xl mx-auto px-4 lg:px-6 pt-5 pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-10">
         {children}
       </main>
 
@@ -132,7 +134,7 @@ export function AppShell({
         aria-label="Primary Navigation"
         className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#0B0D12]/95 backdrop-blur-md border-t border-white/10 pb-safe"
       >
-        <div className="grid grid-cols-5 h-16 max-w-lg mx-auto">
+        <div className="grid grid-cols-6 h-[68px] w-full max-w-xl mx-auto">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -141,12 +143,13 @@ export function AppShell({
                 key={item.id}
                 type="button"
                 onClick={() => onTabChange(item.id)}
-                className={`flex flex-col items-center justify-center gap-1 min-h-[44px] transition-colors ${
+                aria-current={isActive ? 'page' : undefined}
+                className={`flex min-w-0 flex-col items-center justify-center gap-1 px-0.5 min-h-[44px] transition-colors ${
                   isActive ? 'text-[#E04455]' : 'text-[#9299A6] hover:text-[#F4F5F7]'
                 }`}
               >
-                <Icon className="w-5 h-5" strokeWidth={isActive ? 2.3 : 1.8} />
-                <span className="text-[11px] font-medium whitespace-nowrap">{item.label}</span>
+                <Icon className="w-[18px] h-[18px] sm:w-5 sm:h-5 shrink-0" strokeWidth={isActive ? 2.3 : 1.8} />
+                <span className="w-full truncate text-center text-[9px] leading-tight sm:text-[11px] font-medium">{item.label}</span>
               </button>
             );
           })}

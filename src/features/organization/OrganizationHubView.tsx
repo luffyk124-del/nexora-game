@@ -22,6 +22,7 @@ import {
   kickOrgMember,
   leaveOrganization,
   requestJoinOrganization,
+  setOrganizationJoinMode,
   updateOrgMemberRole,
   upgradeOrganization,
   completeOrganizationUpgrade,
@@ -76,6 +77,8 @@ export function OrganizationHubView({
   const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
   const [kickTarget, setKickTarget] = useState<{ uid: string; username: string } | null>(null);
   const [clockNow, setClockNow] = useState(Date.now());
+  const [activeOrgTab, setActiveOrgTab] = useState<'overview' | 'research' | 'treasury' | 'members'>('overview');
+  const [activeJoinTab, setActiveJoinTab] = useState<'browse' | 'create'>('browse');
 
   const currentOrg = myOrgMember
     ? organizations.find((o) => o.id === myOrgMember.orgId) || null
@@ -87,7 +90,7 @@ export function OrganizationHubView({
   const canManageOrg = myOrgMember?.role === 'leader' || myOrgMember?.role === 'deputy' || hasOrgPermission(myOrgMember, 'manage_org');
 
   useEffect(() => {
-    const clock = window.setInterval(() => setClockNow(Date.now()), 15_000);
+    const clock = window.setInterval(() => setClockNow(Date.now()), 1_000);
     return () => window.clearInterval(clock);
   }, []);
 
@@ -111,6 +114,19 @@ export function OrganizationHubView({
   for (const otx of orgTransactions) {
     if (otx.type === 'deposit') {
       contributionsByUid.set(otx.uid, (contributionsByUid.get(otx.uid) || 0) + otx.amount);
+    }
+  }
+
+  async function handleJoinModeChange(mode: 'open' | 'request' | 'closed') {
+    if (!currentOrg || !canManageOrg) return;
+    setBusyKey('join_mode');
+    try {
+      await setOrganizationJoinMode(profile.uid, currentOrg.id, mode);
+      showToast(language === 'ar' ? 'تم تحديث سياسة الانضمام.' : 'Join policy updated.', 'success');
+    } catch (error) {
+      showToast(language === 'ar' ? 'تعذر تحديث سياسة الانضمام.' : 'Could not update join policy.', 'error');
+    } finally {
+      setBusyKey(null);
     }
   }
 
@@ -162,9 +178,11 @@ export function OrganizationHubView({
   async function handleRequestJoin(orgId: string) {
     setBusyKey(`join_${orgId}`);
     try {
-      await requestJoinOrganization(profile.uid, profile.username, orgId);
+      const result = await requestJoinOrganization(profile.uid, profile.username, orgId);
       showToast(
-        language === 'ar' ? 'تم إرسال طلب الانضمام للإدارة.' : 'Join request sent to leadership.',
+        result === 'joined'
+          ? (language === 'ar' ? 'انضممت إلى المنظمة بنجاح.' : 'You joined the organization.')
+          : (language === 'ar' ? 'تم إرسال طلب الانضمام للإدارة.' : 'Join request sent to leadership.'),
         'success'
       );
     } catch (err) {
@@ -374,9 +392,13 @@ export function OrganizationHubView({
 
   if (!myOrgMember || !currentOrg) {
     return (
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="space-y-4">
+        <nav className="grid grid-cols-2 gap-2" aria-label={language === 'ar' ? 'خيارات المنظمة' : 'Organization options'}>
+          <button type="button" onClick={() => setActiveJoinTab('browse')} aria-pressed={activeJoinTab === 'browse'} className={`min-h-[44px] rounded-xl border px-3 text-sm font-semibold ${activeJoinTab === 'browse' ? 'border-[#E04455] bg-[#B91C32] text-white' : 'border-white/10 bg-[#141821] text-[#9299A6]'}`}>{language === 'ar' ? 'الانضمام إلى منظمة' : 'Join an organization'}</button>
+          <button type="button" onClick={() => setActiveJoinTab('create')} aria-pressed={activeJoinTab === 'create'} className={`min-h-[44px] rounded-xl border px-3 text-sm font-semibold ${activeJoinTab === 'create' ? 'border-[#E04455] bg-[#B91C32] text-white' : 'border-white/10 bg-[#141821] text-[#9299A6]'}`}>{t.createOrg}</button>
+        </nav>
         {/* Create Organization */}
-        <form
+        {activeJoinTab === 'create' && <form
           onSubmit={handleCreateOrg}
           className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-4 h-fit"
         >
@@ -431,10 +453,10 @@ export function OrganizationHubView({
           >
             {t.createOrg} ({'$'}{ORG_CREATION_COST.toLocaleString()})
           </button>
-        </form>
+        </form>}
 
         {/* Browse Organizations */}
-        <div className="lg:col-span-2 space-y-3.5">
+        {activeJoinTab === 'browse' && <div className="space-y-3.5">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold text-[#F4F5F7]">
               {language === 'ar' ? 'المنظمات والتحالفات النشطة' : 'Active Syndicates & Organizations'}
@@ -477,7 +499,7 @@ export function OrganizationHubView({
                         [{org.tag}] {org.name}
                       </h3>
                       <p className="text-xs text-[#9299A6]">
-                        {org.leaderName} · {t.members}:{' '}
+                        {language === 'ar' ? `المستوى ${org.level}` : `Level ${org.level}`} · {org.joinMode === 'open' ? (language === 'ar' ? 'مفتوح' : 'Open') : org.joinMode === 'closed' ? (language === 'ar' ? 'مغلق' : 'Closed') : (language === 'ar' ? 'بطلب' : 'Request')} · {org.leaderName} · {t.members}:{' '}
                         <span className="font-mono-num text-[#F4F5F7]">{org.memberCount}</span> ·{' '}
                         {t.reputation}:{' '}
                         <span className="font-mono-num text-[#F4F5F7]">{org.reputation}</span>
@@ -489,17 +511,17 @@ export function OrganizationHubView({
 
                     <button
                       type="button"
-                      disabled={isPending || busyKey === `join_${org.id}`}
+                      disabled={isPending || org.joinMode === 'closed' || busyKey === `join_${org.id}`}
                       onClick={() => handleRequestJoin(org.id)}
                       className="min-h-[42px] px-4 rounded-xl bg-[#B91C32] hover:bg-[#E04455] text-white text-xs font-semibold whitespace-nowrap shrink-0 disabled:bg-[#1B2230] disabled:text-[#9299A6]"
                     >
-                      {isPending ? t.requestPending : busyKey === `join_${org.id}` ? '...' : t.joinOrg}
+                      {isPending ? t.requestPending : org.joinMode === 'closed' ? (language === 'ar' ? 'الانضمام مغلق' : 'Closed') : busyKey === `join_${org.id}` ? '...' : org.joinMode === 'open' ? (language === 'ar' ? 'انضمام مباشر' : 'Join now') : t.joinOrg}
                     </button>
                   </div>
                 );
               })
           )}
-        </div>
+        </div>}
       </div>
     );
   }
@@ -508,9 +530,14 @@ export function OrganizationHubView({
   const isOrgMaxLevel = currentOrg.level >= ORG_MAX_LEVEL;
   const upgradeInProgress = Boolean(currentOrg.upgradeEndsAt && currentOrg.upgradeEndsAt > clockNow);
   const memberCapacity = currentOrg.memberCapacity ?? getOrgMemberCapacity(currentOrg.level, currentOrg.research?.expansion ?? 0);
-  const upgradeHoursLeft = upgradeInProgress ? Math.ceil((currentOrg.upgradeEndsAt! - clockNow) / 3_600_000) : 0;
+  const upgradeRemainingMs = upgradeInProgress ? Math.max(0, currentOrg.upgradeEndsAt! - clockNow) : 0;
+  const upgradeHours = Math.floor(upgradeRemainingMs / 3_600_000).toString().padStart(2, '0');
+  const upgradeMinutes = Math.floor((upgradeRemainingMs % 3_600_000) / 60_000).toString().padStart(2, '0');
+  const upgradeSeconds = Math.floor((upgradeRemainingMs % 60_000) / 1_000).toString().padStart(2, '0');
+  const upgradeCountdown = `${upgradeHours}:${upgradeMinutes}:${upgradeSeconds}`;
 
   return (
+    <>
     <div className="space-y-5">
       {/* Organization Header */}
       <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -538,7 +565,7 @@ export function OrganizationHubView({
             </p>
           </div>
           {upgradeInProgress && (
-            <p className="w-full text-xs text-amber-300">{language === 'ar' ? `ينتهي تطوير المنظمة خلال نحو ${upgradeHoursLeft} ساعة.` : `Organization upgrade completes in about ${upgradeHoursLeft} hours.`}</p>
+            <p className="w-full text-xs text-amber-300">{language === 'ar' ? `الوقت المتبقي لتطوير المنظمة: ${upgradeCountdown}` : `Organization upgrade time remaining: ${upgradeCountdown}`}</p>
           )}
           {canManageOrg && (
             <button
@@ -574,7 +601,21 @@ export function OrganizationHubView({
         </div>
       </div>
 
-      <section className="rounded-2xl border border-white/8 bg-[#141821] p-5 space-y-4">
+      <nav className="grid grid-cols-2 sm:grid-cols-4 gap-2" aria-label={language === 'ar' ? 'أقسام المنظمة' : 'Organization sections'}>
+        {([
+          ['overview', language === 'ar' ? 'المنظمة' : 'Overview'],
+          ['research', language === 'ar' ? 'الأبحاث' : 'Research'],
+          ['treasury', language === 'ar' ? 'الخزنة' : 'Treasury'],
+          ['members', language === 'ar' ? 'الأعضاء' : 'Members'],
+        ] as const).map(([tab, label]) => (
+          <button key={tab} type="button" onClick={() => setActiveOrgTab(tab)} aria-pressed={activeOrgTab === tab}
+            className={`min-h-[44px] rounded-xl border px-3 text-sm font-semibold transition-colors ${activeOrgTab === tab ? 'border-[#E04455] bg-[#B91C32] text-white' : 'border-white/10 bg-[#141821] text-[#9299A6] hover:text-white'}`}>
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {activeOrgTab === 'research' && <section className="rounded-2xl border border-white/8 bg-[#141821] p-5 space-y-4">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-bold text-[#F4F5F7]">{language === 'ar' ? 'أبحاث المنظمة' : 'Organization Research'}</h2>
@@ -615,12 +656,12 @@ export function OrganizationHubView({
           })}
         </div>
         {!canManageOrg && <p className="text-xs text-[#9299A6]">{language === 'ar' ? 'تطوير الأبحاث متاح للقائد والنائب.' : 'Research upgrades are available to the leader and deputy.'}</p>}
-      </section>
+      </section>}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Shared Treasury Operations & RBAC Matrix */}
         <div className="space-y-5">
-          <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-4">
+          {activeOrgTab === 'treasury' && <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-base font-semibold text-[#F4F5F7]">{language === 'ar' ? 'خزينة المنظمة والتبرعات' : 'Organization treasury & donations'}</h2>
               <Vault className="w-4 h-4 text-[#E04455]" />
@@ -691,9 +732,30 @@ export function OrganizationHubView({
                 })
               )}
             </div>
-          </div>
+          </div>}
 
           {/* Role Permissions Matrix */}
+          {activeOrgTab === 'overview' && <div className="space-y-5">
+          <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold text-[#F4F5F7]">{language === 'ar' ? 'سياسة الانضمام' : 'Join policy'}</h2>
+              <span className="text-[11px] text-[#9299A6]">{language === 'ar' ? 'للإدارة' : 'Leadership'}</span>
+            </div>
+            {canManageOrg ? (
+              <select
+                value={currentOrg.joinMode || 'request'}
+                disabled={busyKey === 'join_mode'}
+                onChange={(event) => void handleJoinModeChange(event.target.value as 'open' | 'request' | 'closed')}
+                className="w-full min-h-[44px] rounded-xl border border-white/10 bg-[#0B0D12] px-3 text-sm text-[#F4F5F7]"
+              >
+                <option value="open">{language === 'ar' ? 'مفتوح — انضمام مباشر' : 'Open — join immediately'}</option>
+                <option value="request">{language === 'ar' ? 'طلب — موافقة الإدارة' : 'Request — leadership approval'}</option>
+                <option value="closed">{language === 'ar' ? 'مغلق — منع الانضمام' : 'Closed — no new members'}</option>
+              </select>
+            ) : (
+              <p className="text-xs text-[#9299A6]">{currentOrg.joinMode === 'open' ? (language === 'ar' ? 'الانضمام مفتوح.' : 'Joining is open.') : currentOrg.joinMode === 'closed' ? (language === 'ar' ? 'الانضمام مغلق.' : 'Joining is closed.') : (language === 'ar' ? 'الانضمام بطلب وموافقة الإدارة.' : 'Joining requires leadership approval.')}</p>
+            )}
+          </div>
           <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-3">
             <h2 className="text-sm font-semibold text-[#F4F5F7]">{t.orgPerks}</h2>
             <div className="grid grid-cols-2 gap-2.5 text-xs">
@@ -737,11 +799,12 @@ export function OrganizationHubView({
                 );
               })}
             </div>
+          </div></div>}
           </div>
         </div>
 
         {/* Members & RBAC + Join Requests */}
-        <div className="space-y-5">
+        {activeOrgTab === 'members' && <div className="space-y-5">
           {canManageMembers && orgRequests.length > 0 && (
             <div className="bg-[#141821] border border-white/8 rounded-2xl p-5 space-y-3">
               <h2 className="text-base font-semibold text-[#F4F5F7]">{t.joinRequests}</h2>
@@ -847,7 +910,7 @@ export function OrganizationHubView({
               })}
             </div>
           </div>
-        </div>
+        </div>}
       </div>
 
       <ConfirmDialog
@@ -881,6 +944,6 @@ export function OrganizationHubView({
         onConfirm={handleConfirmKick}
         onCancel={() => setKickTarget(null)}
       />
-    </div>
+    </>
   );
 }

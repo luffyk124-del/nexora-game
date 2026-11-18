@@ -1,8 +1,8 @@
 export type Language = 'ar' | 'en';
 
-export type MainTab = 'home' | 'business' | 'market' | 'organization' | 'profile';
+export type MainTab = 'home' | 'business' | 'market' | 'organization' | 'social' | 'profile';
 
-export type BusinessSubTab = 'companies' | 'manufacturing' | 'properties' | 'inventory' | 'financials';
+export type BusinessSubTab = 'companies' | 'auctions' | 'manufacturing' | 'properties' | 'inventory' | 'financials';
 export type MarketSubTab = 'exchange' | 'contracts' | 'bank' | 'ledger';
 export type ProfileSubTab = 'overview' | 'skills' | 'missions' | 'rankings' | 'settings' | 'diagnostics';
 
@@ -172,7 +172,27 @@ export interface Company {
   vaultUpgradeStartedAt?: number;
   vaultUpgradeEndsAt?: number;
   vaultUpgradeTargetLevel?: number;
+  auctionId?: string;
+  auctionEndsAt?: number;
+  auctionStatus?: 'active';
   lastCollectedAt: unknown;
+  createdAt: unknown;
+  updatedAt: unknown;
+}
+
+export interface CompanyAuction {
+  id: string;
+  companyId: string;
+  companyName: string;
+  companyLevel: number;
+  sellerUid: string;
+  sellerName: string;
+  startingPrice: number;
+  currentBid: number;
+  highestBidderName?: string | null;
+  highestBidderUid?: string | null;
+  endsAt: number;
+  status: 'active' | 'ended_sold' | 'ended_no_bids' | 'ended_refunded';
   createdAt: unknown;
   updatedAt: unknown;
 }
@@ -220,6 +240,7 @@ export interface Organization {
   reputation: number;
   level: number;
   memberCapacity?: number;
+  joinMode?: 'open' | 'request' | 'closed';
   research?: Partial<Record<OrganizationResearchId, number>>;
   upgradeStartedAt?: number;
   upgradeEndsAt?: number;

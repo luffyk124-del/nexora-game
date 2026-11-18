@@ -1,0 +1,75 @@
+name: Deploy NEXORA to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund --package-lock=false
+
+      - name: Build static app
+        env:
+          GITHUB_PAGES: 'true'
+          VITE_NEXORA_SUPABASE_SHADOW_READS: ${{ vars.VITE_NEXORA_SUPABASE_SHADOW_READS || 'false' }}
+          VITE_NEXORA_SUPABASE_PLAYER_READS: ${{ vars.VITE_NEXORA_SUPABASE_PLAYER_READS || 'false' }}
+          VITE_NEXORA_SUPABASE_TRANSFERS: ${{ vars.VITE_NEXORA_SUPABASE_TRANSFERS || 'false' }}
+          VITE_NEXORA_SUPABASE_DAILY_STIPEND: ${{ vars.VITE_NEXORA_SUPABASE_DAILY_STIPEND || 'false' }}
+          VITE_NEXORA_SUPABASE_SKILLS: ${{ vars.VITE_NEXORA_SUPABASE_SKILLS || 'false' }}
+          VITE_NEXORA_SUPABASE_MARKET: ${{ vars.VITE_NEXORA_SUPABASE_MARKET || 'false' }}
+          VITE_NEXORA_SUPABASE_MISSIONS: ${{ vars.VITE_NEXORA_SUPABASE_MISSIONS || 'false' }}
+          VITE_NEXORA_SUPABASE_CONTRACTS: ${{ vars.VITE_NEXORA_SUPABASE_CONTRACTS || 'false' }}
+          VITE_NEXORA_SUPABASE_PROPERTIES: ${{ vars.VITE_NEXORA_SUPABASE_PROPERTIES || 'false' }}
+          VITE_NEXORA_SUPABASE_MANUFACTURING: ${{ vars.VITE_NEXORA_SUPABASE_MANUFACTURING || 'false' }}
+          VITE_NEXORA_SUPABASE_PROFILE: ${{ vars.VITE_NEXORA_SUPABASE_PROFILE || 'false' }}
+          VITE_NEXORA_SUPABASE_ACCOUNT: ${{ vars.VITE_NEXORA_SUPABASE_ACCOUNT || 'false' }}
+          VITE_NEXORA_SUPABASE_COMPANIES: ${{ vars.VITE_NEXORA_SUPABASE_COMPANIES || 'false' }}
+          VITE_NEXORA_SUPABASE_ORG_TREASURY: ${{ vars.VITE_NEXORA_SUPABASE_ORG_TREASURY || 'false' }}
+          VITE_NEXORA_SUPABASE_ORGANIZATIONS: ${{ vars.VITE_NEXORA_SUPABASE_ORGANIZATIONS || 'false' }}
+          VITE_NEXORA_SUPABASE_COMPANY_AUCTIONS: ${{ vars.VITE_NEXORA_SUPABASE_COMPANY_AUCTIONS || 'false' }}
+          VITE_NEXORA_SUPABASE_SOCIAL: ${{ vars.VITE_NEXORA_SUPABASE_SOCIAL || 'false' }}
+          VITE_NEXORA_SUPABASE_ACHIEVEMENTS: ${{ vars.VITE_NEXORA_SUPABASE_ACHIEVEMENTS || 'false' }}
+        run: |
+          npm run build
+          cp dist/index.html dist/404.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

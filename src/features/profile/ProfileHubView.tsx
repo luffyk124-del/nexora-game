@@ -97,7 +97,11 @@ export function ProfileHubView({
     setLbLoading(true);
     setLbError(false);
     fetchLeaderboards()
-      .then((res) => setLeaderboards(res))
+      .then((res) => setLeaderboards({
+        players: [...res.players].sort((a, b) => b.level - a.level || b.xp - a.xp),
+        companies: [...res.companies].sort((a, b) => b.level - a.level || b.totalRevenue - a.totalRevenue),
+        organizations: [...res.organizations].sort((a, b) => b.level - a.level || b.reputation - a.reputation),
+      }))
       .catch(() => setLbError(true))
       .finally(() => setLbLoading(false));
   }, []);
@@ -357,7 +361,6 @@ export function ProfileHubView({
               { label: language === 'ar' ? 'الصفقات' : 'Trades', val: profile.stats.tradesCount },
               { label: language === 'ar' ? 'الإنتاج' : 'Produced', val: profile.stats.totalProduced },
               { label: t.subCompanies, val: profile.stats.companiesOwned },
-              { label: t.subProperties, val: profile.stats.propertiesOwned },
               { label: t.subMissions, val: profile.stats.missionsCompleted },
             ].map((s) => (
               <div key={s.label} className="bg-[#141821] border border-white/8 rounded-2xl p-4">

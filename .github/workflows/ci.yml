@@ -45,6 +45,21 @@ jobs:
       - name: TypeScript typecheck
         run: npx tsc --noEmit
 
+      - name: Check Firestore migration exporter script
+        run: node --check scripts/nexora-firestore-export.mjs
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Typecheck Supabase Edge Functions
+        run: |
+          deno check supabase/functions/nexora-migration-import/index.ts
+          deno check supabase/functions/nexora-player-session/index.ts
+          deno check supabase/functions/nexora-player-data/index.ts
+          deno check supabase/functions/nexora-economy/index.ts
+
       - name: Unit tests
         run: npm test
 

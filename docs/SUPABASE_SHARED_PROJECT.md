@@ -1,6 +1,6 @@
 # NEXORA / OneState — Shared Supabase Project Isolation Contract
 
-**Status (2026-11-16):** NEXORA's isolated schema has a baseline of 22 tables. RLS is enabled on all 22 and no `anon` or `authenticated` table grants exist. The schema is not exposed through the Data API. No NEXORA player data has been imported, and the application still uses Firebase as its live source of truth.
+**Status (2026-11-18):** NEXORA's isolated schema contains 37 tables. RLS is enabled on all 37 and no `anon` or `authenticated` table grants exist. The `nexora` schema is enabled in the Data API Exposed Schemas setting, but this does not grant client table privileges. No NEXORA player data has been imported, and the application still uses Firebase as its live source of truth.
 
 This document is mandatory context for any agent, developer, or automation that inspects or changes the shared Supabase project. Read it before running SQL, applying migrations, changing Auth, or editing either application.
 
@@ -17,10 +17,10 @@ Both applications use the same Supabase project:
 The existing OneState objects in `public` include these eight tables/views:
 `car_image_index`, `cars_catalog`, `cash_ledger`, `current_inventory`, `dashboard_summary`, `inventory`, `settings`, and `trades`.
 
-The NEXORA baseline currently contains 22 tables:
-`player_profiles`, `player_private`, `wallets`, `transactions`, `inventory`, `market_listings`, `market_orders`, `companies`, `company_logs`, `properties`, `organizations`, `organization_members`, `organization_requests`, `organization_transactions`, `player_missions`, `daily_claims`, `contract_claims`, `player_achievements`, `notifications`, `world_events`, `audit_logs`, and `diagnostics_admins`.
+The NEXORA schema currently contains 37 tables:
+`player_profiles`, `player_private`, `wallets`, `transactions`, `inventory`, `market_listings`, `market_orders`, `companies`, `company_logs`, `properties`, `organizations`, `organization_members`, `organization_requests`, `organization_transactions`, `player_missions`, `daily_claims`, `contract_claims`, `player_achievements`, `notifications`, `world_events`, `audit_logs`, `diagnostics_admins`, `company_auctions`, `usernames`, `user_blocks`, `chat_rate_limits`, `conversations`, `conversation_messages`, `global_chat_messages`, `organization_invites`, `player_reports`, `player_report_audit`, `reports_login_attempts`, `migration_operators`, `migration_batches`, `firestore_import_payloads`, and `user_identity_map`.
 
-All 22 NEXORA tables have RLS enabled. The database verification query confirmed zero table grants to `anon` and `authenticated` for every NEXORA table. The schema remains unexposed in Data API settings. No user/player records were imported. The NEXORA migration did not move, rename, copy, or modify any OneState `public` object.
+All 37 NEXORA tables have RLS enabled. The database verification query confirmed zero table grants to `anon` and `authenticated` for every NEXORA table. The `nexora` schema is exposed in Data API settings, while `anon` and `authenticated` still have zero table grants. No user/player records were imported. The NEXORA migration did not move, rename, copy, or modify any OneState `public` object.
 
 ## 2. Mandatory isolation rules
 

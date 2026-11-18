@@ -15,6 +15,8 @@ import { HomeDashboardView } from './features/home/HomeDashboardView';
 import { MarketHubView } from './features/market/MarketHubView';
 import { OrganizationHubView } from './features/organization/OrganizationHubView';
 import { ProfileHubView } from './features/profile/ProfileHubView';
+import { SocialHubView } from './features/social/SocialHubView';
+import { MigrationConsole } from './features/migration/MigrationConsole';
 import { useGameData } from './hooks/useGameData';
 import type { MainTab } from './types/game';
 
@@ -103,6 +105,7 @@ function NexoraAppContent() {
           profile={game.profile}
           wallet={game.wallet}
           companies={game.companies}
+          companyAuctions={game.companyAuctions}
           companyLogs={game.companyLogs}
           properties={game.properties}
           inventory={game.inventory}
@@ -141,6 +144,14 @@ function NexoraAppContent() {
         />
       )}
 
+      {activeTab === 'social' && (
+        <SocialHubView
+          profile={game.profile}
+          myOrgMember={game.myOrgMember}
+          language={game.language}
+        />
+      )}
+
       {activeTab === 'profile' && (
         <ProfileHubView
           profile={game.profile}
@@ -168,6 +179,11 @@ function NexoraAppContent() {
 }
 
 export default function App() {
+  const migrationRoute = window.location.pathname === '/migration' || new URLSearchParams(window.location.search).get('migration') === '1';
+  if (migrationRoute) {
+    return <MigrationConsole />;
+  }
+
   return (
     <ToastProvider>
       <GameAudioFeedback />

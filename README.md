@@ -30,8 +30,8 @@ Default UI language is **Arabic (`RTL`)** with instant switching to **English (`
 ## Supabase Target — Isolated Namespace
 - **Shared project**: `OneState-Trading-DB` (`dmeupqmhsyojxlgalxrc`, `eu-west-1`).
 - **NEXORA schema**: `nexora`; baseline schema applied on 2026-11-16.
-- **Baseline**: 22 NEXORA tables, RLS enabled on all 22, zero `anon`/`authenticated` table grants, no Data API exposure, and no NEXORA player data imported.
-- **Fail-closed state is intentional**: no client RLS policies or table grants have been added yet. The database advisor's `rls_enabled_no_policy` notices for NEXORA are expected until a reviewed identity model and policies are implemented. Do not loosen this state to silence the notice.
+- **Current target**: 37 NEXORA tables, RLS enabled on all 37, zero `anon`/`authenticated` table grants, the `nexora` schema exposed in Data API settings, and no NEXORA player data imported.
+- **Fail-closed state is intentional**: the schema is exposed, but no client table grants or RLS policies have been added yet. The database advisor's `rls_enabled_no_policy` notices for NEXORA are expected until a reviewed identity model and policies are implemented. Do not loosen this state to silence the notice.
 - **OneState**: existing `public` tables/views remain outside the NEXORA migration. Do not modify them.
 - **Auth boundary**: Supabase Auth is shared at project level. Firebase Auth remains active pending an explicit isolated identity design.
 
