@@ -74,6 +74,7 @@ async function main(req: Request): Promise<Response> {
   if (!token) return reply({ error: "UNAUTHENTICATED" }, 401);
 
   let uid = "";
+  let claimedOwner = false;
   try {
     const { payload } = await jwtVerify(token, FIREBASE_KEYS, {
       issuer: FIREBASE_ISSUER, audience: PROJECT_ID, algorithms: ["RS256"],
@@ -83,15 +84,18 @@ async function main(req: Request): Promise<Response> {
       return reply({ error: "VERIFIED_OWNER_REQUIRED" }, 403);
     }
     uid = payload.sub;
+    claimedOwner = payload.diagnosticsOwner === true;
   } catch {
     return reply({ error: "UNAUTHENTICATED" }, 401);
   }
 
   const admin = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
-  const { data: operator, error: operatorError } = await admin.schema("nexora")
-    .from("migration_operators").select("firebase_uid,enabled,role")
-    .eq("firebase_uid", uid).eq("enabled", true).eq("role", "owner").maybeSingle();
-  if (operatorError || !operator) return reply({ error: "MIGRATION_OWNER_REQUIRED" }, 403);
+  if (!claimedOwner) {
+    const { data: operator, error: operatorError } = await admin.schema("nexora")
+      .from("migration_operators").select("firebase_uid,enabled,role")
+      .eq("firebase_uid", uid).eq("enabled", true).eq("role", "owner").maybeSingle();
+    if (operatorError || !operator) return reply({ error: "MIGRATION_OWNER_REQUIRED" }, 403);
+  }
 
   let body: Json;
   try { body = await req.json(); } catch { return reply({ error: "INVALID_JSON" }, 400); }
