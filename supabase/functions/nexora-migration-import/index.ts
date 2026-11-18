@@ -4,6 +4,10 @@ import { createRemoteJWKSet, jwtVerify } from "npm:jose@5.10.0";
 const PROJECT_ID = "gen-lang-client-0074900177";
 const FIREBASE_ISSUER = `https://securetoken.google.com/${PROJECT_ID}`;
 const FIREBASE_KEYS = createRemoteJWKSet(new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"));
+const GITHUB_ISSUER = "https://token.actions.githubusercontent.com";
+const GITHUB_KEYS = createRemoteJWKSet(new URL("https://token.actions.githubusercontent.com/.well-known/jwks"));
+const GITHUB_REPOSITORY = "luffyk124-del/nexora-game";
+const GITHUB_WORKFLOW = ".github/workflows/nexora-firestore-export.yml";
 
 type Json = Record<string, unknown>;
 type Doc = { id: string; path: string; fields: Json };
@@ -98,6 +102,7 @@ async function main(req: Request): Promise<Response> {
 
   let uid = "";
   let claimedOwner = false;
+  let githubActor = "";
   try {
     const { payload } = await jwtVerify(token, FIREBASE_KEYS, {
       issuer: FIREBASE_ISSUER, audience: PROJECT_ID, algorithms: ["RS256"],
@@ -109,7 +114,26 @@ async function main(req: Request): Promise<Response> {
     uid = payload.sub;
     claimedOwner = payload.diagnosticsOwner === true;
   } catch {
-    return send({ error: "UNAUTHENTICATED" }, 401);
+    try {
+      const audience = `${url}/functions/v1/nexora-migration-import`;
+      const { payload } = await jwtVerify(token, GITHUB_KEYS, {
+        issuer: GITHUB_ISSUER, audience, algorithms: ["RS256"],
+      });
+      const ref = typeof payload.ref === "string" ? payload.ref : "";
+      const workflowRef = typeof payload.workflow_ref === "string" ? payload.workflow_ref : "";
+      const actor = typeof payload.actor === "string" ? payload.actor : "";
+      const allowedRef = ref === "refs/heads/feature/nexora-social-economy-mobile-overhaul" || ref === "refs/heads/main";
+      if (payload.repository !== GITHUB_REPOSITORY || !allowedRef ||
+          workflowRef !== `${GITHUB_REPOSITORY}/${GITHUB_WORKFLOW}@${ref}` ||
+          !["workflow_dispatch","schedule"].includes(String(payload.event_name)) || actor !== "luffyk124-del") {
+        return send({ error: "GITHUB_EXPORTER_NOT_AUTHORIZED" }, 403);
+      }
+      githubActor = actor;
+      uid = `github-actions:${actor}`;
+      claimedOwner = true;
+    } catch {
+      return send({ error: "UNAUTHENTICATED" }, 401);
+    }
   }
 
   const admin = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
