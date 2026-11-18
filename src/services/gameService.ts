@@ -1243,6 +1243,19 @@ export async function foundCompany(
 }
 
 export async function upgradeCompany(uid: string, companyId: string): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_COMPANIES === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'company_upgrade', companyId, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'COMPANY_OPERATION_FAILED');
+    return;
+  }
   await callCompanyVault<{ ok: boolean }>(uid, 'company_upgrade', companyId);
 }
 
@@ -1275,6 +1288,19 @@ export async function upgradeCompanyVault(uid: string, companyId: string): Promi
 }
 
 export async function completeCompanyUpgrade(uid: string, companyId: string): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_COMPANIES === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'company_complete', companyId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'COMPANY_OPERATION_FAILED');
+    return;
+  }
   await callCompanyVault<{ ok: boolean }>(uid, 'company_complete', companyId);
 }
 
@@ -1283,6 +1309,19 @@ export async function completeCompanyVaultUpgrade(uid: string, companyId: string
 }
 
 export async function collectCompanyRevenue(uid: string, companyId: string): Promise<number> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_COMPANIES === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'company_collect', companyId, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'COMPANY_OPERATION_FAILED');
+    return Number(payload.payout);
+  }
   const result = await callCompanyVault<{ ok: boolean; payout: number }>(uid, 'collect', companyId);
   return result.payout;
 }
