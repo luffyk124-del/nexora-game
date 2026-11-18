@@ -1907,6 +1907,19 @@ export async function updatePlayerSettings(
   language: Language,
   notificationsEnabled: boolean
 ): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_PROFILE === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'update_player_settings', language, notificationsEnabled }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'PLAYER_UPDATE_FAILED');
+    return;
+  }
   try {
     await updateDoc(doc(db, 'users_private', uid), {
       language,
@@ -1919,6 +1932,19 @@ export async function updatePlayerSettings(
 }
 
 export async function updatePlayerAvatar(uid: string, avatarId: string): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_PROFILE === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'update_player_avatar', avatarId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'PLAYER_UPDATE_FAILED');
+    return;
+  }
   try {
     await updateDoc(doc(db, 'profiles', uid), {
       avatarId,
@@ -1930,6 +1956,19 @@ export async function updatePlayerAvatar(uid: string, avatarId: string): Promise
 }
 
 export async function markNotificationRead(notifId: string): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_PROFILE === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'mark_notification_read', notificationId: notifId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'PLAYER_UPDATE_FAILED');
+    return;
+  }
   try {
     await updateDoc(doc(db, 'notifications', notifId), { read: true });
   } catch (error) {
@@ -1939,6 +1978,19 @@ export async function markNotificationRead(notifId: string): Promise<void> {
 
 export async function markAllNotificationsRead(notifIds: string[]): Promise<void> {
   if (!notifIds.length) return;
+  if (import.meta.env.VITE_NEXORA_SUPABASE_PROFILE === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'mark_notifications_read', notificationIds: notifIds }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'PLAYER_UPDATE_FAILED');
+    return;
+  }
   try {
     const batch = writeBatch(db);
     for (const id of notifIds) {
