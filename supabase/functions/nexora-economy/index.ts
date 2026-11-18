@@ -88,6 +88,33 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  if (action === "company_upgrade" || action === "company_complete" || action === "company_collect") {
+    const companyId = typeof body.companyId === "string" ? body.companyId : "";
+    if (!companyId || companyId.length > 160) return json({ error: "COMPANY_NOT_FOUND" }, 400, origin);
+    let rpcName: string;
+    let args: Record<string, unknown>;
+    if (action === "company_upgrade" || action === "company_collect") {
+      const requestId = typeof body.requestId === "string" ? body.requestId : "";
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) return json({ error: "INVALID_REQUEST" }, 400, origin);
+      rpcName = action === "company_upgrade" ? "start_company_upgrade" : "collect_company_revenue";
+      args = { p_user_id: uid, p_company_id: companyId, p_request_id: requestId };
+    } else {
+      rpcName = "complete_company_upgrade";
+      args = { p_user_id: uid, p_company_id: companyId };
+    }
+    const { data, error } = await admin.schema("nexora").rpc(rpcName, args);
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      const allowed = ["INVALID_REQUEST","COMPANY_NOT_FOUND","UNAUTHORIZED","COMPANY_IN_AUCTION","MAX_LEVEL",
+        "UPGRADE_IN_PROGRESS","INSUFFICIENT_FUNDS","ACCOUNT_NOT_FOUND","NO_UPGRADE_IN_PROGRESS",
+        "UPGRADE_NOT_FINISHED","INVALID_UPGRADE_STATE","NOTHING_TO_COLLECT"];
+      if (allowed.includes(message)) return json({ error: message }, 400, origin);
+      console.error("NEXORA company lifecycle RPC failed:", error.message);
+      return json({ error: "COMPANY_OPERATION_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
   if (action === "deposit_org_treasury" || action === "withdraw_org_treasury") {
     const orgId = typeof body.orgId === "string" ? body.orgId : "";
     const amount = body.amount;
