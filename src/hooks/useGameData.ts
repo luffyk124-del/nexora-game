@@ -218,6 +218,71 @@ export function useGameData(): GameDataState {
     setOrgMemberLoaded(false);
 
     const uid = authUser.uid;
+
+    // Opt-in read migration. Disabled by default until a real-player QA pass is complete.
+    if (import.meta.env.VITE_NEXORA_SUPABASE_READS === 'true') {
+      let cancelled = false;
+      void (async () => {
+        try {
+          const idToken = await authUser.getIdToken();
+          const response = await fetch(
+            'https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-player-data',
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${idToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: '{}',
+              cache: 'no-store',
+            }
+          );
+          const payload = await response.json();
+          if (!response.ok || !payload?.ok || !payload?.player) {
+            throw new Error(payload?.error || 'SUPABASE_PLAYER_DATA_UNAVAILABLE');
+          }
+          if (cancelled) return;
+          const data = payload.player;
+          setProfile(data.profile ?? null);
+          setUserPrivate(data.privateData ?? null);
+          setWallet(data.wallet ?? null);
+          setInventory(data.inventory ?? []);
+          setTransactions(data.transactions ?? []);
+          setMarketListings(data.marketListings ?? []);
+          setMarketOrders(data.marketOrders ?? []);
+          setCompanies(data.companies ?? []);
+          setCompanyAuctions(data.companyAuctions ?? []);
+          setCompanyLogs(data.companyLogs ?? []);
+          setProperties(data.properties ?? []);
+          setOrganizations(data.organizations ?? []);
+          setMyOrgMember(data.myOrgMember ?? null);
+          setOrgMembers(data.orgMembers ?? []);
+          setOrgRequests(data.orgRequests ?? []);
+          setMyPendingOrgIds(new Set(data.myPendingOrgIds ?? []));
+          setOrgTransactions(data.orgTransactions ?? []);
+          setClaimedMissions(data.claimedMissions ?? []);
+          setClaimedDailyToday(Boolean(data.claimedDailyToday));
+          setClaimedContractsToday(new Set(data.claimedContractsToday ?? []));
+          setUnlockedAchievements(new Set(data.unlockedAchievements ?? []));
+          setNotifications(data.notifications ?? []);
+          setWorldEvents(data.worldEvents ?? []);
+          setOrgMemberLoaded(true);
+          if (data.privateData?.language === 'ar' || data.privateData?.language === 'en') {
+            setLanguageLocal(data.privateData.language);
+          }
+          setProfileLoading(false);
+        } catch (error) {
+          if (cancelled) return;
+          console.error('NEXORA Supabase read migration failed:', error);
+          clearSessionState();
+          setProfileLoading(false);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+
     if (bootstrappedUidRef.current !== uid) {
       bootstrappedUidRef.current = uid;
       ensureBootstrapWorldData();
@@ -491,6 +556,7 @@ export function useGameData(): GameDataState {
 
   // Sync organization membership onto profile if approved while away
   useEffect(() => {
+    if (import.meta.env.VITE_NEXORA_SUPABASE_READS === 'true') return;
     if (!authUser || !profile || !orgMemberLoaded) return;
     if (myOrgMember && profile.orgId !== myOrgMember.orgId) {
       syncSelfOrgMembership(authUser.uid, myOrgMember.orgId);
@@ -563,6 +629,7 @@ export function useGameData(): GameDataState {
 
   // Auto-unlock eligible achievements (deduplicated per session)
   useEffect(() => {
+    if (import.meta.env.VITE_NEXORA_SUPABASE_READS === 'true') return;
     if (!authUser || !profile) return;
     const alreadySkipped = new Set([
       ...unlockedAchievements,
