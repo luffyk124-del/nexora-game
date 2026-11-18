@@ -1,43 +1,45 @@
-# NEXORA Reports Center — secure setup
+# NEXORA Reports Center — Supabase setup
 
-## Authentication model
-- Login is handled by the `loginReportsAdmin` callable function.
-- The only accepted username is `MJNON`.
-- The password is verified server-side using scrypt; only a salted scrypt hash is stored in Firebase Secret Manager.
-- A successful login receives a Firebase custom token for the one fixed UID `nexora-reports-mjnon-admin`.
-- Every reports callable checks both that UID and the `reportsAdmin` custom claim.
-- There is no public registration flow and no password or hash in browser code or Git history.
-- Login attempts are rate-limited per hashed IP in Firestore (5 failures per 10 minutes).
+## Current architecture
+- The browser uses Supabase Auth with Google OAuth.
+- The browser calls the `nexora-reports-admin` Edge Function; it does not access report tables directly.
+- The Edge Function verifies the Supabase access token, then checks `nexora.diagnostics_admins` for the signed-in user's enabled admin record.
+- Reports and audit data stay in the `nexora` schema. RLS remains enabled and direct client grants remain revoked.
+- There is no public admin registration or first-user auto-promotion.
 
-## One-time secret provisioning
-Use a new password of at least 12 characters. Do not reuse a password that has been pasted into chat, a ticket, or source control.
+## Required Supabase Auth setup
+1. In Supabase Dashboard, open Authentication → Providers → Google and enable Google.
+2. Configure the Google OAuth Web client ID and client secret in the Google provider settings.
+3. In Authentication → URL Configuration, set the Site URL to the eventual Reports Center origin and add that exact origin/path to the Redirect URLs allow-list.
+4. In Google Cloud OAuth client settings, add the Reports Center origin as an authorized JavaScript origin and the Supabase Auth callback URL shown on the Supabase Google provider page as an authorized redirect URI.
+5. The front end uses `signInWithOAuth({ provider: 'google' })` and redirects back to the Reports Center page.
 
-From the repository root, run:
+Google OAuth cannot be activated from the repository alone: the provider's client secret must be configured in the Supabase project dashboard or through the Supabase Management API. Never commit the Google client secret.
 
-```bash
-node functions/scripts/generate-reports-admin-hash.mjs
+## Authorize the first administrator
+After Google OAuth is enabled and the Reports Center is deployed to a private preview:
+1. Sign in with the intended owner Google account.
+2. Retrieve that account's Supabase Auth user UUID from Authentication → Users.
+3. Insert that UUID into `nexora.diagnostics_admins` with `enabled = true` and `role = 'owner'` using a trusted project-owner database session.
+4. Do not create an open registration endpoint or allow the first visitor to claim admin access.
+
+Example SQL for a trusted project owner session (replace the placeholder with the verified Auth user UUID):
+```sql
+insert into nexora.diagnostics_admins (user_id, enabled, role)
+values ('<VERIFIED_SUPABASE_AUTH_USER_UUID>', true, 'owner')
+on conflict (user_id) do update
+set enabled = true, role = 'owner', updated_at = now();
 ```
 
-The script reads the password without echoing it and prints a salted scrypt hash. Copy that hash, then set the Firebase secret:
+## Frontend deployment
+- Vercel project root: `reports-center`.
+- Build command: `npm run build`.
+- Output directory: `dist`.
+- Keep the preview private until Google OAuth, administrator authorization, and the list/update/audit flows have been tested.
 
-```bash
-firebase functions:secrets:set REPORTS_ADMIN_PASSWORD_HASH --project gen-lang-client-0074900177
-```
-
-Paste the hash when prompted. Never put the password or hash in a source file, command-line argument, GitHub issue, or commit.
-
-## Deploy only the Reports Center backend
-After the secret is configured and the functions build succeeds:
-
-```bash
-cd functions
-npm ci
-npm run build
-cd ..
-firebase deploy --only functions:loginReportsAdmin,functions:listPlayerReportsAdmin,functions:updatePlayerReportAdmin,functions:listPlayerReportAuditAdmin --project gen-lang-client-0074900177
-```
-
-The existing Firestore rules deny direct client access to reports, audit, and admin collections. The new login-attempt collection also remains server-only under the global deny rule.
-
-## Frontend
-The standalone Vercel project root is `reports-center`; build command `npm run build`, output directory `dist`. Deploying the frontend alone does not activate login until the four callable functions and the secret are deployed.
+## Migration status
+- The Supabase Edge Function `nexora-reports-admin` is deployed with JWT verification enabled.
+- The reports tables exist in schema `nexora`; RLS is enabled and no public policies are present.
+- The reports UI branch has been updated to use Supabase Auth and the Edge Function.
+- The Google provider credentials, first administrator record, data import from Firestore, and final deployment are still pending.
+- Do not delete or disable the original Firebase project until migration and data reconciliation are complete.
