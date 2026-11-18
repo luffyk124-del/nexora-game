@@ -117,3 +117,11 @@ The imported Firestore archive for the actual player UID was compared directly w
 - Exact count matches: inventory 9, transactions 84, company 1, company logs 43, market listings 2, market orders 17, organization membership 1, player missions 5, daily claims 3, contract claims 7, achievements 4, notifications 4, and properties 0.
 - Field-level comparison returned zero mismatches for all 84 transaction records, all 9 inventory rows, the company row, all 43 company logs, and all 17 market orders.
 - This is strong archived-data parity evidence. The live-player Migration Console check is still required because the archive snapshot predates this QA session and cannot prove the running Firebase session is current.
+
+
+## GitHub exporter infrastructure status
+
+- Infrastructure PR #10 was merged into `main` after all CI checks passed. The GitHub OIDC exporter workflow is now present on the default branch and available for manual dispatch.
+- The exporter is deliberately manual-only; no scheduled scan or import has been enabled.
+- The remaining external prerequisite is Google Cloud Workload Identity Federation plus the GitHub repository variable `GCP_GITHUB_WIF_PROVIDER`. The exact commands and required permissions are in `docs/GITHUB_OIDC_SETUP.md`.
+- Until that setup is complete and a read-only scan is reviewed, keep the legacy Vercel exporter as a fallback and do not run both exporters concurrently.
