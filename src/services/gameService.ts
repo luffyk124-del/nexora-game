@@ -262,6 +262,32 @@ export async function claimDailyStipend(uid: string): Promise<number> {
   const txId = genId('tx');
   const notifId = genId('ntf');
 
+  // Opt-in migration route. Firebase remains the default until complete economy parity QA.
+  if (import.meta.env.VITE_NEXORA_SUPABASE_DAILY_STIPEND === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) {
+      throw new Error('UNAUTHENTICATED');
+    }
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch(
+      'https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ action: 'claim_daily_stipend' }),
+        cache: 'no-store',
+      }
+    );
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok || !Number.isFinite(payload.amount)) {
+      throw new Error(payload?.error || 'DAILY_STIPEND_FAILED');
+    }
+    return Number(payload.amount);
+  }
+
   try {
     let credited = 0;
     await runTransaction(db, async (tx) => {
