@@ -88,6 +88,47 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  if (action === "create_company_auction" || action === "place_company_auction_bid") {
+    const requestId = typeof body.requestId === "string" ? body.requestId : "";
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+      return json({ error: "INVALID_REQUEST" }, 400, origin);
+    }
+    let rpcName: string;
+    let args: Record<string, unknown>;
+    if (action === "create_company_auction") {
+      const companyId = typeof body.companyId === "string" ? body.companyId.trim() : "";
+      const startingPrice = body.startingPrice;
+      if (!/^cmp_[A-Za-z0-9_-]{6,128}$/.test(companyId) ||
+          !Number.isSafeInteger(startingPrice) || (startingPrice as number) < 0 || (startingPrice as number) > 10000000) {
+        return json({ error: "INVALID_ARGUMENT" }, 400, origin);
+      }
+      rpcName = "create_company_auction";
+      args = { p_user_id: uid, p_company_id: companyId, p_starting_price: startingPrice, p_request_id: requestId };
+    } else {
+      const auctionId = typeof body.auctionId === "string" ? body.auctionId.trim() : "";
+      const bidAmount = body.bidAmount;
+      if (!/^auc_[A-Za-z0-9_-]{8,160}$/.test(auctionId) ||
+          !Number.isSafeInteger(bidAmount) || (bidAmount as number) < 1 || (bidAmount as number) > 10000000) {
+        return json({ error: "INVALID_ARGUMENT" }, 400, origin);
+      }
+      rpcName = "place_company_auction_bid";
+      args = { p_user_id: uid, p_auction_id: auctionId, p_bid_amount: bidAmount, p_request_id: requestId };
+    }
+    const { data, error } = await admin.schema("nexora").rpc(rpcName, args);
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      const allowed = ["INVALID_REQUEST","INVALID_ARGUMENT","NOT_FOUND","ACCOUNT_NOT_FOUND","NOT_COMPANY_OWNER",
+        "COMPANY_LEVEL_TOO_LOW","AUCTION_ALREADY_ACTIVE","COMPANY_UPGRADE_IN_PROGRESS","START_PRICE_OUT_OF_RANGE",
+        "REQUEST_ID_CONFLICT","AUCTION_NOT_FOUND","AUCTION_ENDED","CANNOT_BID_OWN_AUCTION",
+        "ALREADY_HIGHEST_BIDDER","AUCTION_COMPANY_MISMATCH","COMPANY_OWNERSHIP_LIMIT","BID_TOO_LOW",
+        "INSUFFICIENT_FUNDS","PREVIOUS_ESCROW_ACCOUNT_MISSING"];
+      if (allowed.includes(message)) return json({ error: message }, 400, origin);
+      console.error("NEXORA company auction RPC failed:", error.message);
+      return json({ error: "COMPANY_AUCTION_OPERATION_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
   if (action === "join_organization" || action === "leave_organization" ||
       action === "handle_org_join_request" || action === "kick_org_member" || action === "set_org_join_mode") {
     const orgId = typeof body.orgId === "string" ? body.orgId : "";
