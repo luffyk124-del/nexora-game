@@ -86,6 +86,23 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  if (action === "fulfill_trade_contract") {
+    const contractId = typeof body.contractId === "string" ? body.contractId : "";
+    if (!contractId || contractId.length > 80) return json({ error: "INVALID_CONTRACT" }, 400, origin);
+    const { data, error } = await admin.schema("nexora").rpc("fulfill_trade_contract", {
+      p_user_id: uid, p_contract_id: contractId,
+    });
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      if (["INVALID_CONTRACT","CONTRACT_ALREADY_FULFILLED","MISSING_INPUTS","ACCOUNT_NOT_FOUND"].includes(message)) {
+        return json({ error: message }, 400, origin);
+      }
+      console.error("NEXORA trade contract RPC failed:", error.message);
+      return json({ error: "CONTRACT_FULFILL_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
   if (action === "claim_mission_reward") {
     const missionId = typeof body.missionId === "string" ? body.missionId : "";
     if (!missionId || missionId.length > 80) return json({ error: "INVALID_MISSION" }, 400, origin);
