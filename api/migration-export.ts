@@ -61,7 +61,7 @@ function decodeDocument(doc: Data) {
 
 async function verifyActor(req: Req): Promise<TokenActor> {
   const header = req.headers.authorization;
-  const match = typeof header === 'string' ? /^Bearer\\s+(.+)$/i.exec(header) : null;
+  const match = typeof header === 'string' ? /^Bearer\s+(.+)$/i.exec(header) : null;
   if (!match) throw new ExportError(401, 'UNAUTHENTICATED');
   const { payload } = await jwtVerify(match[1], FIREBASE_KEYS, {
     issuer: FIREBASE_ISSUER, audience: PROJECT_ID, algorithms: ['RS256'],
