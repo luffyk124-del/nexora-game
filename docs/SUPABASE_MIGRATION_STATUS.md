@@ -88,3 +88,12 @@ All are disabled unless explicitly set to the string `true`:
 - The Firebase scheduled callbacks now honor `NEXORA_SUPABASE_SCHEDULERS_ACTIVE=true` as an explicit cutover guard. Set it only after verifying the Supabase jobs and then enable the matching Supabase scheduler flags. Do not enable one side without disabling the other.
 - Rollback order: set both Supabase scheduler flags to false first, then unset `NEXORA_SUPABASE_SCHEDULERS_ACTIVE` in Firebase Functions and redeploy the scheduled functions.
 - This environment variable is intentionally not set by this migration. No scheduled production workload has been switched.
+
+
+## Read parity hardening
+
+- `useGameData.ts` now has a guarded Supabase player snapshot path. It is eligible only when the player-read flag and every required game write-domain flag are all enabled; otherwise the hook stays on Firebase (or performs an opt-in shadow read).
+- The Supabase snapshot and Firebase fallback now use deterministic order/limit windows for transactions, listings, orders, company logs, notifications, organization requests, and organization treasury history.
+- Added matching Firestore composite indexes in `firestore.indexes.json`; the Firebase rules deployment workflow now deploys those indexes alongside rules.
+- Added a read-only **real-player parity check** to the Migration Console. It uses the signed-in Firebase player's own session to compare profile/private data, wallet, inventory, transactions, market, companies, auctions, properties, organizations, missions, claims, achievements, notifications, and world events against the Supabase player-data endpoint. It does not mutate player data.
+- The parity check is implemented but has not yet been run with the owner's live signed-in player session. It must report zero differences before the read switch is enabled.
