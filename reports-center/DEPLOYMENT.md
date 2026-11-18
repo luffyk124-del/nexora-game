@@ -5,9 +5,18 @@
 - The browser calls the `nexora-reports-admin` Edge Function; it does not access report tables directly.
 - The Edge Function verifies the Supabase access token, then checks `nexora.diagnostics_admins` for the signed-in user's enabled admin record.
 - Reports and audit data stay in the `nexora` schema. RLS remains enabled and direct client grants remain revoked.
+- Trusted server access is granted to `service_role` only. Do not grant `anon` or `authenticated` access to the NEXORA tables.
 - Status changes and audit insertion are committed atomically through `nexora.set_player_report_status`.
 - The RPC is executable only by `service_role`; `anon` and `authenticated` have no execute permission.
 - There is no public admin registration or first-user auto-promotion.
+
+## Supabase API schema exposure
+The Edge Function uses the Supabase Data API with `.schema("nexora")`. In Supabase Dashboard:
+1. Open Project Settings → API.
+2. Add `nexora` to the exposed schemas list and save.
+3. Keep table privileges restricted: only `service_role` has access; `anon` and `authenticated` remain revoked.
+
+Exposing a schema makes it addressable through the Data API; it does not grant table access by itself. Do not add client grants or public RLS policies.
 
 ## Required Supabase Auth setup
 1. In Supabase Dashboard, open Authentication → Providers → Google and enable Google.
@@ -43,7 +52,6 @@ set enabled = true, role = 'owner', updated_at = now();
 - The Supabase Edge Function `nexora-reports-admin` is deployed as version 2 with JWT verification enabled.
 - The status update path uses the atomic RPC `nexora.set_player_report_status`; the SQL migration is tracked at `supabase/migrations/20261118051500_nexora_reports_atomic_status_audit.sql`.
 - The function source is tracked at `supabase/functions/nexora-reports-admin/index.ts`.
-- The reports tables exist in schema `nexora`; RLS is enabled and no public policies are present.
-- The reports UI branch uses Supabase Auth and the Edge Function.
-- The Google provider credentials, first administrator record, data import from Firestore, and final deployment are still pending.
+- Reports tables exist in schema `nexora`; RLS is enabled and client grants remain revoked.
+- The Google provider credentials, first administrator record, `nexora` API schema exposure, Firestore data import, and final deployment are still pending.
 - Do not delete or disable the original Firebase project until migration and data reconciliation are complete.
