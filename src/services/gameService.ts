@@ -946,6 +946,23 @@ export async function fulfillTradeContract(uid: string, contractId: string): Pro
   const contract = TRADE_CONTRACTS.find((c) => c.id === contractId);
   if (!contract) throw new Error('INVALID_CONTRACT');
 
+  if (import.meta.env.VITE_NEXORA_SUPABASE_CONTRACTS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'fulfill_trade_contract', contractId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok || !Number.isFinite(payload.payout)) {
+      throw new Error(payload?.error || 'CONTRACT_FULFILL_FAILED');
+    }
+    return Number(payload.payout);
+  }
+
   const dateKey = getUtcDateKey();
   const claimId = `${uid}_${contractId}_${dateKey}`;
   const txId = genId('tx');
