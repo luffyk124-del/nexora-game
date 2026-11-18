@@ -5,6 +5,8 @@
 - The browser calls the `nexora-reports-admin` Edge Function; it does not access report tables directly.
 - The Edge Function verifies the Supabase access token, then checks `nexora.diagnostics_admins` for the signed-in user's enabled admin record.
 - Reports and audit data stay in the `nexora` schema. RLS remains enabled and direct client grants remain revoked.
+- Status changes and audit insertion are committed atomically through `nexora.set_player_report_status`.
+- The RPC is executable only by `service_role`; `anon` and `authenticated` have no execute permission.
 - There is no public admin registration or first-user auto-promotion.
 
 ## Required Supabase Auth setup
@@ -38,8 +40,10 @@ set enabled = true, role = 'owner', updated_at = now();
 - Keep the preview private until Google OAuth, administrator authorization, and the list/update/audit flows have been tested.
 
 ## Migration status
-- The Supabase Edge Function `nexora-reports-admin` is deployed with JWT verification enabled.
+- The Supabase Edge Function `nexora-reports-admin` is deployed as version 2 with JWT verification enabled.
+- The status update path uses the atomic RPC `nexora.set_player_report_status`; the SQL migration is tracked at `supabase/migrations/20261118051500_nexora_reports_atomic_status_audit.sql`.
+- The function source is tracked at `supabase/functions/nexora-reports-admin/index.ts`.
 - The reports tables exist in schema `nexora`; RLS is enabled and no public policies are present.
-- The reports UI branch has been updated to use Supabase Auth and the Edge Function.
+- The reports UI branch uses Supabase Auth and the Edge Function.
 - The Google provider credentials, first administrator record, data import from Firestore, and final deployment are still pending.
 - Do not delete or disable the original Firebase project until migration and data reconciliation are complete.
