@@ -11,9 +11,15 @@ const ORIGINS = new Set([
   "https://nexora-game-git-feature-nexora-social-economy-mo-add6d8-manus24.vercel.app",
   "https://luffyk124-del.github.io",
 ]);
+function isAllowedOrigin(origin: string | null): boolean {
+  return !origin ||
+    ORIGINS.has(origin) ||
+    /^https:\/\/nexora-game-[a-z0-9-]+\.vercel\.app$/.test(origin);
+}
+
 
 const headers = (origin: string | null) => ({
-  "Access-Control-Allow-Origin": origin && ORIGINS.has(origin)
+  "Access-Control-Allow-Origin": origin && isAllowedOrigin(origin)
     ? origin
     : "https://nexora-game-wkbi2g3f9-manus24.vercel.app",
   "Access-Control-Allow-Headers": "authorization, apikey, x-client-info, content-type",
@@ -96,7 +102,7 @@ function normalize(value: unknown): unknown {
 
 Deno.serve(async (req: Request) => {
   const origin = req.headers.get("Origin");
-  if (origin && !ORIGINS.has(origin)) return json({ error: "FORBIDDEN_ORIGIN" }, 403, origin);
+  if (!isAllowedOrigin(origin)) return json({ error: "FORBIDDEN_ORIGIN" }, 403, origin);
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: headers(origin) });
   if (req.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405, origin);
 
