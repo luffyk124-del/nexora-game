@@ -1427,6 +1427,21 @@ export async function claimMissionReward(uid: string, missionId: string): Promis
   const mission = MISSIONS.find((m) => m.id === missionId);
   if (!mission) throw new Error('INVALID_MISSION');
 
+  if (import.meta.env.VITE_NEXORA_SUPABASE_MISSIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'claim_mission_reward', missionId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'MISSION_REWARD_FAILED');
+    return;
+  }
+
   const claimDocId = `${uid}_${missionId}`;
   const txId = genId('tx');
 
