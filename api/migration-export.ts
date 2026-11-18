@@ -15,7 +15,8 @@ const EXPORT_COLLECTIONS = new Set([
   'market_listings', 'market_orders', 'companies', 'company_auctions', 'company_logs',
   'properties', 'organizations', 'organization_members', 'organization_requests',
   'organization_transactions', 'player_missions', 'daily_claims', 'contract_claims',
-  'player_achievements', 'notifications', 'world_events', 'audit_logs', 'user_blocks',\n  'chat_rate_limits', 'conversations', 'global_chat_messages', 'organization_invites', 'conversation_messages',
+  'player_achievements', 'notifications', 'world_events', 'audit_logs', 'user_blocks',
+  'chat_rate_limits', 'conversations', 'global_chat_messages', 'organization_invites', 'conversation_messages',
 ]);
 
 type Req = IncomingMessage & { body?: unknown };
@@ -136,7 +137,8 @@ export default async function handler(req: Req, res: Res): Promise<void> {
     const pageToken = typeof body.pageToken === 'string' ? body.pageToken : '';
     if (pageToken.length > 8192) throw new ExportError(400, 'INVALID_PAGE_TOKEN');
 
-    const sourcePath = collection === 'conversation_messages' ? `conversations/${parentId}/messages` : collection;\n    const base = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/${DATABASE_ID}/documents/${sourcePath}`;
+    const sourcePath = collection === 'conversation_messages' ? `conversations/${parentId}/messages` : collection;
+    const base = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/${DATABASE_ID}/documents/${sourcePath}`;
     const url = new URL(base);
     url.searchParams.set('pageSize', String(pageSize));
     if (pageToken) url.searchParams.set('pageToken', pageToken);
