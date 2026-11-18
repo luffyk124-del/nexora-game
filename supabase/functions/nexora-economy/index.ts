@@ -88,6 +88,26 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  if (action === "deposit_org_treasury" || action === "withdraw_org_treasury") {
+    const orgId = typeof body.orgId === "string" ? body.orgId : "";
+    const amount = body.amount;
+    const requestId = typeof body.requestId === "string" ? body.requestId : "";
+    if (!orgId || orgId.length > 160) return json({ error: "NOT_FOUND" }, 400, origin);
+    if (!Number.isSafeInteger(amount) || (amount as number)<1 || (amount as number)>10000000) return json({ error: "INVALID_AMOUNT" }, 400, origin);
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) return json({ error: "INVALID_REQUEST" }, 400, origin);
+    const rpcName = action === "deposit_org_treasury" ? "deposit_org_treasury" : "withdraw_org_treasury";
+    const { data, error } = await admin.schema("nexora").rpc(rpcName, {
+      p_user_id: uid, p_org_id: orgId, p_amount: amount, p_request_id: requestId,
+    });
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      if (["INVALID_REQUEST","INVALID_AMOUNT","NOT_FOUND","UNAUTHORIZED","INSUFFICIENT_FUNDS","INSUFFICIENT_TREASURY"].includes(message)) return json({ error: message }, 400, origin);
+      console.error("NEXORA organization treasury RPC failed:", error.message);
+      return json({ error: "ORG_TREASURY_OPERATION_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
   if (action === "found_company") {
     const name = typeof body.name === "string" ? body.name : "";
     const sector = typeof body.sector === "string" ? body.sector : "";
