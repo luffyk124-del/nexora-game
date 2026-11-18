@@ -88,6 +88,23 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  if (action === "update_org_member_role") {
+    const orgId = typeof body.orgId === "string" ? body.orgId : "";
+    const targetUid = typeof body.targetUid === "string" ? body.targetUid : "";
+    const newRole = typeof body.newRole === "string" ? body.newRole : "";
+    if (!orgId || !targetUid || orgId.length>160 || targetUid.length>128) return json({ error: "INVALID_ARGUMENT" }, 400, origin);
+    const { data, error } = await admin.schema("nexora").rpc("update_org_member_role", {
+      p_actor_uid: uid, p_org_id: orgId, p_target_uid: targetUid, p_new_role: newRole,
+    });
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      if (["INVALID_ARGUMENT","INVALID_ROLE","UNAUTHORIZED","MEMBER_NOT_FOUND"].includes(message)) return json({ error: message }, 400, origin);
+      console.error("NEXORA organization role RPC failed:", error.message);
+      return json({ error: "ORG_ROLE_UPDATE_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
   if (action === "start_org_upgrade" || action === "complete_org_upgrade" || action === "research_org") {
     const orgId = typeof body.orgId === "string" ? body.orgId : "";
     if (!orgId || orgId.length > 160) return json({ error: "NOT_FOUND" }, 400, origin);
