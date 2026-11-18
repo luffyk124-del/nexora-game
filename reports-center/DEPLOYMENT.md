@@ -23,8 +23,8 @@
 - RLS remains enabled on NEXORA tables. Do not grant direct client table access.
 
 ## Current deployment and data status
-- Supabase Edge Function `nexora-reports-admin`: active, version 3, JWT verification enabled.
-- Edge Function CORS is restricted to the GitHub Pages origin `https://luffyk124-del.github.io`.
+- Supabase Edge Function `nexora-reports-admin`: active, version 4, JWT verification enabled.
+- The Edge Function requires role `owner` and CORS is restricted to the GitHub Pages origin `https://luffyk124-del.github.io`.
 - The atomic status/audit RPC migration is applied.
 - Current counts at verification: `nexora.player_reports = 0`, `nexora.player_report_audit = 0`.
 - `nexora.migration_batches = 0` and `nexora.firestore_import_payloads = 0`; no Firestore data import has occurred.
