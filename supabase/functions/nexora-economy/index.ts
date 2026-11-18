@@ -88,6 +88,162 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  if (action === "search_players" || action === "get_public_player_profile" ||
+      action === "list_blocked_players" || action === "list_direct_conversations" ||
+      action === "list_direct_messages" || action === "list_global_chat_messages" ||
+      action === "list_organization_invites") {
+    if (action === "search_players") {
+      const prefix = typeof body.prefix === "string" ? body.prefix.trim().toLowerCase() : "";
+      const { data, error } = await admin.schema("nexora").rpc("search_players", { p_user_id: uid, p_prefix: prefix });
+      if (error) {
+        console.error("NEXORA player search failed:", error.message);
+        return json({ error: "PLAYER_SEARCH_FAILED" }, 500, origin);
+      }
+      return json(data, 200, origin);
+    }
+    if (action === "get_public_player_profile") {
+      const targetUid = typeof body.targetUid === "string" ? body.targetUid.trim() : "";
+      if (!targetUid || targetUid.length > 128) return json({ error: "INVALID_TARGET" }, 400, origin);
+      const { data, error } = await admin.schema("nexora").rpc("get_public_player_profile", { p_target_uid: targetUid });
+      if (error) {
+        const message = error.message.split(/[\\n:]/)[0].trim();
+        if (message === "PLAYER_NOT_FOUND" || message === "INVALID_TARGET") return json({ error: message }, 404, origin);
+        console.error("NEXORA public profile read failed:", error.message);
+        return json({ error: "PLAYER_PROFILE_READ_FAILED" }, 500, origin);
+      }
+      return json(data, 200, origin);
+    }
+    if (action === "list_blocked_players") {
+      const { data, error } = await admin.schema("nexora").from("user_blocks").select("target_uid")
+        .eq("owner_uid", uid).order("created_at", { ascending: false }).limit(200);
+      if (error) {
+        console.error("NEXORA block list read failed:", error.message);
+        return json({ error: "BLOCK_LIST_READ_FAILED" }, 500, origin);
+      }
+      return json({ blockedUids: (data ?? []).map((row) => row.target_uid) }, 200, origin);
+    }
+    if (action === "list_direct_conversations") {
+      const { data, error } = await admin.schema("nexora").from("conversations").select("*")
+        .contains("participants", [uid]).order("last_message_at", { ascending: false }).limit(50);
+      if (error) {
+        console.error("NEXORA conversation list read failed:", error.message);
+        return json({ error: "CONVERSATION_LIST_FAILED" }, 500, origin);
+      }
+      const conversations = (data ?? []).map((row) => ({
+        id: row.id, participants: row.participants, participantNames: row.participant_names,
+        participantAvatars: row.participant_avatars, lastMessage: row.last_message,
+        lastMessageAt: row.last_message_at, lastSenderUid: row.last_sender_uid,
+      }));
+      return json({ conversations }, 200, origin);
+    }
+    if (action === "list_direct_messages") {
+      const conversationId = typeof body.conversationId === "string" ? body.conversationId.trim() : "";
+      if (!conversationId || conversationId.length > 180) return json({ error: "INVALID_CONVERSATION" }, 400, origin);
+      const { data: conversation, error: conversationError } = await admin.schema("nexora")
+        .from("conversations").select("id,participants").eq("id", conversationId).maybeSingle();
+      if (conversationError || !conversation || !Array.isArray(conversation.participants) ||
+          !conversation.participants.includes(uid)) return json({ error: "CONVERSATION_ACCESS_DENIED" }, 403, origin);
+      const { data, error } = await admin.schema("nexora").from("conversation_messages").select("*")
+        .eq("conversation_id", conversationId).order("created_at", { ascending: false }).limit(80);
+      if (error) {
+        console.error("NEXORA direct message read failed:", error.message);
+        return json({ error: "DIRECT_MESSAGES_READ_FAILED" }, 500, origin);
+      }
+      const messages = (data ?? []).reverse().map((row) => ({
+        id: row.id, senderUid: row.sender_uid, senderName: row.sender_name,
+        text: row.message_text, createdAt: row.created_at,
+      }));
+      return json({ messages }, 200, origin);
+    }
+    if (action === "list_global_chat_messages") {
+      const { data, error } = await admin.schema("nexora").from("global_chat_messages").select("*")
+        .order("created_at", { ascending: false }).limit(60);
+      if (error) {
+        console.error("NEXORA global chat read failed:", error.message);
+        return json({ error: "GLOBAL_CHAT_READ_FAILED" }, 500, origin);
+      }
+      const messages = (data ?? []).reverse().map((row) => ({
+        id: row.id, senderUid: row.sender_uid, senderName: row.sender_name,
+        avatarId: row.avatar_id, text: row.message_text, createdAt: row.created_at,
+      }));
+      return json({ messages }, 200, origin);
+    }
+    const { data, error } = await admin.schema("nexora").from("organization_invites").select("*")
+      .eq("target_uid", uid).eq("status", "pending").order("created_at", { ascending: false }).limit(20);
+    if (error) {
+      console.error("NEXORA organization invite read failed:", error.message);
+      return json({ error: "ORG_INVITES_READ_FAILED" }, 500, origin);
+    }
+    const invites = (data ?? []).map((row) => ({
+      id: row.id, orgId: row.org_id, orgName: row.org_name, orgTag: row.org_tag,
+      inviterName: row.inviter_name, status: row.status, targetUid: row.target_uid,
+    }));
+    return json({ invites }, 200, origin);
+  }
+
+  if (action === "block_player" || action === "unblock_player" ||
+      action === "submit_player_report" || action === "open_direct_conversation" ||
+      action === "send_direct_message" || action === "send_global_chat_message" ||
+      action === "invite_player_to_organization" || action === "respond_organization_invite") {
+    let rpcName: string;
+    let args: Record<string, unknown>;
+    const targetUid = typeof body.targetUid === "string" ? body.targetUid.trim() : "";
+    if (action === "block_player" || action === "unblock_player" ||
+        action === "open_direct_conversation" || action === "invite_player_to_organization") {
+      if (!targetUid || targetUid.length > 128) return json({ error: "INVALID_TARGET" }, 400, origin);
+      rpcName = action === "block_player" ? "block_player"
+        : action === "unblock_player" ? "unblock_player"
+        : action === "open_direct_conversation" ? "open_direct_conversation"
+        : "invite_player_to_organization";
+      args = { p_user_id: uid, p_target_uid: targetUid };
+    } else if (action === "submit_player_report") {
+      const reason = typeof body.reason === "string" ? body.reason : "";
+      const requestId = typeof body.requestId === "string" ? body.requestId : "";
+      if (!targetUid || targetUid.length > 128 || !["harassment","spam","inappropriate","impersonation","other"].includes(reason) ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+        return json({ error: "INVALID_REPORT" }, 400, origin);
+      }
+      rpcName = "submit_player_report";
+      args = { p_user_id: uid, p_target_uid: targetUid, p_reason: reason, p_request_id: requestId };
+    } else if (action === "send_direct_message") {
+      const text = typeof body.text === "string" ? body.text : "";
+      const requestId = typeof body.requestId === "string" ? body.requestId : "";
+      if (!targetUid || targetUid.length > 128 || !text || text.length > 2000 ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+        return json({ error: "INVALID_MESSAGE" }, 400, origin);
+      }
+      rpcName = "send_direct_message";
+      args = { p_user_id: uid, p_target_uid: targetUid, p_text: text, p_request_id: requestId };
+    } else if (action === "send_global_chat_message") {
+      const text = typeof body.text === "string" ? body.text : "";
+      const requestId = typeof body.requestId === "string" ? body.requestId : "";
+      if (!text || text.length > 1000 ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+        return json({ error: "INVALID_MESSAGE" }, 400, origin);
+      }
+      rpcName = "send_global_chat_message";
+      args = { p_user_id: uid, p_text: text, p_request_id: requestId };
+    } else {
+      const inviteId = typeof body.inviteId === "string" ? body.inviteId.trim() : "";
+      const response = body.response === "accept" ? "accept" : body.response === "decline" ? "decline" : "";
+      if (!inviteId || inviteId.length > 180 || !response) return json({ error: "INVALID_ARGUMENT" }, 400, origin);
+      rpcName = "respond_organization_invite";
+      args = { p_user_id: uid, p_invite_id: inviteId, p_response: response };
+    }
+    const { data, error } = await admin.schema("nexora").rpc(rpcName, args);
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      const allowed = ["INVALID_REQUEST","INVALID_TARGET","PLAYER_NOT_FOUND","INVALID_REPORT","REPORT_RATE_LIMIT",
+        "PLAYER_BLOCKED","INVALID_MESSAGE","PROFILE_NOT_FOUND","CHAT_RATE_LIMIT","CONVERSATION_ACCESS_DENIED",
+        "NOT_IN_ORG","NOT_FOUND","INVITE_PERMISSION_REQUIRED","TARGET_ALREADY_IN_ORG","INVITE_ALREADY_PENDING",
+        "INVALID_ARGUMENT","INVITE_NOT_FOUND","INVITE_NOT_AVAILABLE","ORG_NOT_FOUND","ALREADY_IN_ORG","ORG_FULL"];
+      if (allowed.includes(message)) return json({ error: message }, 400, origin);
+      console.error("NEXORA social RPC failed:", error.message);
+      return json({ error: "SOCIAL_OPERATION_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
   if (action === "create_company_auction" || action === "place_company_auction_bid") {
     const requestId = typeof body.requestId === "string" ? body.requestId : "";
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
