@@ -27,22 +27,27 @@ The Edge Function queries the `nexora` schema through the Supabase Data API. In 
 - The atomic status/audit RPC migration is applied.
 - The Auth user and enabled owner record are provisioned.
 - Current counts at verification: `nexora.player_reports = 0`, `nexora.player_report_audit = 0`.
-- No Firestore reports have been imported yet. An empty dashboard is expected until the migration is completed or the game starts writing reports to the new backend.
+- `nexora.migration_batches = 0` and `nexora.firestore_import_payloads = 0`; no Firestore data import has occurred.
+- No historical reports have been imported; an empty dashboard is expected until the migration is completed or the game starts writing reports to the new backend.
 - The Reports Center frontend has not been published.
 - Do not delete, disable, or modify the original Firebase project until the full game migration and data reconciliation are complete.
 
-## Build
+## Build and GitHub Pages deployment
 From `reports-center/`:
 - Install: `npm install`
 - Build: `npm run build`
 - Output: `dist/`
-- Vite uses relative asset paths so the app can be hosted under a repository subpath.
+- Vite uses relative asset paths; `reports-center/public/.nojekyll` disables Jekyll processing.
+- `.github/workflows/deploy-reports-center.yml` builds and deploys only `reports-center/dist` to GitHub Pages when changes reach `main`, or when manually dispatched.
+- Before the first deployment, open repository Settings → Pages and select **GitHub Actions** as the build and deployment source. The workflow cannot enable this repository setting itself.
+- Expected project site origin: `https://luffyk124-del.github.io`; final URL includes the repository path.
 
 ## Release checklist
 1. Confirm Supabase Auth public signups are disabled.
 2. Verify the `nexora` schema is exposed to the Edge Function Data API while direct client grants remain revoked.
 3. Restrict Edge Function CORS to the final hosting origin before publishing.
-4. Publish the static frontend only after the hosting target and Pages settings are verified.
-5. Test valid MJNON login, invalid password, denied non-admin access, report list, status update, and audit history.
-6. Import/reconcile any historical Firestore report records and verify the game writes new reports to the intended backend.
-7. Keep PRs open and Firebase intact until the above release gates pass.
+4. Enable GitHub Pages with the GitHub Actions source in repository Settings.
+5. Publish the static frontend only after the migration and security gates are verified.
+6. Test valid MJNON login, invalid password, denied non-admin access, report list, status update, and audit history.
+7. Import/reconcile any historical Firestore report records and verify the game writes new reports to the intended backend.
+8. Keep PRs open and Firebase intact until the above release gates pass.
