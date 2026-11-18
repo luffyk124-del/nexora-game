@@ -1806,6 +1806,19 @@ export async function updateOrgMemberRole(
   targetUid: string,
   newRole: Exclude<OrgRole, 'leader'>
 ): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'update_org_member_role', orgId, targetUid, newRole }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'ORG_ROLE_UPDATE_FAILED');
+    return;
+  }
   try {
     await updateDoc(doc(db, 'organization_members', `${orgId}_${targetUid}`), {
       role: newRole,
