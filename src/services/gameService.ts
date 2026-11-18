@@ -377,6 +377,37 @@ export async function transferCredits(
   const cleanName = recipientUsername.trim().toLowerCase();
   if (!cleanName) throw new Error('RECIPIENT_NOT_FOUND');
 
+  // Explicit opt-in only. Firebase remains the default until transfer parity QA is complete.
+  if (import.meta.env.VITE_NEXORA_SUPABASE_TRANSFERS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== fromUid || currentUser.isAnonymous) {
+      throw new Error('UNAUTHENTICATED');
+    }
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch(
+      'https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          recipientUsername: cleanName,
+          amount,
+          note: note.trim().slice(0, 180),
+          requestId: crypto.randomUUID(),
+        }),
+        cache: 'no-store',
+      }
+    );
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.error || 'TRANSFER_FAILED');
+    }
+    return;
+  }
+
   const unameSnap = await getDoc(doc(db, 'usernames', cleanName));
   if (!unameSnap.exists()) throw new Error('RECIPIENT_NOT_FOUND');
   const toUid = (unameSnap.data() as { uid: string }).uid;
