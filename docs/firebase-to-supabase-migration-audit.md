@@ -3,45 +3,46 @@
 Updated: 2026-11-18
 
 ## Scope and safety boundary
-
 - Firebase project: `gen-lang-client-0074900177`.
 - Firestore database: `ai-studio-74843d9e-8228-49b7-a616-317cadd90bff`.
-- Supabase destination: existing OneState project `dmeupqmhsyojxlgalxrc`, isolated schema `nexora`.
-- Do not modify the OneState `public` schema or its tables.
-- Do not delete, pause, or disable Firebase. Keep Firebase as the live source until import and reconciliation pass.
-- Supabase `nexora` currently has no imported game rows. This does not prove Firestore is empty.
+- Destination: existing OneState Supabase project `dmeupqmhsyojxlgalxrc`, isolated schema `nexora`.
+- Do not modify OneState's `public` schema or its data.
+- Keep Firebase operational until import, reconciliation, and rollback gates pass.
+- Supabase `nexora` has no imported game rows yet; this does not prove Firestore is empty.
 
-## Firestore collections found in the game source
+## Firestore collections found in source
 
 ### Realtime subscriptions in `src/hooks/useGameData.ts`
 `profiles`, `users_private`, `wallets`, `inventory`, `transactions`, `market_listings`, `market_orders`, `companies`, `company_auctions`, `company_logs`, `properties`, `organizations`, `organization_members`, `organization_requests`, `organization_transactions`, `player_missions`, `daily_claims`, `contract_claims`, `player_achievements`, `notifications`, `world_events`.
 
-### Additional collections written/read by `src/services/gameService.ts`
-- `usernames` — username uniqueness index; document payload includes `uid`, `username`, `createdAt`.
-- `audit_logs` — administrative/economy audit records.
-- The service also reads/writes the collections listed above.
+### Additional collections in `src/services/gameService.ts`
+- `usernames`: username uniqueness index; stores `uid`, `username`, `createdAt`.
+- `audit_logs`: administrative/economy audit records.
+- The service also reads/writes the subscribed collections above.
+- `test` is only a Firebase connectivity probe, not game data.
 
-### Name mapping already present in the destination schema
+### Destination mapping
 - `profiles` → `nexora.player_profiles`
 - `users_private` → `nexora.player_private`
-- Other collections mostly map to same-named tables, with snake_case columns.
-- `company_auctions` and `usernames` do not yet have destination tables.
-- `test` is only used by the Firebase connectivity probe, not game data.
+- Other game collections map to same-named tables with snake_case columns.
+- `company_auctions` and `usernames` destination tables have now been created.
+- Game fields missing from `companies`, `organizations`, and `world_events` have now been added.
 
-## Confirmed schema gaps
+## Schema work completed (2026-11-18)
+Migration `20261118052000_nexora_game_schema_completion_v1.sql` was applied to the existing Supabase project and committed on this branch. It:
+- Added company vault, upgrade, owner-name, and auction metadata fields.
+- Added organization capacity, join mode, research, and upgrade fields.
+- Added world-event descriptions, sector targeting, revenue multiplier, and stack group.
+- Created `nexora.company_auctions` and `nexora.usernames`.
+- Expanded the transaction type constraint to include auction bid/refund/sale and vault-upgrade operations.
+- Kept RLS enabled and revoked direct `anon`/`authenticated` access to both new tables.
 
-These are code/schema differences that must be resolved before switching the game client or server writes:
+Verification confirmed both new tables have RLS enabled and neither `anon` nor `authenticated` can SELECT them. No OneState `public` objects were touched.
 
-1. `nexora.companies` is missing game fields: `owner_name`, `vault_level`, `vault_balance`, `level_upgrade_started_at`, `level_upgrade_ends_at`, `level_upgrade_target_level`, `level_upgrade_cost`, `vault_upgrade_started_at`, `vault_upgrade_ends_at`, `vault_upgrade_target_level`, `auction_id`, `auction_ends_at`, `auction_status`.
-2. `nexora.organizations` is missing `member_capacity`, `join_mode`, `research`, `upgrade_started_at`, `upgrade_ends_at`, `upgrade_target_level`.
-3. `nexora.world_events` is missing `description_ar`, `description_en`, `affected_sectors`, `revenue_multiplier`, `stack_group`.
-4. `nexora.company_logs.details` is currently JSONB, while the TypeScript game model expects a string. Resolve this deliberately in the migration contract rather than silently coercing records.
-5. `nexora.transactions.type` currently excludes auction ledger values emitted by Cloud Functions: `company_auction_bid`, `company_auction_refund`, and `company_auction_sale`. The game also emits `company_collect` and `company_vault_upgrade`; confirm the full allowed set against every server transaction write before changing the constraint.
-6. `company_auctions` requires a destination table for auction state and escrow metadata.
-7. `usernames` requires a destination table with a unique normalized username key and a Firebase UID reference.
+### Remaining known schema mismatch
+- `nexora.company_logs.details` is JSONB, while the TypeScript model currently treats it as a string. This needs a deliberate adapter or a separately reviewed type migration before imports; it was not silently changed.
 
 ## Server-side Firebase functions that must be migrated
-
 The current Functions source exports:
 - `upgradeCompanyProfitVault`
 - `collectCompanyRevenueSecure`
@@ -67,22 +68,19 @@ The current Functions source exports:
 - `respondOrganizationInviteSecure`
 - `getPublicPlayerProfileSecure`
 
-These operations include wallet/economy transactions, organization permission checks, auction escrow, moderation, and messaging. They must be reimplemented as trusted server-side operations (e.g. Supabase Edge Functions and narrowly scoped SQL RPCs) before any client-side write path is switched.
+These operations include wallet/economy transactions, organization permissions, auction escrow, moderation, and messaging. They must be reimplemented as trusted server-side operations (Supabase Edge Functions and narrowly scoped SQL RPCs) before switching client write paths.
 
 ## Identity migration requirement
-
-Firebase UIDs and Supabase Auth user IDs are different identity namespaces. Preserve every original Firebase UID as a stable legacy identifier and create a trusted mapping from the authenticated Supabase user ID to the original Firebase UID. Do not rewrite ownership references by matching unverified email addresses, and do not allow a client to choose or alter its own legacy UID mapping. Guest accounts need a separate migration/recovery strategy because they may not have a verified email identity.
+Firebase UIDs and Supabase Auth user IDs are different identity namespaces. Preserve original Firebase UIDs as stable legacy IDs and create a trusted mapping from Supabase Auth ID to Firebase UID. Do not match accounts using unverified email addresses, and never let clients choose or edit their own legacy UID mapping. Guest accounts need a separate recovery strategy.
 
 ## Data export/import blocker
-
-No connected Firebase Admin / Firestore export-import tool is currently available in this execution environment. The Supabase project tools can manage the destination but cannot export source Firestore documents. Do not claim that any Firestore data has been copied. A trusted Firestore export or authorized Admin SDK transfer path is required; then import in batches with counts, checksums, and reconciliation by collection.
+No connected Firebase Admin / Firestore export-import tool is currently available in this execution environment. Supabase tools manage the destination but cannot export Firestore documents. No Firestore data has been copied. A trusted Firestore export or authorized Admin SDK transfer path is required, followed by batched import with collection counts, checksums, and reconciliation.
 
 ## Required migration sequence
-
-1. Freeze and document the source collection/type contracts; keep Firebase operational.
-2. Complete the destination schema and constraints for every collection and server operation.
-3. Implement Supabase Auth identity mapping and trusted server-side game operations.
-4. Export Firestore using an authorized Admin path and import into `nexora` only.
-5. Reconcile document counts, user ownership, wallet totals, transaction ledgers, auctions, organization membership, and report/audit records.
-6. Run isolated integration and mobile tests against the Supabase-backed branch.
-7. Switch the game and reports center only after gates pass; preserve rollback to Firebase until post-release verification completes.
+1. Finalize the source collection/type contracts, including the remaining company-log details mismatch.
+2. Design and implement the trusted Supabase identity mapping.
+3. Migrate all Firebase callable/scheduled functions to trusted Edge Functions/RPCs and test economy invariants.
+4. Export Firestore through an authorized Admin path and import only into `nexora`.
+5. Reconcile collection counts, ownership, wallet totals, ledger entries, auctions, organization membership, and moderation records.
+6. Run isolated integration tests and mobile QA against the Supabase-backed game branch.
+7. Switch the game and reports center only after all gates pass; retain Firebase rollback until post-release reconciliation.
