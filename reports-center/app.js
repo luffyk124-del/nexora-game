@@ -6,17 +6,26 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 const $ = (id) => document.getElementById(id);
 let currentStatus = 'all', reports = [], auditEntries = [], view = 'reports', searchTerm = '';
 
+const ADMIN_USERNAME = 'MJNON';
+const ADMIN_LOGIN_EMAIL = 'mjn.admin@nexora.invalid';
+
 $('loginBtn').onclick = async () => {
   $('loginError').textContent = '';
+  const username = $('username').value.trim().toUpperCase();
+  const password = $('password').value;
+  if (username !== ADMIN_USERNAME || !password) {
+    $('loginError').textContent = 'اسم المستخدم أو كلمة المرور غير صحيحة.';
+    return;
+  }
   $('loginBtn').disabled = true;
   try {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: window.location.origin + window.location.pathname, queryParams: { prompt: 'select_account' } }
+    const { error } = await supabase.auth.signInWithPassword({
+      email: ADMIN_LOGIN_EMAIL,
+      password
     });
     if (error) throw error;
-  } catch (error) {
-    $('loginError').textContent = 'تعذر بدء تسجيل الدخول عبر Google. تحقق من تفعيل مزود Google في إعدادات Supabase.';
+  } catch {
+    $('loginError').textContent = 'تعذر تسجيل الدخول. تحقق من بيانات الحساب أو تفعيل صلاحية المشرف.';
     $('loginBtn').disabled = false;
   }
 };
@@ -55,7 +64,7 @@ async function loadReports() {
       $('notice').textContent = 'تم تسجيل الدخول، لكن هذا الحساب غير مضاف إلى قائمة مشرفي NEXORA بعد.';
       return;
     }
-    $('notice').textContent = 'تعذر تحميل البلاغات. تحقق من إعدادات Google Auth والاتصال.';
+    $('notice').textContent = 'تعذر تحميل البلاغات. تحقق من اتصال Supabase وصلاحية حساب المشرف.';
   }
 }
 async function loadAudit() {
