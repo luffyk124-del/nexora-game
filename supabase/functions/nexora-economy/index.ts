@@ -88,6 +88,21 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  if (action === "sync_org_membership") {
+    const orgId = body.orgId === null ? null : typeof body.orgId === "string" ? body.orgId : undefined;
+    if (orgId === undefined || (typeof orgId === "string" && orgId.length>160)) return json({ error: "INVALID_ARGUMENT" }, 400, origin);
+    const { data, error } = await admin.schema("nexora").rpc("sync_self_org_membership", {
+      p_user_id: uid, p_org_id: orgId,
+    });
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      if (["UNAUTHORIZED","ACCOUNT_NOT_FOUND","UNAUTHENTICATED"].includes(message)) return json({ error: message }, 400, origin);
+      console.error("NEXORA membership sync RPC failed:", error.message);
+      return json({ error: "ORG_MEMBERSHIP_SYNC_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
   if (action === "update_org_member_role") {
     const orgId = typeof body.orgId === "string" ? body.orgId : "";
     const targetUid = typeof body.targetUid === "string" ? body.targetUid : "";
