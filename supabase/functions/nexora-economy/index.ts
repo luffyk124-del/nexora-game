@@ -42,7 +42,7 @@ function json(body: unknown, status: number, origin: string | null): Response {
     },
   });
 }
-async function verifyPlayer(req: Request): Promise<string | null> {
+async function verifyPlayer(req: Request): Promise<{ uid: string; email: string } | null> {
   const auth = req.headers.get("Authorization") ?? "";
   if (!auth.startsWith("Bearer ")) return null;
   try {
@@ -55,8 +55,9 @@ async function verifyPlayer(req: Request): Promise<string | null> {
       ? payload.firebase as Record<string, unknown>
       : {};
     if (typeof payload.sub !== "string" || !payload.sub ||
-        payload.email_verified !== true || firebase.sign_in_provider === "anonymous") return null;
-    return payload.sub;
+        typeof payload.email !== "string" || payload.email_verified !== true ||
+        firebase.sign_in_provider === "anonymous") return null;
+    return { uid: payload.sub, email: payload.email };
   } catch { return null; }
 }
 Deno.serve(async (req: Request) => {
@@ -71,8 +72,9 @@ Deno.serve(async (req: Request) => {
   }});
   if (req.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405, origin);
 
-  const uid = await verifyPlayer(req);
-  if (!uid) return json({ error: "UNAUTHENTICATED_OR_UNVERIFIED" }, 401, origin);
+  const player = await verifyPlayer(req);
+  if (!player) return json({ error: "UNAUTHENTICATED_OR_UNVERIFIED" }, 401, origin);
+  const uid = player.uid;
 
   let body: Record<string, unknown>;
   try {
@@ -85,6 +87,28 @@ Deno.serve(async (req: Request) => {
   const key = getServiceKey();
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+
+  if (action === "create_player_character") {
+    const username = typeof body.username === "string" ? body.username : "";
+    const avatarId = typeof body.avatarId === "string" ? body.avatarId : "";
+    const language = body.language;
+    if (!/^[A-Za-z0-9_]{3,24}$/.test(username.trim())) return json({ error: "INVALID_USERNAME" }, 400, origin);
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(avatarId)) return json({ error: "INVALID_AVATAR" }, 400, origin);
+    if (language !== "ar" && language !== "en") return json({ error: "INVALID_LANGUAGE" }, 400, origin);
+    const { data, error } = await admin.schema("nexora").rpc("create_player_character", {
+      p_user_id: uid, p_email: player.email, p_username: username.trim(),
+      p_avatar_id: avatarId, p_language: language,
+    });
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      if (["INVALID_USERNAME","INVALID_AVATAR","INVALID_LANGUAGE","INVALID_EMAIL","USERNAME_TAKEN","PROFILE_EXISTS"].includes(message)) {
+        return json({ error: message }, 400, origin);
+      }
+      console.error("NEXORA player creation RPC failed:", error.message);
+      return json({ error: "PLAYER_CREATION_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
 
   if (action === "update_player_settings" || action === "update_player_avatar" ||
       action === "mark_notification_read" || action === "mark_notifications_read") {
