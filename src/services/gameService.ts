@@ -2347,6 +2347,22 @@ export async function checkAndUnlockAchievements(
     threshold: number;
   }[]
 ): Promise<string[]> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_ACHIEVEMENTS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'claim_eligible_achievements' }),
+      cache: 'no-store',
+    });
+    const payload = await response.json().catch(() => ({})) as { ok?: boolean; unlockedIds?: unknown; error?: unknown };
+    if (!response.ok || payload.ok !== true || !Array.isArray(payload.unlockedIds)) {
+      throw new Error(typeof payload.error === 'string' ? payload.error : 'ACHIEVEMENT_UNLOCK_FAILED');
+    }
+    return payload.unlockedIds.filter((id): id is string => typeof id === 'string');
+  }
   const eligible = achievements.filter((ach) => {
     if (unlockedIds.has(ach.id)) return false;
     return getAchievementProgress(ach.metric, profile) >= ach.threshold;
