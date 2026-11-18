@@ -1,7 +1,9 @@
 import { createClient } from "npm:@supabase/supabase-js@2.95.0";
 
+const allowedOrigin = "https://luffyk124-del.github.io";
 const cors = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": allowedOrigin,
+  "Vary": "Origin",
   "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
@@ -9,6 +11,8 @@ const reply = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 
 Deno.serve(async (req: Request) => {
+  const origin = req.headers.get("Origin");
+  if (origin && origin !== allowedOrigin) return new Response("Forbidden origin", { status: 403 });
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return reply({ error: "METHOD_NOT_ALLOWED" }, 405);
 
