@@ -333,7 +333,7 @@ export function MigrationConsole() {
   }
 
   async function runPlayerParityCheck() {
-    if (!user || parityRunning) return;
+    if (!user || parityRunning || running) return;
     setParityRunning(true);
     setParityError('');
     setParityResults([]);
