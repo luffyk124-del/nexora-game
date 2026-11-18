@@ -34,7 +34,11 @@ Deno.serve(async (req: Request) => {
 
   const { data: adminRecord, error: adminError } = await admin
     .schema("nexora").from("diagnostics_admins")
-    .select("user_id,role,enabled").eq("user_id", userData.user.id).eq("enabled", true).maybeSingle();
+    .select("user_id,role,enabled")
+    .eq("user_id", userData.user.id)
+    .eq("role", "owner")
+    .eq("enabled", true)
+    .maybeSingle();
   if (adminError || !adminRecord) return reply({ error: "REPORTS_ADMIN_REQUIRED" }, 403);
 
   let body: Record<string, unknown>;
