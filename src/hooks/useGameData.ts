@@ -219,6 +219,75 @@ export function useGameData(): GameDataState {
 
     const uid = authUser.uid;
 
+    // Verified Supabase read path. Firebase Auth remains the identity provider;
+    // anonymous guest sessions continue using the legacy Firebase data path.
+    if (import.meta.env.VITE_NEXORA_SUPABASE_PLAYER_READS === 'true' && !authUser.isAnonymous) {
+      let active = true;
+      let inFlight = false;
+      const refreshPlayer = async () => {
+        if (inFlight || !active) return;
+        inFlight = true;
+        try {
+          const idToken = await authUser.getIdToken();
+          const response = await fetch(
+            'https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-player-data',
+            {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+              body: '{}',
+              cache: 'no-store',
+            }
+          );
+          const payload = await response.json();
+          if (!response.ok || !payload?.ok || !payload?.player) {
+            throw new Error(payload?.error || 'SUPABASE_PLAYER_READ_FAILED');
+          }
+          if (!active) return;
+          const player = payload.player as Record<string, unknown>;
+          setProfile((player.profile ?? null) as PlayerProfile | null);
+          setProfileLoading(false);
+          setUserPrivate((player.privateData ?? null) as UserPrivate | null);
+          const privateData = player.privateData as UserPrivate | null;
+          if (privateData?.language === 'ar' || privateData?.language === 'en') {
+            setLanguageLocal(privateData.language);
+          }
+          setWallet((player.wallet ?? null) as Wallet | null);
+          setInventory((player.inventory ?? []) as InventoryItem[]);
+          setTransactions((player.transactions ?? []) as TransactionRecord[]);
+          setMarketListings((player.marketListings ?? []) as MarketListing[]);
+          setMarketOrders((player.marketOrders ?? []) as MarketOrder[]);
+          setCompanies((player.companies ?? []) as Company[]);
+          setCompanyAuctions((player.companyAuctions ?? []) as CompanyAuction[]);
+          setCompanyLogs((player.companyLogs ?? []) as CompanyLog[]);
+          setProperties((player.properties ?? []) as PropertyAsset[]);
+          setOrganizations((player.organizations ?? []) as Organization[]);
+          setMyOrgMember((player.myOrgMember ?? null) as OrganizationMember | null);
+          setOrgMemberLoaded(true);
+          setOrgMembers((player.orgMembers ?? []) as OrganizationMember[]);
+          setOrgRequests((player.orgRequests ?? []) as OrganizationRequest[]);
+          setMyPendingOrgIds(new Set((player.myPendingOrgIds ?? []) as string[]));
+          setOrgTransactions((player.orgTransactions ?? []) as OrganizationTransaction[]);
+          setClaimedMissions((player.claimedMissions ?? []) as PlayerMissionClaim[]);
+          setClaimedDailyToday(player.claimedDailyToday === true);
+          setClaimedContractsToday(new Set((player.claimedContractsToday ?? []) as string[]));
+          setUnlockedAchievements(new Set((player.unlockedAchievements ?? []) as string[]));
+          setNotifications((player.notifications ?? []) as GameNotification[]);
+          setWorldEvents((player.worldEvents ?? []) as WorldEvent[]);
+        } catch (error) {
+          console.warn('NEXORA Supabase player read failed:', error);
+          setProfileLoading(false);
+        } finally {
+          inFlight = false;
+        }
+      };
+      void refreshPlayer();
+      const timer = window.setInterval(() => { void refreshPlayer(); }, 5000);
+      return () => {
+        active = false;
+        window.clearInterval(timer);
+      };
+    }
+
     // Shadow-read only: Supabase is queried for parity diagnostics while Firebase remains authoritative.
     // Do not switch UI state to Supabase until all game mutations have migrated to server-side functions.
     if (import.meta.env.VITE_NEXORA_SUPABASE_SHADOW_READS === 'true' && !authUser.isAnonymous) {
@@ -541,6 +610,7 @@ export function useGameData(): GameDataState {
 
   // Subscribe to current organization's members, requests, and treasury ledger
   useEffect(() => {
+    if (import.meta.env.VITE_NEXORA_SUPABASE_PLAYER_READS === 'true' && authUser && !authUser.isAnonymous) return;
     if (!authUser || !myOrgMember?.orgId) {
       setOrgMembers([]);
       setOrgRequests([]);
@@ -603,7 +673,7 @@ export function useGameData(): GameDataState {
 
   // Auto-unlock eligible achievements (deduplicated per session)
   useEffect(() => {
-    if (import.meta.env.VITE_NEXORA_SUPABASE_READS === 'true') return;
+    if (import.meta.env.VITE_NEXORA_SUPABASE_READS === 'true' || import.meta.env.VITE_NEXORA_SUPABASE_PLAYER_READS === 'true') return;
     if (!authUser || !profile) return;
     const alreadySkipped = new Set([
       ...unlockedAchievements,
