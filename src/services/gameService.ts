@@ -1106,6 +1106,21 @@ export async function createCompanyAuction(
   startingPrice: number
 ): Promise<{ auctionId: string; endsAt: number; minPrice: number; maxPrice: number }> {
   if (auth.currentUser?.uid !== uid) throw new Error('AUTH_SESSION_MISMATCH');
+  if (import.meta.env.VITE_NEXORA_SUPABASE_COMPANY_AUCTIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create_company_auction', companyId, startingPrice, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || payload?.ok !== true || typeof payload.auctionId !== 'string') {
+      throw new Error(payload?.error || 'COMPANY_AUCTION_CREATE_FAILED');
+    }
+    return payload as { ok: boolean; auctionId: string; endsAt: number; minPrice: number; maxPrice: number };
+  }
   const create = httpsCallable<
     { companyId: string; startingPrice: number },
     { ok: boolean; auctionId: string; endsAt: number; minPrice: number; maxPrice: number }
@@ -1120,6 +1135,19 @@ export async function placeCompanyAuctionBid(
   bidAmount: number
 ): Promise<{ ok: boolean; currentBid: number; nextMinimumBid: number }> {
   if (auth.currentUser?.uid !== uid) throw new Error('AUTH_SESSION_MISMATCH');
+  if (import.meta.env.VITE_NEXORA_SUPABASE_COMPANY_AUCTIONS === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'place_company_auction_bid', auctionId, bidAmount, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || payload?.ok !== true) throw new Error(payload?.error || 'COMPANY_AUCTION_BID_FAILED');
+    return payload as { ok: boolean; currentBid: number; nextMinimumBid: number };
+  }
   const placeBid = httpsCallable<
     { auctionId: string; bidAmount: number },
     { ok: boolean; currentBid: number; nextMinimumBid: number }
