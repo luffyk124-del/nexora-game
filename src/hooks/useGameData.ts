@@ -83,6 +83,26 @@ function sortByCreatedAtDesc<T extends { createdAt?: unknown }>(items: T[]): T[]
   );
 }
 
+const SUPABASE_PLAYER_WRITE_PATHS_READY =
+  import.meta.env.VITE_NEXORA_SUPABASE_PLAYER_READS === 'true' &&
+  [
+    import.meta.env.VITE_NEXORA_SUPABASE_ACCOUNT,
+    import.meta.env.VITE_NEXORA_SUPABASE_DAILY_STIPEND,
+    import.meta.env.VITE_NEXORA_SUPABASE_SKILLS,
+    import.meta.env.VITE_NEXORA_SUPABASE_TRANSFERS,
+    import.meta.env.VITE_NEXORA_SUPABASE_MARKET,
+    import.meta.env.VITE_NEXORA_SUPABASE_MANUFACTURING,
+    import.meta.env.VITE_NEXORA_SUPABASE_CONTRACTS,
+    import.meta.env.VITE_NEXORA_SUPABASE_COMPANY_AUCTIONS,
+    import.meta.env.VITE_NEXORA_SUPABASE_COMPANIES,
+    import.meta.env.VITE_NEXORA_SUPABASE_PROPERTIES,
+    import.meta.env.VITE_NEXORA_SUPABASE_MISSIONS,
+    import.meta.env.VITE_NEXORA_SUPABASE_ORGANIZATIONS,
+    import.meta.env.VITE_NEXORA_SUPABASE_ORG_TREASURY,
+    import.meta.env.VITE_NEXORA_SUPABASE_PROFILE,
+    import.meta.env.VITE_NEXORA_SUPABASE_ACHIEVEMENTS,
+  ].every((value) => value === 'true');
+
 export function useGameData(): GameDataState {
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -221,7 +241,7 @@ export function useGameData(): GameDataState {
 
     // Verified Supabase read path. Firebase Auth remains the identity provider;
     // anonymous guest sessions continue using the legacy Firebase data path.
-    if (import.meta.env.VITE_NEXORA_SUPABASE_PLAYER_READS === 'true' && !authUser.isAnonymous) {
+    if (SUPABASE_PLAYER_WRITE_PATHS_READY && !authUser.isAnonymous) {
       let active = true;
       let inFlight = false;
       const refreshPlayer = async () => {
@@ -290,7 +310,7 @@ export function useGameData(): GameDataState {
 
     // Shadow-read only: Supabase is queried for parity diagnostics while Firebase remains authoritative.
     // Do not switch UI state to Supabase until all game mutations have migrated to server-side functions.
-    if (import.meta.env.VITE_NEXORA_SUPABASE_SHADOW_READS === 'true' && import.meta.env.VITE_NEXORA_SUPABASE_PLAYER_READS !== 'true' && !authUser.isAnonymous) {
+    if (import.meta.env.VITE_NEXORA_SUPABASE_SHADOW_READS === 'true' && !SUPABASE_PLAYER_WRITE_PATHS_READY && !authUser.isAnonymous) {
       void (async () => {
         try {
           const idToken = await authUser.getIdToken();
