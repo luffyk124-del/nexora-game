@@ -1284,6 +1284,19 @@ async function callCompanyVault<T>(
 }
 
 export async function upgradeCompanyVault(uid: string, companyId: string): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_COMPANIES === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'company_vault_upgrade', companyId, requestId: crypto.randomUUID() }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'COMPANY_OPERATION_FAILED');
+    return;
+  }
   await callCompanyVault<{ ok: boolean }>(uid, 'upgrade', companyId);
 }
 
@@ -1305,6 +1318,19 @@ export async function completeCompanyUpgrade(uid: string, companyId: string): Pr
 }
 
 export async function completeCompanyVaultUpgrade(uid: string, companyId: string): Promise<void> {
+  if (import.meta.env.VITE_NEXORA_SUPABASE_COMPANIES === 'true') {
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid || currentUser.isAnonymous) throw new Error('UNAUTHENTICATED');
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('https://dmeupqmhsyojxlgalxrc.supabase.co/functions/v1/nexora-economy', {
+      method: 'POST', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'company_vault_complete', companyId }),
+      cache: 'no-store',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || 'COMPANY_OPERATION_FAILED');
+    return;
+  }
   await callCompanyVault<{ ok: boolean }>(uid, 'vault_complete', companyId);
 }
 
