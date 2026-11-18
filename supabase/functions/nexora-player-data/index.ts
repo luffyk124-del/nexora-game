@@ -118,11 +118,11 @@ Deno.serve(async (req: Request) => {
 
   try {
     const [profile, privateData, wallet, inventory, sent, received, listings, orders,
-      companies, auctions, companyLogs, properties, organizations, membership,
+      companies, auctions, companyLogs, properties, organizations, membership, myPendingRequests,
       missionClaims, dailyClaims, contractClaims, achievements, notifications, worldEvents] =
       await Promise.all([
         run("profile", db.from("player_profiles").select("*").eq("user_id", uid).maybeSingle()),
-        run("private", db.from("player_private").select("user_id,language,notifications_enabled").eq("user_id", uid).maybeSingle()),
+        run("private", db.from("player_private").select("*").eq("user_id", uid).maybeSingle()),
         run("wallet", db.from("wallets").select("*").eq("user_id", uid).maybeSingle()),
         run("inventory", db.from("inventory").select("*").eq("user_id", uid).limit(200)),
         run("sent_transactions", db.from("transactions").select("*").eq("from_uid", uid).order("created_at", { ascending: false }).limit(30)),
@@ -135,8 +135,9 @@ Deno.serve(async (req: Request) => {
         run("properties", db.from("properties").select("*").eq("owner_uid", uid).limit(100)),
         run("organizations", db.from("organizations").select("*").order("reputation", { ascending: false }).limit(40)),
         run("membership", db.from("organization_members").select("*").eq("user_id", uid).limit(1).maybeSingle()),
+        run("my_pending_requests", db.from("organization_requests").select("org_id").eq("user_id", uid).eq("status", "pending").limit(100)),
         run("missions", db.from("player_missions").select("*").eq("user_id", uid).limit(200)),
-        run("daily_claims", db.from("daily_claims").select("*").eq("user_id", uid).limit(60)),
+        run("daily_claims", db.from("daily_claims").select("*").eq("user_id", uid).eq("date_key", new Date().toISOString().slice(0, 10)).limit(2)),
         run("contract_claims", db.from("contract_claims").select("*").eq("user_id", uid).limit(200)),
         run("achievements", db.from("player_achievements").select("*").eq("user_id", uid).limit(200)),
         run("notifications", db.from("notifications").select("*").eq("user_id", uid).order("created_at", { ascending: false }).limit(30)),
@@ -180,9 +181,7 @@ Deno.serve(async (req: Request) => {
         myOrgMember: membership,
         orgMembers,
         orgRequests,
-        myPendingOrgIds: (orgRequests as Record<string, unknown>[])
-          .filter((item) => item.status === "pending")
-          .map((item) => item.orgId),
+        myPendingOrgIds: (myPendingRequests as Record<string, unknown>[]).map((item) => item.orgId),
         orgTransactions,
         claimedMissions: missionClaims,
         claimedDailyToday: (dailyClaims as Record<string, unknown>[]).some((item) =>
