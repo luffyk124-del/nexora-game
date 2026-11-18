@@ -88,6 +88,17 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  if (action === "claim_eligible_achievements") {
+    const { data, error } = await admin.schema("nexora").rpc("claim_eligible_achievements", { p_user_id: uid });
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      if (["UNAUTHENTICATED","ACCOUNT_NOT_FOUND"].includes(message)) return json({ error: message }, 400, origin);
+      console.error("NEXORA achievement unlock RPC failed:", error.message);
+      return json({ error: "ACHIEVEMENT_UNLOCK_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
   if (action === "search_players" || action === "get_public_player_profile" ||
       action === "list_blocked_players" || action === "list_direct_conversations" ||
       action === "list_direct_messages" || action === "list_global_chat_messages" ||
