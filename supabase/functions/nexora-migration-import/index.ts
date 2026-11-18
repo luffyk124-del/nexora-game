@@ -152,6 +152,12 @@ async function main(req: Request): Promise<Response> {
       const column = spec.aliases?.[key] ?? camelToSnake(key);
       if (spec.columns.includes(column) && value !== undefined) row[column] = value;
     }
+    // world_events.affected_sectors is NOT NULL in NEXORA; legacy Firestore
+    // documents may omit it or store null, so normalize missing values to [].
+    if (collection === "world_events" && (row.affected_sectors === undefined || row.affected_sectors === null)) {
+      row.affected_sectors = [];
+    }
+
     // company_logs.details is constrained to a JSON object in NEXORA.
     // Older Firestore records sometimes store it as plain text; preserve that text.
     if (collection === "company_logs") {
