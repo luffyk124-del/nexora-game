@@ -45,6 +45,9 @@ jobs:
       - name: TypeScript typecheck
         run: npx tsc --noEmit
 
+      - name: Check Firestore migration exporter script
+        run: node --check scripts/nexora-firestore-export.mjs
+
       - name: Unit tests
         run: npm test
 
