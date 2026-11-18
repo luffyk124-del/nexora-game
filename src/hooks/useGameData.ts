@@ -219,9 +219,9 @@ export function useGameData(): GameDataState {
 
     const uid = authUser.uid;
 
-    // Opt-in read migration. Disabled by default until a real-player QA pass is complete.
-    if (import.meta.env.VITE_NEXORA_SUPABASE_READS === 'true' && !authUser.isAnonymous) {
-      let cancelled = false;
+    // Shadow-read only: Supabase is queried for parity diagnostics while Firebase remains authoritative.
+    // Do not switch UI state to Supabase until all game mutations have migrated to server-side functions.
+    if (import.meta.env.VITE_NEXORA_SUPABASE_SHADOW_READS === 'true' && !authUser.isAnonymous) {
       void (async () => {
         try {
           const idToken = await authUser.getIdToken();
@@ -239,48 +239,23 @@ export function useGameData(): GameDataState {
           );
           const payload = await response.json();
           if (!response.ok || !payload?.ok || !payload?.player) {
-            throw new Error(payload?.error || 'SUPABASE_PLAYER_DATA_UNAVAILABLE');
+            throw new Error(payload?.error || 'SUPABASE_SHADOW_READ_FAILED');
           }
-          if (cancelled) return;
-          const data = payload.player;
-          setProfile(data.profile ?? null);
-          setUserPrivate(data.privateData ?? null);
-          setWallet(data.wallet ?? null);
-          setInventory(data.inventory ?? []);
-          setTransactions(data.transactions ?? []);
-          setMarketListings(data.marketListings ?? []);
-          setMarketOrders(data.marketOrders ?? []);
-          setCompanies(data.companies ?? []);
-          setCompanyAuctions(data.companyAuctions ?? []);
-          setCompanyLogs(data.companyLogs ?? []);
-          setProperties(data.properties ?? []);
-          setOrganizations(data.organizations ?? []);
-          setMyOrgMember(data.myOrgMember ?? null);
-          setOrgMembers(data.orgMembers ?? []);
-          setOrgRequests(data.orgRequests ?? []);
-          setMyPendingOrgIds(new Set(data.myPendingOrgIds ?? []));
-          setOrgTransactions(data.orgTransactions ?? []);
-          setClaimedMissions(data.claimedMissions ?? []);
-          setClaimedDailyToday(Boolean(data.claimedDailyToday));
-          setClaimedContractsToday(new Set(data.claimedContractsToday ?? []));
-          setUnlockedAchievements(new Set(data.unlockedAchievements ?? []));
-          setNotifications(data.notifications ?? []);
-          setWorldEvents(data.worldEvents ?? []);
-          setOrgMemberLoaded(true);
-          if (data.privateData?.language === 'ar' || data.privateData?.language === 'en') {
-            setLanguageLocal(data.privateData.language);
-          }
-          setProfileLoading(false);
+          const player = payload.player;
+          console.info('NEXORA Supabase shadow-read counts', {
+            hasProfile: Boolean(player.profile),
+            hasWallet: Boolean(player.wallet),
+            inventory: player.inventory?.length ?? 0,
+            transactions: player.transactions?.length ?? 0,
+            listings: player.marketListings?.length ?? 0,
+            companies: player.companies?.length ?? 0,
+            organizations: player.organizations?.length ?? 0,
+            notifications: player.notifications?.length ?? 0,
+          });
         } catch (error) {
-          if (cancelled) return;
-          console.error('NEXORA Supabase read migration failed:', error);
-          clearSessionState();
-          setProfileLoading(false);
+          console.warn('NEXORA Supabase shadow-read check failed:', error);
         }
       })();
-      return () => {
-        cancelled = true;
-      };
     }
 
     if (bootstrappedUidRef.current !== uid) {
@@ -556,7 +531,6 @@ export function useGameData(): GameDataState {
 
   // Sync organization membership onto profile if approved while away
   useEffect(() => {
-    if (import.meta.env.VITE_NEXORA_SUPABASE_READS === 'true') return;
     if (!authUser || !profile || !orgMemberLoaded) return;
     if (myOrgMember && profile.orgId !== myOrgMember.orgId) {
       syncSelfOrgMembership(authUser.uid, myOrgMember.orgId);
