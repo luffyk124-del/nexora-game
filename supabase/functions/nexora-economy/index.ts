@@ -86,6 +86,58 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return json({ error: "SERVER_CONFIGURATION_ERROR" }, 500, origin);
   const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  if (action === "create_market_listing") {
+    const itemId = typeof body.itemId === "string" ? body.itemId : "";
+    const quantity = body.quantity;
+    const unitPrice = body.unitPrice;
+    const requestId = typeof body.requestId === "string" ? body.requestId : "";
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+      return json({ error: "INVALID_REQUEST_ID" }, 400, origin);
+    }
+    if (!Number.isSafeInteger(quantity) || !Number.isSafeInteger(unitPrice)) {
+      return json({ error: "INVALID_LISTING_PARAMS" }, 400, origin);
+    }
+    const { data, error } = await admin.schema("nexora").rpc("create_market_listing", {
+      p_user_id: uid, p_item_id: itemId, p_quantity: quantity,
+      p_unit_price: unitPrice, p_request_id: requestId,
+    });
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      if (["INVALID_ITEM","INVALID_LISTING_PARAMS","INSUFFICIENT_INVENTORY","ACCOUNT_NOT_FOUND","INVALID_REQUEST_ID"].includes(message)) {
+        return json({ error: message }, 400, origin);
+      }
+      console.error("NEXORA listing RPC failed:", error.message);
+      return json({ error: "MARKET_LISTING_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
+  if (action === "buy_market_listing") {
+    const listingId = typeof body.listingId === "string" ? body.listingId : "";
+    const quantity = body.quantity;
+    const requestId = typeof body.requestId === "string" ? body.requestId : "";
+    if (!listingId || listingId.length > 160) return json({ error: "LISTING_NOT_FOUND" }, 400, origin);
+    if (!Number.isSafeInteger(quantity) || (quantity as number) < 1 || (quantity as number) > 10000) {
+      return json({ error: "INVALID_QUANTITY" }, 400, origin);
+    }
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+      return json({ error: "INVALID_REQUEST_ID" }, 400, origin);
+    }
+    const { data, error } = await admin.schema("nexora").rpc("buy_market_listing", {
+      p_buyer_uid: uid, p_listing_id: listingId, p_quantity: quantity,
+      p_request_id: requestId,
+    });
+    if (error) {
+      const message = error.message.split(/[\\n:]/)[0].trim();
+      const allowed = ["INVALID_REQUEST_ID","INVALID_QUANTITY","INVALID_TOTAL","LISTING_NOT_FOUND",
+        "INSUFFICIENT_LISTING_QTY","CANNOT_BUY_OWN_LISTING","ACCOUNT_NOT_FOUND","INSUFFICIENT_FUNDS"];
+      if (allowed.includes(message)) return json({ error: message }, 400, origin);
+      console.error("NEXORA market purchase RPC failed:", error.message);
+      return json({ error: "MARKET_PURCHASE_FAILED" }, 500, origin);
+    }
+    return json(data, 200, origin);
+  }
+
   if (action === "upgrade_skill") {
     const skillKey = typeof body.skillKey === "string" ? body.skillKey : "";
     if (!["trade","management","industry","negotiation","finance","leadership"].includes(skillKey)) {
