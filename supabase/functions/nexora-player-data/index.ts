@@ -7,6 +7,8 @@ const FIREBASE_KEYS = createRemoteJWKSet(
   new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"),
 );
 const ORIGINS = new Set([
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
   "https://nexora-game-wkbi2g3f9-manus24.vercel.app",
   "https://nexora-game-git-feature-nexora-social-economy-mo-add6d8-manus24.vercel.app",
   "https://luffyk124-del.github.io",
